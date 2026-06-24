@@ -1,0 +1,79 @@
+import yfinance as yf
+import pandas as pd
+
+
+MARKETS = [
+    "SPY",
+    "QQQ",
+    "DIA",
+    "IWM"
+]
+
+
+def analyze_2y():
+
+    results = []
+
+    for ticker in MARKETS:
+
+        try:
+
+            data = yf.download(
+                ticker,
+                period="2y",
+                progress=False,
+                auto_adjust=True
+            )
+
+            if len(data) < 2:
+                continue
+
+            start_price = float(data["Close"].iloc[0])
+            end_price = float(data["Close"].iloc[-1])
+
+            total_return = (
+                (end_price - start_price)
+                / start_price
+            ) * 100
+
+            results.append({
+                "Market": ticker,
+                "Return_%": round(
+                    total_return,
+                    2
+                )
+            })
+
+        except Exception:
+            continue
+
+    if not results:
+        return None
+
+    df = pd.DataFrame(results)
+
+    winner = (
+        df.sort_values(
+            "Return_%",
+            ascending=False
+        )
+        .iloc[0]
+        .to_dict()
+    )
+
+    return winner
+
+
+if __name__ == "__main__":
+
+    winner = analyze_2y()
+
+    print(
+        "\n===== 2Y HORIZON =====\n"
+    )
+
+    print(winner)
+
+ls intelligence
+ls intelligence
+

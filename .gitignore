@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pyo
+*.DS_Store
+venv/
+.env
+*.log
+*.pid
+
+# Archives / backups
+archive/
+backups/
+backup_v41_pre_market/
+restore_2026_06_22/
+
+# Generated logs / runtime data
+*.csv
+*.txt
+*.pdf
+*.json
+bot_status.txt
+bot_pid.txt
+
+# Keep source code and markdown tracked manually

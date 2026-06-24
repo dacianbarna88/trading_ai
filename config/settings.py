@@ -1,0 +1,36 @@
+# Trading AI V5.1 - Settings
+# Centralized configuration extracted from V4 Step5
+
+STARTING_CAPITAL = 20000
+INTERVAL_SECONDS = 60
+
+MIN_SCORE_TO_BUY = 90
+
+STOP_LOSS_PCT = -3
+
+MAX_POSITIONS_BULL = 15
+MAX_POSITIONS_NEUTRAL = 8
+MAX_POSITIONS_BEAR = 0
+
+TRAILING_ACTIVATE_PCT = 4
+TRAILING_DISTANCE_PCT = 5
+
+MARKET_REGIME_FILTER = True
+MARKET_REGIME_TICKER = "SPY"
+MARKET_REGIME_SMA = 200
+
+TEST_SELL_MODE = False
+ALLOW_BUY_WHEN_MARKET_CLOSED = False
+
+WATCHLIST_FILE = "watchlist.txt"
+LIVE_SIGNALS_FILE = "live_signals.csv"
+PORTFOLIO_FILE = "portfolio.csv"
+ALERTS_FILE = "alerts_log.csv"
+LOG_FILE = "bot_output.log"
+STATUS_FILE = "bot_status.txt"
+
+MIN_CASH_RESERVE = 500
+
+V41_SAFE_MODE = True
+V41_SHADOW_FILE = "v41_shadow_signals.csv"
+V41_LOG_DISAGREEMENTS = True
