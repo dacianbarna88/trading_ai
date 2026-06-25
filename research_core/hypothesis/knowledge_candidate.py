@@ -19,6 +19,8 @@ from typing import Any
 
 from research_core.hypothesis.hypothesis_model import SAFETY_MODE
 from research_core.hypothesis.hypothesis_ranking import (
+    DEFAULT_DISCOVERY_RANKINGS_PATH,
+    DISCOVERY_RANKINGS_SCHEMA_NAME,
     HypothesisRankingEntry,
     HypothesisRankingsStore,
     RankingRecommendation,
@@ -127,6 +129,9 @@ class PromotionResult:
     eligible_from_rankings: int
     rankings_loaded: bool
     rankings_count: int
+    skipped_ineligible: list[str] = field(default_factory=list)
+    knowledge_base_improved: bool = False
+    comparison_summary: str = ""
 
     @property
     def promoted_count(self) -> int:
@@ -294,6 +299,108 @@ def _candidate_from_ranking(
     )
 
 
+def _meets_discovery_promotion_thresholds(
+    entry: HypothesisRankingEntry,
+    min_quality_score: float,
+    min_sample_size: int,
+    min_accuracy: float,
+) -> bool:
+    return (
+        entry.recommendation == PROMOTE_RECOMMENDATION
+        and entry.quality_score >= min_quality_score
+        and entry.sample_size >= min_sample_size
+        and entry.accuracy >= min_accuracy
+        and entry.avg_forward_return > 0.0
+    )
+
+
+def _build_discovery_evidence_summary(entry: HypothesisRankingEntry) -> str:
+    return (
+        f"Discovery-derived hypothesis: n={entry.sample_size}, "
+        f"accuracy={entry.accuracy:.2%}, "
+        f"avg_forward_return={entry.avg_forward_return:.2f}%, "
+        f"robustness={entry.robustness_label}, "
+        f"quality_score={entry.quality_score:.2f}. "
+        "Phase IV discovery pipeline — research evidence only, not live trading."
+    )
+
+
+def _build_discovery_promotion_reason(
+    entry: HypothesisRankingEntry,
+    comparison: dict[str, Any] | None = None,
+) -> str:
+    base = (
+        f"Phase IV D5 discovery promotion: rank #{entry.rank}, "
+        f"quality_score={entry.quality_score:.2f}, "
+        f"recommendation={PROMOTE_RECOMMENDATION}. "
+        "Discovery-derived knowledge candidate — not execution."
+    )
+    if comparison and comparison.get("summary"):
+        return f"{base} Comparison: {comparison['summary']}"
+    return base
+
+
+class DiscoveryRankingsLoader:
+    """Loads discovery hypothesis rankings from Phase IV D4 report."""
+
+    def __init__(self, path: Path | None = None) -> None:
+        self._path = path or DEFAULT_DISCOVERY_RANKINGS_PATH
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def load(self) -> tuple[list[HypothesisRankingEntry], dict[str, Any], bool]:
+        if not self._path.is_file():
+            return [], {}, False
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+            payload = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Discovery rankings unreadable (%s): %s", self._path, exc)
+            return [], {}, False
+
+        if not isinstance(payload, dict) or payload.get("schema") != DISCOVERY_RANKINGS_SCHEMA_NAME:
+            return [], {}, False
+
+        items = payload.get("discovery_rankings", [])
+        rankings: list[HypothesisRankingEntry] = []
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                entry = HypothesisRankingEntry.from_dict(item)
+                if entry is not None:
+                    rankings.append(entry)
+
+        comparison = payload.get("comparison", {})
+        if not isinstance(comparison, dict):
+            comparison = {}
+
+        return rankings, comparison, True
+
+
+def _candidate_from_discovery_ranking(
+    entry: HypothesisRankingEntry,
+    registry: KnowledgeCandidateRegistry,
+    comparison: dict[str, Any] | None = None,
+) -> KnowledgeCandidate:
+    return KnowledgeCandidate(
+        candidate_id=registry.next_id(prefix="kn_d5"),
+        source_hypothesis_id=entry.hypothesis_id,
+        title=entry.title,
+        quality_score=entry.quality_score,
+        accuracy=entry.accuracy,
+        sample_size=entry.sample_size,
+        avg_forward_return=entry.avg_forward_return,
+        robustness_label=entry.robustness_label,
+        evidence_summary=_build_discovery_evidence_summary(entry),
+        promotion_reason=_build_discovery_promotion_reason(entry, comparison),
+        status=KnowledgeCandidateStatus.CANDIDATE,
+        safety_mode=entry.safety_mode,
+    )
+
+
 class KnowledgeCandidatePromoter:
     """
     Promotes PROMOTE_TO_KNOWLEDGE_CANDIDATE rankings into the candidate registry.
@@ -343,4 +450,70 @@ class KnowledgeCandidatePromoter:
             eligible_from_rankings=len(eligible),
             rankings_loaded=rankings_loaded,
             rankings_count=len(rankings),
+        )
+
+    def promote_from_discovery_rankings(
+        self,
+        rankings_path: Path | None = None,
+        min_quality_score: float = 65.0,
+        min_sample_size: int = 500,
+        min_accuracy: float = 0.60,
+    ) -> PromotionResult:
+        """
+        Promote discovery-derived hypotheses from Phase IV D4 rankings.
+        Stricter thresholds than Sprint 5.3 council rankings.
+        """
+        loader = DiscoveryRankingsLoader(path=rankings_path)
+        rankings, comparison, rankings_loaded = loader.load()
+
+        eligible: list[HypothesisRankingEntry] = []
+        skipped_ineligible: list[str] = []
+
+        for entry in rankings:
+            if _meets_discovery_promotion_thresholds(
+                entry, min_quality_score, min_sample_size, min_accuracy
+            ):
+                eligible.append(entry)
+            else:
+                skipped_ineligible.append(
+                    f"{entry.hypothesis_id} "
+                    f"(rec={entry.recommendation}, q={entry.quality_score:.1f}, "
+                    f"n={entry.sample_size}, acc={entry.accuracy:.2%})"
+                )
+
+        prior_best_quality = 0.0
+        for candidate in self._registry.list_all():
+            if candidate.quality_score > prior_best_quality:
+                prior_best_quality = candidate.quality_score
+
+        promoted: list[KnowledgeCandidate] = []
+        skipped: list[str] = []
+
+        for entry in eligible:
+            if self._registry.has_source(entry.hypothesis_id):
+                skipped.append(entry.hypothesis_id)
+                continue
+            candidate = _candidate_from_discovery_ranking(
+                entry, self._registry, comparison
+            )
+            self._registry.register(candidate)
+            promoted.append(candidate)
+
+        knowledge_improved = False
+        if promoted:
+            new_best = max(c.quality_score for c in promoted)
+            knowledge_improved = new_best > prior_best_quality or (
+                comparison.get("knowledge_base_improved", False)
+            )
+        comparison_summary = str(comparison.get("summary", ""))
+
+        return PromotionResult(
+            promoted=promoted,
+            skipped_duplicates=skipped,
+            eligible_from_rankings=len(eligible),
+            rankings_loaded=rankings_loaded,
+            rankings_count=len(rankings),
+            skipped_ineligible=skipped_ineligible,
+            knowledge_base_improved=knowledge_improved,
+            comparison_summary=comparison_summary,
         )

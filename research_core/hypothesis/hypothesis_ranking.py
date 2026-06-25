@@ -26,8 +26,10 @@ from research_core.hypothesis.hypothesis_registry import HypothesisRegistry
 logger = logging.getLogger(__name__)
 
 DEFAULT_RANKINGS_PATH = Path("tae_hypothesis_rankings.json")
+DEFAULT_DISCOVERY_RANKINGS_PATH = Path("tae_discovery_hypothesis_rankings.json")
 SCHEMA_VERSION = 1
 SCHEMA_NAME = "tae_hypothesis_rankings"
+DISCOVERY_RANKINGS_SCHEMA_NAME = "tae_discovery_hypothesis_rankings"
 
 ROBUSTNESS_HIGH = "HIGH"
 ROBUSTNESS_ROBUST = "ROBUST"
@@ -261,8 +263,15 @@ class HypothesisRanker:
         self._registry = registry or HypothesisRegistry()
         self._results = results_store or ExperimentResultsStore()
 
-    def rank(self) -> tuple[list[HypothesisRankingEntry], list[DuplicateGroupSummary], dict[str, Any]]:
-        candidates = self._collect_candidates()
+    def rank(
+        self,
+        source_cycle_prefix: str | None = None,
+        exclude_source_cycle_prefix: str | None = None,
+    ) -> tuple[list[HypothesisRankingEntry], list[DuplicateGroupSummary], dict[str, Any]]:
+        candidates = self._collect_candidates(
+            source_cycle_prefix=source_cycle_prefix,
+            exclude_source_cycle_prefix=exclude_source_cycle_prefix,
+        )
         if not candidates:
             return [], [], {"total_tested": 0, "ranked_count": 0, "top_hypothesis_id": ""}
 
@@ -303,12 +312,21 @@ class HypothesisRanker:
         }
         return rankings, groups, meta
 
-    def _collect_candidates(self) -> list[tuple[Hypothesis, ExperimentResult | None]]:
+    def _collect_candidates(
+        self,
+        source_cycle_prefix: str | None = None,
+        exclude_source_cycle_prefix: str | None = None,
+    ) -> list[tuple[Hypothesis, ExperimentResult | None]]:
         latest = self._latest_results_by_hypothesis()
         candidates: list[tuple[Hypothesis, ExperimentResult | None]] = []
 
         for hypothesis in self._registry.list_all():
             if hypothesis.status not in self.RANKABLE_STATUSES:
+                continue
+            cycle = str(hypothesis.source_cycle)
+            if source_cycle_prefix and not cycle.startswith(source_cycle_prefix):
+                continue
+            if exclude_source_cycle_prefix and cycle.startswith(exclude_source_cycle_prefix):
                 continue
             experiment = latest.get(hypothesis.hypothesis_id)
             if hypothesis.status == HypothesisStatus.TESTED and experiment is None:

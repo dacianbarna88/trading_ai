@@ -204,14 +204,16 @@ class ExperimentRunner:
         return self._results
 
     def run_untested(self) -> list[ExperimentResult]:
-        untested = self._registry.list_untested()
-        produced: list[ExperimentResult] = []
+        return self.run_hypotheses(self._registry.list_untested())
 
-        if not untested:
+    def run_hypotheses(self, hypotheses: list[Hypothesis]) -> list[ExperimentResult]:
+        """Run experiments for a specific hypothesis list (e.g. discovery-derived subset)."""
+        produced: list[ExperimentResult] = []
+        if not hypotheses:
             return produced
 
         data_ok = self._data.load()
-        for hypothesis in untested:
+        for hypothesis in hypotheses:
             if not data_ok:
                 result = self._insufficient_data_result(
                     hypothesis,
