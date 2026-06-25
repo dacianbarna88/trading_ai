@@ -94,3 +94,36 @@ class AchievementTracker:
 
     def count_unlocked(self) -> int:
         return sum(1 for a in self._achievements.values() if a.unlocked)
+
+    def restore_from(self, achievements_data: list[dict[str, Any]]) -> None:
+        """Merge persisted achievement progress without duplicating unlocks."""
+        for item in achievements_data:
+            if not isinstance(item, dict):
+                continue
+            achievement_id = item.get("id")
+            if not achievement_id or achievement_id not in self._achievements:
+                continue
+            achievement = self._achievements[achievement_id]
+            progress_current = int(item.get("progress_current", achievement.progress_current))
+            progress_target = int(item.get("progress_target", achievement.progress_target))
+            achievement.progress_target = progress_target
+            achievement.progress_current = min(progress_current, progress_target)
+            if item.get("unlocked"):
+                if not achievement.unlocked:
+                    achievement.unlocked = True
+                    achievement.unlocked_at = _parse_unlocked_at(item.get("unlocked_at"))
+                    achievement.progress_current = achievement.progress_target
+            elif achievement.progress_current >= achievement.progress_target:
+                self.unlock(achievement_id)
+
+
+def _parse_unlocked_at(value: Any) -> datetime | None:
+    if not value:
+        return datetime.now(timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError):
+        return datetime.now(timezone.utc)

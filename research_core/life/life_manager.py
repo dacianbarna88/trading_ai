@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,17 +10,11 @@ from research_core.life.age import TAEAge, TAE_BIRTHDAY
 from research_core.life.achievements import AchievementTracker
 from research_core.life.generation import GenerationTracker
 from research_core.life.journal import Journal
+from research_core.life.life_events import LifeEvent
+from research_core.life.life_storage import DEFAULT_STATE_PATH, LifeStorage
 from research_core.life.milestones import MilestoneStore
 from research_core.life.status import StatusGenerator
 from research_core.life.timeline import Timeline
-
-
-@dataclass
-class LifeEvent:
-    event_type: str
-    title: str
-    detail: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class LifeManager:
@@ -34,6 +27,8 @@ class LifeManager:
         self,
         start_generation: int = 3,
         status_path: Path | None = None,
+        state_path: Path | None = None,
+        auto_load: bool = True,
     ) -> None:
         self.age = TAEAge(TAE_BIRTHDAY)
         self.generation = GenerationTracker(start_generation=start_generation)
@@ -52,32 +47,76 @@ class LifeManager:
         }
         self._current_mission = "Birth of Collective Intelligence"
         self._events: list[LifeEvent] = []
+        self._origin_bootstrapped = False
+        self._loaded_from_storage = False
+        self._storage_path = state_path or DEFAULT_STATE_PATH
+        self._storage = LifeStorage(self._storage_path)
 
-    def bootstrap_origin_story(self) -> None:
-        """Seed timeline and milestones for TAE origin (Sprint 3.5)."""
+        if auto_load:
+            self._loaded_from_storage = self._storage.load_into(self)
+
+    @property
+    def origin_bootstrapped(self) -> bool:
+        return self._origin_bootstrapped
+
+    @property
+    def loaded_from_storage(self) -> bool:
+        return self._loaded_from_storage
+
+    @property
+    def state_path(self) -> Path:
+        return self._storage_path
+
+    @property
+    def metrics(self) -> dict[str, int]:
+        return dict(self._metrics)
+
+    def events(self) -> list[LifeEvent]:
+        return list(self._events)
+
+    def persist(self) -> Path:
+        """Write current life state to JSON."""
+        path = self._storage.save(self)
+        self._loaded_from_storage = True
+        return path
+
+    def bootstrap_origin_story(self) -> bool:
+        """Seed timeline and milestones for TAE origin (Sprint 3.5). Idempotent."""
+        if self._origin_bootstrapped:
+            return False
+
         birth_date = self.age.birthday_string()
-        self.timeline.add(birth_date, "TAE Born", "Trading AI Ecosystem officially born.")
-        self.timeline.add(birth_date, "Foundation Created", "TAE 1.0 philosophy and architecture.")
-        self.timeline.add(birth_date, "Collective Intelligence Created", "Sprint 2 nervous system.")
-        self.timeline.add(birth_date, "Cognitive Layer Created", "Sprint 3 active cognition.")
-        self.timeline.add(birth_date, "Life System Born", "Sprint 3.5 — official biography begins.")
+        origin_timeline = [
+            ("TAE Born", "Trading AI Ecosystem officially born."),
+            ("Foundation Created", "TAE 1.0 philosophy and architecture."),
+            ("Collective Intelligence Created", "Sprint 2 nervous system."),
+            ("Cognitive Layer Created", "Sprint 3 active cognition."),
+            ("Life System Born", "Sprint 3.5 — official biography begins."),
+        ]
+        for title, detail in origin_timeline:
+            if not self.timeline.has_title(title):
+                self.timeline.add(birth_date, title, detail)
 
         age_str = self.age.age_one_line()
         gen = self.generation.current_generation()
         for title, desc, importance in MilestoneStore.PREDEFINED[:3]:
-            self.milestones.add(title, birth_date, age_str, gen, desc, importance)
-        self.milestones.add(
-            "Life System Born",
-            datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            age_str,
-            gen,
-            "TAE Life System Sprint 3.5 activated.",
-            10,
-        )
+            if not self.milestones.has_title(title):
+                self.milestones.add(title, birth_date, age_str, gen, desc, importance)
+        if not self.milestones.has_title("Life System Born"):
+            self.milestones.add(
+                "Life System Born",
+                datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                age_str,
+                gen,
+                "TAE Life System Sprint 3.5 activated.",
+                10,
+            )
 
         self.achievements.unlock("life_system_born")
         self.achievements.unlock("first_organism")
         self.achievements.unlock("first_milestone")
+        self._origin_bootstrapped = True
+        return True
 
     def record_event(
         self,

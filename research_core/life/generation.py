@@ -91,6 +91,11 @@ class GenerationTracker:
             return GENERATION_DEFINITIONS[num][0]
         return f"Generation {num}"
 
+    def restore(self, current: int, history: list[GenerationRecord]) -> None:
+        """Replace generation state from persisted JSON."""
+        self._current = current
+        self._history = list(history)
+
     def to_dict(self) -> dict[str, Any]:
         info = self.current_generation_info()
         return {

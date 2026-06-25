@@ -54,3 +54,6 @@ class Timeline:
 
     def count(self) -> int:
         return len(self._events)
+
+    def has_title(self, title: str) -> bool:
+        return any(event.title == title for event in self._events)

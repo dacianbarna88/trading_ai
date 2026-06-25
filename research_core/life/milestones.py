@@ -78,3 +78,6 @@ class MilestoneStore:
 
     def titles(self) -> list[str]:
         return [m.title for m in self._milestones]
+
+    def has_title(self, title: str) -> bool:
+        return title in self.titles()

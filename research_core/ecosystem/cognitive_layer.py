@@ -100,7 +100,11 @@ class CognitiveLayer:
         )
         return name
 
-    def process_cycle(self, organisms: list[Organism] | None = None) -> CognitiveCycleResult:
+    def process_cycle(
+        self,
+        organisms: list[Organism] | None = None,
+        trust_weights: dict[str, float] | None = None,
+    ) -> CognitiveCycleResult:
         self._cycle_count += 1
         self.collective.clear_session()
 
@@ -116,7 +120,7 @@ class CognitiveLayer:
             self.memory.remember_evidence(packet)
             self._update_graph_for_packet(packet)
 
-        decision = self.collective.aggregate()
+        decision = self.collective.aggregate(trust_weights=trust_weights)
         self.memory.remember_decision(decision)
         self._apply_knowledge_core_feedback(decision, packets)
         self._update_graph_for_decision(decision)

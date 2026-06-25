@@ -17,6 +17,31 @@ class CollectiveConfidenceLevel(str, Enum):
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 
 
+DEFAULT_NEUTRAL_TRUST: float = 50.0
+
+
+@dataclass
+class OrganismContribution:
+    """Per-organism breakdown for trust-weighted collective decisions."""
+
+    organism_name: str
+    confidence: float
+    trust_used: float
+    packet_trust: float
+    weight: float
+    weighted_contribution: float
+
+    def to_dict(self) -> dict[str, float | str]:
+        return {
+            "organism_name": self.organism_name,
+            "confidence": round(self.confidence, 2),
+            "trust_used": round(self.trust_used, 2),
+            "packet_trust": round(self.packet_trust, 2),
+            "weight": round(self.weight, 4),
+            "weighted_contribution": round(self.weighted_contribution, 2),
+        }
+
+
 @dataclass
 class CollectiveDecision:
     """
@@ -32,6 +57,10 @@ class CollectiveDecision:
     explanation: str
     contributing_organisms: list[str] = field(default_factory=list)
     packet_summaries: list[str] = field(default_factory=list)
+    unweighted_confidence: float = 0.0
+    trust_weighted_confidence: float = 0.0
+    organism_contributions: list[OrganismContribution] = field(default_factory=list)
+    trust_weighting_applied: bool = False
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict[str, Any]:
@@ -44,6 +73,10 @@ class CollectiveDecision:
             "confidence_level": self.confidence_level.value,
             "explanation": self.explanation,
             "contributing_organisms": self.contributing_organisms,
+            "unweighted_confidence": round(self.unweighted_confidence, 2),
+            "trust_weighted_confidence": round(self.trust_weighted_confidence, 2),
+            "trust_weighting_applied": self.trust_weighting_applied,
+            "organism_contributions": [item.to_dict() for item in self.organism_contributions],
         }
 
 
@@ -67,7 +100,19 @@ class CollectiveIntelligence:
     def clear_session(self) -> None:
         self._packets.clear()
 
-    def aggregate(self) -> CollectiveDecision:
+    def resolve_trust_weight(
+        self,
+        packet: EvidencePacket,
+        trust_weights: dict[str, float] | None,
+    ) -> float:
+        """Resolve trust for weighting — memory trust, packet trust, or neutral 50."""
+        if trust_weights is not None:
+            if packet.organism_name in trust_weights:
+                return max(0.0, min(100.0, float(trust_weights[packet.organism_name])))
+            return DEFAULT_NEUTRAL_TRUST
+        return max(0.0, min(100.0, float(packet.trust)))
+
+    def aggregate(self, trust_weights: dict[str, float] | None = None) -> CollectiveDecision:
         packets = list(self._packets)
         if len(packets) < self.MIN_PACKETS:
             decision = CollectiveDecision(
@@ -78,19 +123,42 @@ class CollectiveIntelligence:
                 organism_participation=0,
                 confidence_level=CollectiveConfidenceLevel.INSUFFICIENT_EVIDENCE,
                 explanation="No evidence packets received — insufficient evidence for collective view.",
+                unweighted_confidence=0.0,
+                trust_weighted_confidence=0.0,
+                trust_weighting_applied=trust_weights is not None,
             )
             self._decisions.append(decision)
             return decision
 
         confidences = [p.confidence for p in packets]
-        trusts = [p.trust for p in packets]
-        weights = [p.trust / 100.0 for p in packets]
+        unweighted_confidence = sum(confidences) / len(confidences)
+
+        contributions: list[OrganismContribution] = []
+        weights: list[float] = []
+        trusts_used: list[float] = []
+
+        for packet in packets:
+            trust_used = self.resolve_trust_weight(packet, trust_weights)
+            weight = trust_used / 100.0
+            weights.append(weight)
+            trusts_used.append(trust_used)
+            contributions.append(
+                OrganismContribution(
+                    organism_name=packet.organism_name,
+                    confidence=packet.confidence,
+                    trust_used=trust_used,
+                    packet_trust=packet.trust,
+                    weight=weight,
+                    weighted_contribution=packet.confidence * weight,
+                )
+            )
+
         weight_sum = sum(weights) or 1.0
+        trust_weighted_confidence = sum(c.weighted_contribution for c in contributions) / weight_sum
+        collective_trust = sum(trusts_used) / len(trusts_used)
+        collective_confidence = trust_weighted_confidence
 
-        collective_confidence = sum(c * w for c, w in zip(confidences, weights)) / weight_sum
-        collective_trust = sum(trusts) / len(trusts)
-
-        mean_conf = sum(confidences) / len(confidences)
+        mean_conf = unweighted_confidence
         variance = sum((c - mean_conf) ** 2 for c in confidences) / len(confidences)
         spread = variance ** 0.5
         agreement = max(0.0, 100.0 - spread * 2.0)
@@ -101,7 +169,15 @@ class CollectiveIntelligence:
         summaries = [p.observation_summary for p in packets]
 
         explanation = self._build_explanation(
-            packets, collective_confidence, collective_trust, agreement, disagreement, level
+            packets,
+            collective_confidence,
+            collective_trust,
+            agreement,
+            disagreement,
+            level,
+            unweighted_confidence,
+            trust_weighted_confidence,
+            trust_weights is not None,
         )
 
         decision = CollectiveDecision(
@@ -114,6 +190,10 @@ class CollectiveIntelligence:
             explanation=explanation,
             contributing_organisms=organisms,
             packet_summaries=summaries,
+            unweighted_confidence=unweighted_confidence,
+            trust_weighted_confidence=trust_weighted_confidence,
+            organism_contributions=contributions,
+            trust_weighting_applied=trust_weights is not None,
         )
         self._decisions.append(decision)
         return decision
@@ -143,11 +223,17 @@ class CollectiveIntelligence:
         agreement: float,
         disagreement: float,
         level: CollectiveConfidenceLevel,
+        unweighted_confidence: float = 0.0,
+        trust_weighted_confidence: float = 0.0,
+        memory_trust_weighting: bool = False,
     ) -> str:
+        weight_label = "memory-calibrated trust" if memory_trust_weighting else "packet trust"
         parts = [
             f"Collective assessment: {level.value}.",
-            f"Weighted confidence {confidence:.1f} from {len(packets)} organism(s).",
-            f"Mean trust {trust:.1f}. Agreement {agreement:.1f}% disagreement {disagreement:.1f}%.",
+            f"Trust-weighted confidence {trust_weighted_confidence:.1f} "
+            f"(unweighted {unweighted_confidence:.1f}) from {len(packets)} organism(s).",
+            f"Weighting: {weight_label}. Mean trust used {trust:.1f}.",
+            f"Agreement {agreement:.1f}% disagreement {disagreement:.1f}%.",
         ]
         for packet in packets:
             parts.append(
