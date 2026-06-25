@@ -109,6 +109,14 @@ class CrossRegimeValidator:
             data_sources=self._data_sources,
         )
 
+    def validate_candidate_by_id(self, candidate_id: str) -> CandidateValidationResult | None:
+        """Focused validation for a single knowledge candidate (Sprint A2)."""
+        self._load_inputs()
+        candidate = self._candidates.get(candidate_id)
+        if candidate is None:
+            return None
+        return self._validate_candidate(candidate)
+
     def _load_inputs(self) -> None:
         if not self._candidates.loaded_at_startup:
             self._candidates.load()
