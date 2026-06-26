@@ -1,4 +1,4 @@
-"""Strategy evolution — Phase VIII B1/B2 (read-only)."""
+"""Strategy evolution — Phase VIII B1/B2/B3 (read-only)."""
 
 from research_core.strategy_evolution.candidate_registry import CandidateStrategyRegistry
 from research_core.strategy_evolution.candidate_report import (
@@ -9,6 +9,16 @@ from research_core.strategy_evolution.candidate_report import (
     RegistryVerdict,
     SAFETY_BANNER,
     StrategyCandidate,
+)
+from research_core.strategy_evolution.continuous_ranking_engine import (
+    ContinuousStrategyRankingEngine,
+)
+from research_core.strategy_evolution.continuous_ranking_report import (
+    ContinuousStrategyRankingReport,
+    ContinuousStrategyRankingReportStore,
+    RankingDecision,
+    RankingVerdict,
+    StrategyRankingEntry,
 )
 from research_core.strategy_evolution.parallel_paper_report import (
     ParallelPaperValidationReport,
@@ -34,4 +44,10 @@ __all__ = [
     "PaperValidationResult",
     "ValidationStatus",
     "ValidatorVerdict",
+    "ContinuousStrategyRankingEngine",
+    "ContinuousStrategyRankingReport",
+    "ContinuousStrategyRankingReportStore",
+    "RankingDecision",
+    "RankingVerdict",
+    "StrategyRankingEntry",
 ]
