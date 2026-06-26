@@ -87,11 +87,45 @@ else
     echo "Python bot (live_bot): NOT DETECTED"
 fi
 
-if [[ -f bot_pid.txt ]]; then
-    echo "bot_pid.txt: $(tr -d '\n' < bot_pid.txt)"
-fi
-if [[ -f bot_status.txt ]]; then
-    echo "bot_status.txt: $(tr -d '\n' < bot_status.txt)"
+section "BOT HEALTH (process_supervisor)"
+if [[ -f process_health.json ]]; then
+    python3 - <<'PY'
+import json
+from pathlib import Path
+
+data = json.loads(Path("process_health.json").read_text(encoding="utf-8"))
+status = data.get("status", "UNKNOWN")
+reason = str(data.get("reason", ""))
+
+if status == "RUNNING":
+    label = "RUNNING"
+elif reason == "stale pid removed":
+    label = "STALE PID REMOVED"
+else:
+    label = "STOPPED"
+
+print(f"Bot Health: {label}")
+if status == "RUNNING":
+    print(
+        f"  pid={data.get('pid', '?')} "
+        f"cpu={data.get('cpu', '?')}% "
+        f"memory={data.get('memory', '?')}% "
+        f"uptime={data.get('uptime', '?')}"
+    )
+elif reason:
+    print(f"  reason: {reason}")
+checked = data.get("checked_at", "")
+if checked:
+    print(f"  checked_at: {checked}")
+PY
+else
+    echo "Bot Health: (process_health.json missing — run: python3 tools/process_supervisor.py)"
+    if [[ -f bot_pid.txt ]]; then
+        echo "bot_pid.txt: $(tr -d '\n' < bot_pid.txt)"
+    fi
+    if [[ -f bot_status.txt ]]; then
+        echo "bot_status.txt: $(tr -d '\n' < bot_status.txt) (unverified)"
+    fi
 fi
 
 # --- 3. Market regime ---
