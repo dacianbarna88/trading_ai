@@ -1,4 +1,4 @@
-"""Strategy evolution — Phase VIII B1/B2/B3 (read-only)."""
+"""Strategy evolution — Phase VIII B1/B2/B3/B4 (read-only)."""
 
 from research_core.strategy_evolution.candidate_registry import CandidateStrategyRegistry
 from research_core.strategy_evolution.candidate_report import (
@@ -28,6 +28,14 @@ from research_core.strategy_evolution.parallel_paper_report import (
     ValidatorVerdict,
 )
 from research_core.strategy_evolution.parallel_paper_validator import ParallelPaperValidator
+from research_core.strategy_evolution.promotion_gate import StrategyPromotionGate
+from research_core.strategy_evolution.promotion_gate_report import (
+    PromotionGateDecision,
+    PromotionGateEntry,
+    PromotionGateReport,
+    PromotionGateReportStore,
+    PromotionGateVerdict,
+)
 
 __all__ = [
     "CandidateStrategyRegistry",
@@ -50,4 +58,10 @@ __all__ = [
     "RankingDecision",
     "RankingVerdict",
     "StrategyRankingEntry",
+    "StrategyPromotionGate",
+    "PromotionGateReport",
+    "PromotionGateReportStore",
+    "PromotionGateEntry",
+    "PromotionGateDecision",
+    "PromotionGateVerdict",
 ]
