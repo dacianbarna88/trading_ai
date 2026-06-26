@@ -15,10 +15,12 @@ from research_core.constants import RESEARCH_SAFETY_BANNER
 from research_core.evolution import (
     DEFAULT_EVOLUTION_NOTICE_PATH,
     DEFAULT_EVOLUTION_PLAN_PATH,
+    DEFAULT_PROPOSAL_PATH,
     EvolutionPlanResult,
     ImplementationStatus,
     ProposedChangeType,
     StrategyEvolutionManager,
+    generate_evolution_proposal,
 )
 
 SUMMARY_TXT = "tae_phase5_strategy_evolution_summary.txt"
@@ -67,8 +69,13 @@ def run_evolution_demo() -> EvolutionPlanResult:
     notice = result.format_human_notice(live_files_unchanged=live_files_ok)
     notice_path = result.write_human_notice(live_files_unchanged=live_files_ok)
 
+    proposal_text = generate_evolution_proposal()
+
     print("===== HUMAN REVIEW NOTICE =====")
     print(notice)
+
+    print("===== EVOLUTION PROPOSAL CARD =====")
+    print(proposal_text)
 
     print("===== EVOLUTION SUMMARY =====")
     print(f"Recommendations loaded: {result.recommendations_loaded}")
@@ -102,6 +109,7 @@ def run_evolution_demo() -> EvolutionPlanResult:
     print(f"implementation_status NOT_IMPLEMENTED on all: {all_not_impl}")
     print(f"Output saved: {DEFAULT_EVOLUTION_PLAN_PATH}")
     print(f"Notice saved: {notice_path}")
+    print(f"Proposal saved: {DEFAULT_PROPOSAL_PATH}")
     print()
 
     summary_path = Path(SUMMARY_TXT)
