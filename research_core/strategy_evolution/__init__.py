@@ -1,4 +1,4 @@
-"""Strategy evolution — Phase VIII B1/B2/B3/B4/B5 (read-only)."""
+"""Strategy evolution — Phase VIII B1/B2/B3/B4/B5/B6 (read-only)."""
 
 from research_core.strategy_evolution.candidate_registry import CandidateStrategyRegistry
 from research_core.strategy_evolution.candidate_report import (
@@ -44,6 +44,14 @@ from research_core.strategy_evolution.paper_tracking_report import (
     PaperTrackingVerdict,
     TrackingStatus,
 )
+from research_core.strategy_evolution.daily_runner import StrategyEvolutionDailyRunner
+from research_core.strategy_evolution.daily_runner_report import (
+    DailyRunnerReport,
+    DailyRunnerReportStore,
+    DailyRunnerStepResult,
+    DailyRunnerVerdict,
+    PaperTrackingNeed,
+)
 
 __all__ = [
     "CandidateStrategyRegistry",
@@ -78,4 +86,10 @@ __all__ = [
     "PaperTrackingEntry",
     "PaperTrackingVerdict",
     "TrackingStatus",
+    "StrategyEvolutionDailyRunner",
+    "DailyRunnerReport",
+    "DailyRunnerReportStore",
+    "DailyRunnerStepResult",
+    "DailyRunnerVerdict",
+    "PaperTrackingNeed",
 ]
