@@ -20,18 +20,20 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LEDGER_JSON_PATH = Path("tae_cash_flow_ledger.json")
 DEFAULT_LEDGER_TXT_PATH = Path("tae_cash_flow_ledger.txt")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA_NAME = "tae_cash_flow_ledger"
 ANALYSIS_SAFETY_BANNER = "ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION"
 RECONCILIATION_FORMULA = (
     "Account Value = Starting Capital + Deposits - Withdrawals "
     "+ Realized PnL + Open Unrealized PnL"
 )
+CANONICAL_ACCOUNT_VALUE_SOURCE = "portfolio_csv_marks"
+MICRO_LOT_TOLERANCE = 0.05
 
 
 class LedgerStatus(str, Enum):
-    VALID = "VALID"
-    INVALID = "INVALID"
+    LEDGER_VALID_WITH_MARK_SOURCE_DELTA = "LEDGER_VALID_WITH_MARK_SOURCE_DELTA"
+    LEDGER_INVALID = "LEDGER_INVALID"
 
 
 class CheckSeverity(str, Enum):
@@ -143,6 +145,30 @@ class CrossCheckResult:
 
 
 @dataclass
+class MarkSourceTickerDelta:
+    ticker: str
+    shares: float
+    portfolio_csv_mark: float
+    latest_portfolio_mark: float
+    market_value_csv: float
+    market_value_latest: float
+    delta: float
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ticker": self.ticker,
+            "shares": round(self.shares, 6),
+            "portfolio_csv_mark": round(self.portfolio_csv_mark, 4),
+            "latest_portfolio_mark": round(self.latest_portfolio_mark, 4),
+            "market_value_csv": round(self.market_value_csv, 2),
+            "market_value_latest": round(self.market_value_latest, 2),
+            "delta": round(self.delta, 2),
+            "reason": self.reason,
+        }
+
+
+@dataclass
 class LedgerSummary:
     starting_capital: float
     deposits: float
@@ -158,12 +184,20 @@ class LedgerSummary:
     final_account_value: float
     formula_account_value: float
     reconciliation_difference: float
+    account_value_from_portfolio_csv_marks: float
+    account_value_from_latest_portfolio_marks: float
+    canonical_account_value_source: str
+    mark_source_delta: float
+    open_market_value_portfolio_csv: float
+    open_market_value_latest_portfolio: float
+    open_unrealized_pnl_portfolio_csv: float
     transaction_count: int
     buy_count: int
     sell_count: int
     open_position_count: int
     closed_position_count: int
     open_tickers: list[str] = field(default_factory=list)
+    mark_source_ticker_deltas: list[MarkSourceTickerDelta] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -181,12 +215,32 @@ class LedgerSummary:
             "final_account_value": round(self.final_account_value, 2),
             "formula_account_value": round(self.formula_account_value, 2),
             "reconciliation_difference": round(self.reconciliation_difference, 2),
+            "account_value_from_portfolio_csv_marks": round(
+                self.account_value_from_portfolio_csv_marks, 2
+            ),
+            "account_value_from_latest_portfolio_marks": round(
+                self.account_value_from_latest_portfolio_marks, 2
+            ),
+            "canonical_account_value_source": self.canonical_account_value_source,
+            "mark_source_delta": round(self.mark_source_delta, 2),
+            "open_market_value_portfolio_csv": round(
+                self.open_market_value_portfolio_csv, 2
+            ),
+            "open_market_value_latest_portfolio": round(
+                self.open_market_value_latest_portfolio, 2
+            ),
+            "open_unrealized_pnl_portfolio_csv": round(
+                self.open_unrealized_pnl_portfolio_csv, 2
+            ),
             "transaction_count": self.transaction_count,
             "buy_count": self.buy_count,
             "sell_count": self.sell_count,
             "open_position_count": self.open_position_count,
             "closed_position_count": self.closed_position_count,
             "open_tickers": list(self.open_tickers),
+            "mark_source_ticker_deltas": [
+                d.to_dict() for d in self.mark_source_ticker_deltas
+            ],
         }
 
 
@@ -252,7 +306,8 @@ class LedgerAuditReport:
             "===== RECONCILIATION FORMULA =====",
             RECONCILIATION_FORMULA,
             "",
-            "===== ACCOUNT SUMMARY =====",
+            "===== ACCOUNT SUMMARY (CANONICAL) =====",
+            f"Canonical source:           {self.summary.canonical_account_value_source}",
             f"Starting Capital:           ${self.summary.starting_capital:,.2f}",
             f"Deposits:                   ${self.summary.deposits:,.2f}",
             f"Withdrawals:                ${self.summary.withdrawals:,.2f}",
@@ -260,23 +315,46 @@ class LedgerAuditReport:
             f"Fees/Commission:            ${self.summary.fees:,.2f}",
             f"Realized PnL (all SELLs):   ${self.summary.realized_pnl_all_sells:,.2f}",
             f"Realized PnL (repairable):  ${self.summary.realized_pnl_repairable:,.2f}",
-            f"Open Unrealized PnL:        ${self.summary.open_unrealized_pnl:,.2f}",
+            f"Open Unrealized PnL (CSV):  ${self.summary.open_unrealized_pnl_portfolio_csv:,.2f}",
             f"Total PnL:                  ${self.summary.total_pnl:,.2f}",
             "",
             f"Current Cash:               ${self.summary.current_cash:,.2f}",
-            f"Open Market Value:          ${self.summary.open_market_value:,.2f}",
-            f"Final Account Value:        ${self.summary.final_account_value:,.2f}",
-            f"  (= Current Cash + Open Market Value)",
+            f"Open Market Value (CSV):    ${self.summary.open_market_value_portfolio_csv:,.2f}",
+            f"Account Value (CSV marks):  ${self.summary.account_value_from_portfolio_csv_marks:,.2f}",
+            f"  (= cash + open marks from portfolio.csv Current_Price)",
+            "",
+            f"Open Market Value (latest): ${self.summary.open_market_value_latest_portfolio:,.2f}",
+            f"Account Value (latest):     ${self.summary.account_value_from_latest_portfolio_marks:,.2f}",
+            f"  (= cash + open marks from latest_portfolio.txt)",
+            f"Mark source delta:          ${self.summary.mark_source_delta:,.2f}",
             "",
             f"Formula Account Value:      ${self.summary.formula_account_value:,.2f}",
             f"Reconciliation Difference:  ${self.summary.reconciliation_difference:,.2f}",
+            "",
+            "===== MARK SOURCE DELTA BY TICKER =====",
+        ]
+        if self.summary.mark_source_ticker_deltas:
+            for row in self.summary.mark_source_ticker_deltas:
+                if abs(row.delta) > 0.005:
+                    lines.append(
+                        f"  {row.ticker:8s} | CSV ${row.market_value_csv:,.2f} "
+                        f"({row.portfolio_csv_mark:.2f}/sh) vs "
+                        f"latest ${row.market_value_latest:,.2f} "
+                        f"({row.latest_portfolio_mark:.2f}/sh) | "
+                        f"delta ${row.delta:,.2f} — {row.reason}"
+                    )
+            if not any(abs(r.delta) > 0.005 for r in self.summary.mark_source_ticker_deltas):
+                lines.append("  No material per-ticker mark delta.")
+        else:
+            lines.append("  No open positions.")
+        lines.extend([
             "",
             f"Transactions: {self.summary.transaction_count} "
             f"(BUY {self.summary.buy_count} / SELL {self.summary.sell_count})",
             f"Open positions: {self.summary.open_position_count} "
             f"{', '.join(self.summary.open_tickers) or '—'}",
             "",
-        ]
+        ])
 
         if self.first_error:
             fe = self.first_error

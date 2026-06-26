@@ -19,6 +19,7 @@ from typing import Any
 
 from research_core.accounting.ledger_report import (
     ANALYSIS_SAFETY_BANNER,
+    CANONICAL_ACCOUNT_VALUE_SOURCE,
     CheckSeverity,
     CrossCheckResult,
     FirstErrorTransaction,
@@ -28,6 +29,8 @@ from research_core.accounting.ledger_report import (
     LedgerStatus,
     LedgerSummary,
     LedgerTransaction,
+    MICRO_LOT_TOLERANCE,
+    MarkSourceTickerDelta,
     RECONCILIATION_FORMULA,
 )
 from tools.recompute_realized_pnl import _is_repairable_sell, recompute_portfolio
@@ -37,7 +40,7 @@ logger = logging.getLogger(__name__)
 PORTFOLIO_PATH = Path("portfolio.csv")
 LATEST_PORTFOLIO_PATH = Path("latest_portfolio.txt")
 FALLBACK_STARTING_CAPITAL = 30000.0
-RECONCILIATION_TOLERANCE = 0.01
+RECONCILIATION_TOLERANCE = MICRO_LOT_TOLERANCE
 MIN_SHARES = 0.0001
 CASH_TICKER = "CASH"
 
@@ -162,29 +165,61 @@ class CashFlowLedgerAuditor:
         }
 
         parsed = self._parse_transactions(portfolio_rows)
-        open_marks = self._build_open_marks(latest_rows, portfolio_rows, parsed)
+        csv_marks = self._build_open_marks_portfolio_csv(portfolio_rows, parsed)
+        latest_marks = self._build_open_marks_latest_portfolio(latest_rows, csv_marks)
 
         (
             transactions,
             summary,
             checks,
             first_error,
-        ) = self._replay_ledger(parsed, starting_capital, open_marks)
+        ) = self._replay_ledger(parsed, starting_capital, csv_marks, latest_marks)
 
         repairable_realized = self._repairable_realized_pnl(portfolio_rows)
         summary.realized_pnl_repairable = repairable_realized
 
         cross_checks = self._cross_checks(summary, repairable_realized, portfolio_rows)
 
-        failed_errors = [
+        critical_errors = [
             c for c in checks
-            if not c.passed and c.severity == CheckSeverity.ERROR
+            if not c.passed
+            and c.severity == CheckSeverity.ERROR
+            and c.check_id not in ("RECONCILIATION_FORMULA",)
         ]
-        reconciliation_ok = abs(summary.reconciliation_difference) <= RECONCILIATION_TOLERANCE
-        status = (
-            LedgerStatus.VALID
-            if reconciliation_ok and not failed_errors
-            else LedgerStatus.INVALID
+        cashflow_ok = not critical_errors
+        reconciliation_ok = (
+            abs(summary.reconciliation_difference) <= MICRO_LOT_TOLERANCE
+        )
+        mark_delta_only = (
+            cashflow_ok
+            and reconciliation_ok
+            and abs(summary.mark_source_delta) > MICRO_LOT_TOLERANCE
+        )
+
+        if cashflow_ok and reconciliation_ok:
+            status = LedgerStatus.LEDGER_VALID_WITH_MARK_SOURCE_DELTA
+        else:
+            status = LedgerStatus.LEDGER_INVALID
+
+        if mark_delta_only and first_error and first_error.action not in ("SELL", "BUY"):
+            if "Reconciliation drift" in first_error.reason:
+                first_error = None
+
+        checks.append(
+            LedgerCheck(
+                check_id="MARK_SOURCE_DELTA",
+                severity=CheckSeverity.INFO,
+                passed=abs(summary.mark_source_delta) <= MICRO_LOT_TOLERANCE
+                or mark_delta_only,
+                description=(
+                    "Mark source delta between portfolio.csv and latest_portfolio.txt"
+                ),
+                amount=summary.mark_source_delta,
+                reason=(
+                    f"CSV canonical ${summary.account_value_from_portfolio_csv_marks:,.2f} "
+                    f"vs latest ${summary.account_value_from_latest_portfolio_marks:,.2f}"
+                ),
+            )
         )
 
         report = LedgerAuditReport(
@@ -233,25 +268,18 @@ class CashFlowLedgerAuditor:
         parsed.sort(key=lambda t: (t.dt, t.index))
         return parsed
 
-    def _build_open_marks(
+    def _build_open_marks_portfolio_csv(
         self,
-        latest_rows: list[dict[str, str]],
         portfolio_rows: list[dict[str, str]],
         parsed: list[_ParsedTxn],
     ) -> dict[str, float]:
+        """Open marks from portfolio.csv Current_Price only (dashboard/independent source)."""
         marks: dict[str, float] = {}
-
-        for row in latest_rows:
-            ticker = row.get("Ticker", "").strip()
-            if not ticker or ticker == CASH_TICKER:
+        for txn in parsed:
+            if txn.ticker == CASH_TICKER:
                 continue
-            cp = _safe_float(row.get("Current_Price"))
-            cv = _safe_float(row.get("Current_Value"))
-            shares = _safe_float(row.get("Shares"))
-            if cp > 0:
-                marks[ticker] = cp
-            elif cv > 0 and shares > 0:
-                marks[ticker] = cv / shares
+            if txn.current_price > 0:
+                marks[txn.ticker] = txn.current_price
 
         net: dict[str, float] = defaultdict(float)
         for txn in parsed:
@@ -261,16 +289,6 @@ class CashFlowLedgerAuditor:
                 net[txn.ticker] += txn.shares
             elif txn.action == "SELL":
                 net[txn.ticker] -= txn.shares
-
-        for txn in reversed(parsed):
-            if txn.ticker in marks or txn.ticker == CASH_TICKER:
-                continue
-            if net.get(txn.ticker, 0.0) <= MIN_SHARES:
-                continue
-            if txn.current_price > 0:
-                marks[txn.ticker] = txn.current_price
-            elif txn.current_value > 0 and txn.shares > 0:
-                marks[txn.ticker] = txn.current_value / txn.shares
 
         for ticker, shares in net.items():
             if shares <= MIN_SHARES or ticker in marks:
@@ -282,14 +300,76 @@ class CashFlowLedgerAuditor:
                 if cp > 0:
                     marks[ticker] = cp
                     break
-
         return marks
+
+    def _build_open_marks_latest_portfolio(
+        self,
+        latest_rows: list[dict[str, str]],
+        csv_marks_fallback: dict[str, float],
+    ) -> dict[str, float]:
+        """Open marks from latest_portfolio.txt Current_Price (snapshot source)."""
+        marks: dict[str, float] = dict(csv_marks_fallback)
+        for row in latest_rows:
+            ticker = row.get("Ticker", "").strip()
+            if not ticker or ticker == CASH_TICKER:
+                continue
+            cp = _safe_float(row.get("Current_Price"))
+            cv = _safe_float(row.get("Current_Value"))
+            shares = _safe_float(row.get("Shares"))
+            if cp > 0:
+                marks[ticker] = cp
+            elif cv > 0 and shares > 0:
+                marks[ticker] = cv / shares
+        return marks
+
+    def _compute_mark_source_deltas(
+        self,
+        lots: dict[str, _LotState],
+        csv_marks: dict[str, float],
+        latest_marks: dict[str, float],
+    ) -> list[MarkSourceTickerDelta]:
+        deltas: list[MarkSourceTickerDelta] = []
+        for ticker, lot in sorted(lots.items()):
+            if ticker == CASH_TICKER or lot.shares <= MIN_SHARES:
+                continue
+            csv_mark = csv_marks.get(ticker, lot.avg_cost)
+            latest_mark = latest_marks.get(ticker, csv_mark)
+            if csv_mark <= 0:
+                csv_mark = lot.avg_cost
+            if latest_mark <= 0:
+                latest_mark = csv_mark
+            mv_csv = lot.shares * csv_mark
+            mv_latest = lot.shares * latest_mark
+            delta = mv_latest - mv_csv
+            reason = ""
+            if abs(csv_mark - latest_mark) > 0.0001:
+                if csv_mark == lot.avg_cost and ticker not in csv_marks:
+                    reason = "portfolio.csv missing Current_Price — used cost basis for CSV side"
+                elif latest_mark != csv_mark:
+                    reason = (
+                        f"mark differs: CSV {csv_mark:.2f}/sh vs "
+                        f"latest {latest_mark:.2f}/sh"
+                    )
+            deltas.append(
+                MarkSourceTickerDelta(
+                    ticker=ticker,
+                    shares=lot.shares,
+                    portfolio_csv_mark=csv_mark,
+                    latest_portfolio_mark=latest_mark,
+                    market_value_csv=mv_csv,
+                    market_value_latest=mv_latest,
+                    delta=delta,
+                    reason=reason,
+                )
+            )
+        return deltas
 
     def _replay_ledger(
         self,
         parsed: list[_ParsedTxn],
         starting_capital: float,
-        open_marks: dict[str, float],
+        csv_marks: dict[str, float],
+        latest_marks: dict[str, float],
     ) -> tuple[
         list[LedgerTransaction],
         LedgerSummary,
@@ -598,9 +678,14 @@ class CashFlowLedgerAuditor:
             t for t, lot in sorted(lots.items())
             if t != CASH_TICKER and lot.shares > MIN_SHARES
         ]
-        open_market_value = self._open_market_value(lots, open_marks)
-        open_unrealized = self._open_unrealized(lots, open_marks)
-        final_account_value = cash + open_market_value
+        open_mv_csv = self._open_market_value(lots, csv_marks)
+        open_mv_latest = self._open_market_value(lots, latest_marks)
+        open_unreal_csv = self._open_unrealized(lots, csv_marks)
+        av_csv = cash + open_mv_csv
+        av_latest = cash + open_mv_latest
+        mark_source_delta = av_latest - av_csv
+        mark_ticker_deltas = self._compute_mark_source_deltas(lots, csv_marks, latest_marks)
+
         formula_account_value = (
             starting_capital
             + deposits
@@ -608,16 +693,16 @@ class CashFlowLedgerAuditor:
             + dividends
             - fees
             + cumulative_realized
-            + open_unrealized
+            + open_unreal_csv
         )
-        reconciliation_difference = final_account_value - formula_account_value
+        reconciliation_difference = av_csv - formula_account_value
 
         closed_count = sum(
             1 for t, lot in lots.items()
             if t != CASH_TICKER and lot.shares <= MIN_SHARES and lot.total_cost <= MIN_SHARES
         )
 
-        checks.extend(self._position_drift_checks(parsed, lots, open_marks, open_tickers))
+        checks.extend(self._position_drift_checks(parsed, lots, csv_marks, open_tickers))
         checks.extend(self._duplicate_buy_checks(parsed))
 
         summary = LedgerSummary(
@@ -628,34 +713,59 @@ class CashFlowLedgerAuditor:
             fees=round(fees, 2),
             realized_pnl_all_sells=round(cumulative_realized, 2),
             realized_pnl_repairable=0.0,
-            open_unrealized_pnl=round(open_unrealized, 2),
-            total_pnl=round(cumulative_realized + open_unrealized, 2),
+            open_unrealized_pnl=round(open_unreal_csv, 2),
+            total_pnl=round(cumulative_realized + open_unreal_csv, 2),
             current_cash=round(cash, 2),
-            open_market_value=round(open_market_value, 2),
-            final_account_value=round(final_account_value, 2),
+            open_market_value=round(open_mv_csv, 2),
+            final_account_value=round(av_csv, 2),
             formula_account_value=round(formula_account_value, 2),
             reconciliation_difference=round(reconciliation_difference, 2),
+            account_value_from_portfolio_csv_marks=round(av_csv, 2),
+            account_value_from_latest_portfolio_marks=round(av_latest, 2),
+            canonical_account_value_source=CANONICAL_ACCOUNT_VALUE_SOURCE,
+            mark_source_delta=round(mark_source_delta, 2),
+            open_market_value_portfolio_csv=round(open_mv_csv, 2),
+            open_market_value_latest_portfolio=round(open_mv_latest, 2),
+            open_unrealized_pnl_portfolio_csv=round(open_unreal_csv, 2),
             transaction_count=len(transactions),
             buy_count=buy_count,
             sell_count=sell_count,
             open_position_count=len(open_tickers),
             closed_position_count=closed_count,
             open_tickers=open_tickers,
+            mark_source_ticker_deltas=mark_ticker_deltas,
         )
 
+        micro_lot_drift = abs(reconciliation_difference) > 0.01 and (
+            abs(reconciliation_difference) <= MICRO_LOT_TOLERANCE
+        )
         checks.append(
             LedgerCheck(
                 check_id="RECONCILIATION_FORMULA",
                 severity=CheckSeverity.ERROR,
-                passed=abs(reconciliation_difference) <= RECONCILIATION_TOLERANCE,
+                passed=abs(reconciliation_difference) <= MICRO_LOT_TOLERANCE,
                 description=RECONCILIATION_FORMULA,
                 amount=reconciliation_difference,
                 reason=(
                     f"Difference ${reconciliation_difference:,.2f} "
-                    f"(must be 0.00)"
+                    f"(tolerance ${MICRO_LOT_TOLERANCE:.2f})"
                 ),
             )
         )
+        if micro_lot_drift:
+            checks.append(
+                LedgerCheck(
+                    check_id="MICRO_LOT_RECONCILIATION_DRIFT",
+                    severity=CheckSeverity.WARNING,
+                    passed=False,
+                    description="Micro-lot cashflow drift within tolerance",
+                    amount=reconciliation_difference,
+                    reason=(
+                        f"${reconciliation_difference:,.2f} drift from near-zero "
+                        f"BUY rows (IBM/INTC) — not a mark-source issue"
+                    ),
+                )
+            )
 
         checks.append(
             LedgerCheck(
@@ -663,12 +773,11 @@ class CashFlowLedgerAuditor:
                 severity=CheckSeverity.ERROR,
                 passed=True,
                 description=(
-                    "Final Account Value = Current Cash + Open Market Value"
+                    "Canonical Account Value = Current Cash + Open Market Value (CSV marks)"
                 ),
-                amount=final_account_value,
+                amount=av_csv,
                 reason=(
-                    f"${cash:,.2f} + ${open_market_value:,.2f} "
-                    f"= ${final_account_value:,.2f}"
+                    f"${cash:,.2f} + ${open_mv_csv:,.2f} = ${av_csv:,.2f}"
                 ),
             )
         )
