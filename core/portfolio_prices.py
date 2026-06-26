@@ -1,6 +1,7 @@
 import pandas as pd
 
 from core.indicators import get_latest_price
+from core.trades import is_immutable_portfolio_row
 from data.storage import load_portfolio, save_portfolio
 from utils.logger import log
 
@@ -16,8 +17,17 @@ def update_portfolio_prices():
 
     for i, row in portfolio.iterrows():
         ticker = row["Ticker"]
+        action = str(row.get("Action", ""))
+        reason = str(row.get("Reason", ""))
+        signal = str(row.get("Signal", ""))
 
         if pd.isna(ticker):
+            continue
+
+        if is_immutable_portfolio_row(action, reason, signal):
+            continue
+
+        if action.upper() != "BUY":
             continue
 
         current_price = get_latest_price(ticker, log)
@@ -25,10 +35,10 @@ def update_portfolio_prices():
         if current_price is None:
             current_price = row["Price"]
 
-        price = float(row["Price"])
+        buy_price = float(row["Price"])
         shares = float(row["Shares"])
 
-        invested = price * shares
+        invested = buy_price * shares
         current_value = float(current_price) * shares
         pnl = current_value - invested
         pnl_pct = (pnl / invested) * 100 if invested else 0
