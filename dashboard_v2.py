@@ -16,6 +16,10 @@ from config.settings import STARTING_CAPITAL
 MARKET_REGIME_TICKER = "SPY"
 MARKET_REGIME_SMA = 200
 TRAILING_STOP_PCT = 5
+FALLBACK_STARTING_CAPITAL = 30000.0
+ACCOUNT_VALUE_FORMULA = (
+    "Account Value = Starting Capital + Deposits + Realized PnL + Open Unrealized PnL"
+)
 
 st.title("🚀 Trading AI Dashboard")
 st.caption("Dashboard complet: Live Bot + Portfolio + Performance + Bot Health + Daily Report")
@@ -170,8 +174,174 @@ def compute_open_positions(portfolio_df):
     open_positions = pd.DataFrame(open_rows)
     open_value = open_positions["Current_Value"].sum() if not open_positions.empty else 0
     open_pnl = open_positions["PnL"].sum() if not open_positions.empty else 0
+    # Account value = cash (starting + deposits − buys + sell proceeds) + open mark-to-market value.
+    # Closed BUY rows are not included — only net-open positions contribute to open_value.
     account_value = cash + open_value
     return open_positions, cash, open_value, open_pnl, account_value
+
+
+def _resolve_starting_capital() -> float:
+    try:
+        from config.settings import STARTING_CAPITAL as cfg_start
+
+        return float(cfg_start)
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return FALLBACK_STARTING_CAPITAL
+
+
+def _portfolio_df_to_rows(portfolio_df: pd.DataFrame) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for _, series in portfolio_df.iterrows():
+        row: dict[str, str] = {}
+        for col in portfolio_df.columns:
+            val = series[col]
+            row[col] = "" if pd.isna(val) else str(val)
+        rows.append(row)
+    return rows
+
+
+def _sum_deposits(portfolio_df: pd.DataFrame) -> float:
+    if portfolio_df.empty or "Action" not in portfolio_df.columns:
+        return 0.0
+    df = portfolio_df.copy()
+    df["Action"] = df["Action"].astype(str).str.upper()
+    df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
+    df["Shares"] = pd.to_numeric(df["Shares"], errors="coerce").fillna(0)
+    deposits = df[df["Action"] == "DEPOSIT"]
+    if deposits.empty:
+        return 0.0
+    return float((deposits["Price"] * deposits["Shares"]).sum())
+
+
+def _open_pnl_from_portfolio_marks(portfolio_df: pd.DataFrame) -> float:
+    """Mark-to-market open PnL from latest open BUY row per ticker in portfolio.csv."""
+    if portfolio_df.empty:
+        return 0.0
+    rows = _portfolio_df_to_rows(portfolio_df)
+    net: dict[str, float] = {}
+    for row in rows:
+        ticker = row.get("Ticker", "").strip()
+        action = row.get("Action", "").upper()
+        shares = float(row.get("Shares") or 0)
+        if not ticker or ticker == "CASH":
+            continue
+        if action == "BUY":
+            net[ticker] = net.get(ticker, 0.0) + shares
+        elif action == "SELL":
+            net[ticker] = net.get(ticker, 0.0) - shares
+
+    open_pnl = 0.0
+    for ticker, shares in net.items():
+        if shares <= 0.0001:
+            continue
+        ticker_rows = [r for r in rows if r.get("Ticker") == ticker]
+        if not ticker_rows:
+            continue
+        last = ticker_rows[-1]
+        if last.get("Action", "").upper() == "BUY":
+            open_pnl += float(last.get("PnL") or 0)
+    return round(open_pnl, 2)
+
+
+def compute_dashboard_performance_metrics(
+    portfolio_df: pd.DataFrame,
+    open_pnl: float | None = None,
+) -> dict:
+    """
+    Canonical dashboard performance metrics (read-only).
+
+    account_value = starting_capital + deposits + realized_pnl + open_pnl
+    """
+    from tools.recompute_realized_pnl import _is_repairable_sell, recompute_portfolio
+
+    starting_capital = _resolve_starting_capital()
+    deposits = round(_sum_deposits(portfolio_df), 2)
+
+    empty = {
+        "starting_capital": starting_capital,
+        "deposits": deposits,
+        "realized_pnl": 0.0,
+        "open_pnl": 0.0,
+        "total_pnl": 0.0,
+        "account_value": round(starting_capital + deposits, 2),
+        "win_rate": 0.0,
+        "buy_count": 0,
+        "sell_count": 0,
+        "repairable_sell_count": 0,
+        "account_value_formula": ACCOUNT_VALUE_FORMULA,
+        "legacy_account_value": round(starting_capital + deposits, 2),
+        "closed_trades": [],
+        "portfolio_sell_sum_all": 0.0,
+        "portfolio_sell_sum_repairable": 0.0,
+    }
+    if portfolio_df.empty:
+        return empty
+
+    df = portfolio_df.copy()
+    df["Action"] = df["Action"].astype(str).str.upper()
+    buy_count = int((df["Action"] == "BUY").sum())
+    sell_count = int((df["Action"] == "SELL").sum())
+
+    rows = _portfolio_df_to_rows(portfolio_df)
+    updated_rows, _changes = recompute_portfolio(rows)
+
+    realized_pnl = 0.0
+    wins = 0
+    closed_trades: list[dict] = []
+    portfolio_sell_sum_all = 0.0
+    portfolio_sell_sum_repairable = 0.0
+
+    for orig, corrected in zip(rows, updated_rows):
+        if orig.get("Action", "").upper() != "SELL":
+            continue
+        stale_pnl = float(orig.get("PnL") or 0)
+        portfolio_sell_sum_all += stale_pnl
+        if not _is_repairable_sell(orig):
+            continue
+        exec_pnl = float(corrected.get("PnL") or 0)
+        portfolio_sell_sum_repairable += stale_pnl
+        realized_pnl += exec_pnl
+        if exec_pnl > 0:
+            wins += 1
+        closed_trades.append(
+            {
+                "Date": corrected.get("Date", orig.get("Date", "")),
+                "Ticker": corrected.get("Ticker", orig.get("Ticker", "")),
+                "Recorded_PnL": stale_pnl,
+                "Execution_PnL": exec_pnl,
+                "PnL": exec_pnl,
+            }
+        )
+
+    repairable_count = len(closed_trades)
+    win_rate = round((wins / repairable_count * 100.0) if repairable_count else 0.0, 2)
+    realized_pnl = round(realized_pnl, 2)
+
+    if open_pnl is None:
+        open_pnl = _open_pnl_from_portfolio_marks(portfolio_df)
+    else:
+        open_pnl = round(float(open_pnl), 2)
+
+    total_pnl = round(realized_pnl + open_pnl, 2)
+    account_value = round(starting_capital + deposits + total_pnl, 2)
+
+    return {
+        "starting_capital": starting_capital,
+        "deposits": deposits,
+        "realized_pnl": realized_pnl,
+        "open_pnl": open_pnl,
+        "total_pnl": total_pnl,
+        "account_value": account_value,
+        "win_rate": win_rate,
+        "buy_count": buy_count,
+        "sell_count": sell_count,
+        "repairable_sell_count": repairable_count,
+        "account_value_formula": ACCOUNT_VALUE_FORMULA,
+        "legacy_account_value": empty["legacy_account_value"],
+        "closed_trades": closed_trades,
+        "portfolio_sell_sum_all": round(portfolio_sell_sum_all, 2),
+        "portfolio_sell_sum_repairable": round(portfolio_sell_sum_repairable, 2),
+    }
 
 
 def prepare_live_signals(df):
@@ -206,19 +376,27 @@ portfolio = load_csv("portfolio.csv")
 
 bot_status = read_text("bot_status.txt").strip() or "UNKNOWN"
 market_regime, market_price, market_sma = get_market_regime()
-open_positions, cash, open_value, open_pnl, account_value = compute_open_positions(portfolio)
+open_positions, cash, open_value, open_pnl_live, account_value_legacy = compute_open_positions(portfolio)
+dash_perf = compute_dashboard_performance_metrics(portfolio, open_pnl=open_pnl_live)
+starting_capital_display = dash_perf["starting_capital"]
+deposits_display = dash_perf["deposits"]
+realized_pnl = dash_perf["realized_pnl"]
+open_pnl_display = dash_perf["open_pnl"]
+total_pnl = dash_perf["total_pnl"]
+account_value_display = dash_perf["account_value"]
+execution_win_rate = dash_perf["win_rate"]
+stale_recorded_realized = dash_perf["portfolio_sell_sum_repairable"]
+legacy_realized_pnl = dash_perf["portfolio_sell_sum_all"]
+legacy_account_value = account_value_legacy
+closed_trades_exec = pd.DataFrame(dash_perf["closed_trades"])
+if not closed_trades_exec.empty:
+    closed_trades_exec["Date"] = pd.to_datetime(closed_trades_exec["Date"], errors="coerce")
 
-deposited_capital = 0
-if not portfolio.empty and "Action" in portfolio.columns:
-    tmp_capital_df = portfolio.copy()
-    tmp_capital_df["Action"] = tmp_capital_df["Action"].astype(str).str.upper()
-    tmp_capital_df["Price"] = pd.to_numeric(tmp_capital_df["Price"], errors="coerce")
-    tmp_capital_df["Shares"] = pd.to_numeric(tmp_capital_df["Shares"], errors="coerce")
-    dep_rows = tmp_capital_df[tmp_capital_df["Action"] == "DEPOSIT"]
-    deposited_capital = (dep_rows["Price"] * dep_rows["Shares"]).sum() if not dep_rows.empty else 0
-
-total_capital_base = STARTING_CAPITAL + deposited_capital
-account_pnl = account_value - total_capital_base
+total_capital_base = starting_capital_display + deposits_display
+account_return_display = (
+    (total_pnl / total_capital_base) * 100 if total_capital_base else 0
+)
+account_pnl = account_value_legacy - total_capital_base
 account_return_pct = (account_pnl / total_capital_base) * 100 if total_capital_base else 0
 
 tabs = st.tabs([
@@ -789,7 +967,7 @@ with tabs[5]:
         c1.metric("Capital total", f"${STARTING_CAPITAL:,.2f}")
         c2.metric("Cash disponibil", f"${cash:,.2f}")
         c3.metric("Valoare poziții", f"${open_value:,.2f}")
-        c4.metric("Valoare cont", f"${account_value:,.2f}")
+        c4.metric("Valoare cont (legacy cash+open)", f"${account_value_legacy:,.2f}")
         c5, c6, c7 = st.columns(3)
         c5.metric("PnL cont", f"${account_pnl:,.2f}")
         c6.metric("Randament cont", f"{account_return_pct:.2f}%")
@@ -806,34 +984,39 @@ with tabs[5]:
 
 with tabs[6]:
     st.subheader("📈 Performance")
+    st.caption("PnL: realized SELL execution PnL + open mark-to-market PnL")
     if portfolio.empty:
         st.warning("Nu există portfolio.csv")
     else:
+        closed = closed_trades_exec.copy()
+        win_rate = execution_win_rate
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Starting Capital", f"${starting_capital_display:,.2f}")
+        c2.metric("Deposits", f"${deposits_display:,.2f}")
+        c3.metric("Realized PnL", f"${realized_pnl:,.2f}")
+        c4.metric("Open PnL", f"${open_pnl_display:,.2f}")
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("Total PnL", f"${total_pnl:,.2f}")
+        c6.metric("Account Value", f"${account_value_display:,.2f}")
+        c7.metric("Win Rate", f"{win_rate:.2f}%")
+        c8.metric("BUY / SELL", f"{dash_perf['buy_count']} / {dash_perf['sell_count']}")
+        st.caption(ACCOUNT_VALUE_FORMULA)
+        if abs(legacy_account_value - account_value_display) > 0.01:
+            st.info(
+                f"Legacy cash+open-value model: ${legacy_account_value:,.2f} → "
+                f"capital+PnL model: ${account_value_display:,.2f}"
+            )
+        if abs(stale_recorded_realized - realized_pnl) > 0.01:
+            st.info(
+                f"portfolio.csv repairable SELL PnL column (stale): ${stale_recorded_realized:,.2f} → "
+                f"execution display: ${realized_pnl:,.2f}. "
+                f"Legacy all-SELL sum was ${legacy_realized_pnl:,.2f}."
+            )
+        st.subheader("📋 Trade History")
         perf = portfolio.copy()
         perf["Date"] = pd.to_datetime(perf["Date"], errors="coerce")
-        perf["Price"] = pd.to_numeric(perf["Price"], errors="coerce")
-        perf["Shares"] = pd.to_numeric(perf["Shares"], errors="coerce")
-        perf["PnL"] = pd.to_numeric(perf.get("PnL", 0), errors="coerce").fillna(0)
-        perf = perf.dropna(subset=["Date", "Ticker", "Action", "Price", "Shares"]).sort_values("Date")
-        buy_count = len(perf[perf["Action"].astype(str).str.upper() == "BUY"])
-        sell_count = len(perf[perf["Action"].astype(str).str.upper() == "SELL"])
-        closed = perf[perf["Action"].astype(str).str.upper() == "SELL"].copy()
-        realized_pnl = closed["PnL"].sum() if not closed.empty else 0
-        win_rate = (len(closed[closed["PnL"] > 0]) / len(closed) * 100) if not closed.empty else 0
-        total_pnl = realized_pnl + open_pnl
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("BUY", buy_count)
-        c2.metric("SELL", sell_count)
-        c3.metric("Win Rate", f"{win_rate:.2f}%")
-        c4.metric("Realized PnL", f"${realized_pnl:,.2f}")
-        c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Open PnL", f"${open_pnl:,.2f}")
-        c6.metric("Total PnL", f"${total_pnl:,.2f}")
-        c7.metric("Valoare cont", f"${account_value:,.2f}")
-        c8.metric("Randament cont", f"{account_return_pct:.2f}%")
-        st.subheader("📋 Trade History")
-        st.dataframe(perf, width="stretch")
-        st.subheader("✅ Closed Trades")
+        st.dataframe(perf.sort_values("Date"), width="stretch")
+        st.subheader("✅ Closed Trades (execution-based PnL)")
         if not closed.empty:
             st.dataframe(closed, width="stretch")
         else:
@@ -863,6 +1046,7 @@ with tabs[7]:
 
 with tabs[8]:
     st.subheader("📋 Daily Report")
+    st.caption("PnL: realized SELL execution PnL + open mark-to-market PnL")
     if portfolio.empty:
         st.warning("Nu există portfolio.csv")
     else:
@@ -873,22 +1057,20 @@ with tabs[8]:
         report_df["PnL"] = pd.to_numeric(report_df.get("PnL", 0), errors="coerce").fillna(0)
         buys = report_df[report_df["Action"] == "BUY"]
         sells = report_df[report_df["Action"] == "SELL"]
-        realized_pnl = sells["PnL"].sum() if not sells.empty else 0
-        total_pnl = realized_pnl + open_pnl
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Capital inițial", f"${STARTING_CAPITAL:,.2f}")
-        c2.metric("Cash", f"${cash:,.2f}")
-        c3.metric("Valoare poziții", f"${open_value:,.2f}")
-        c4.metric("Valoare cont", f"${account_value:,.2f}")
+        c1.metric("Starting Capital", f"${starting_capital_display:,.2f}")
+        c2.metric("Deposits", f"${deposits_display:,.2f}")
+        c3.metric("Realized PnL", f"${realized_pnl:,.2f}")
+        c4.metric("Open PnL", f"${open_pnl_display:,.2f}")
         c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Open PnL", f"${open_pnl:,.2f}")
-        c6.metric("Realized PnL", f"${realized_pnl:,.2f}")
-        c7.metric("Total PnL", f"${total_pnl:,.2f}")
-        c8.metric("Randament cont", f"{account_return_pct:.2f}%")
+        c5.metric("Total PnL", f"${total_pnl:,.2f}")
+        c6.metric("Account Value", f"${account_value_display:,.2f}")
+        c7.metric("Win Rate", f"{execution_win_rate:.2f}%")
+        c8.metric("Randament cont", f"{account_return_display:.2f}%")
         c9, c10, c11, c12 = st.columns(4)
-        c9.metric("BUY", len(buys))
-        c10.metric("SELL", len(sells))
-        c11.metric("Win Rate", f"{(len(sells[sells['PnL'] > 0]) / len(sells) * 100) if not sells.empty else 0:.2f}%")
+        c9.metric("BUY", dash_perf["buy_count"])
+        c10.metric("SELL", dash_perf["sell_count"])
+        c11.metric("Cash (legacy view)", f"${cash:,.2f}")
         c12.metric("Poziții deschise", len(open_positions))
         st.subheader("🏆 Top Winner / Top Loser")
         if not open_positions.empty:
@@ -907,18 +1089,18 @@ with tabs[8]:
         report_text = f"""
 Daily Trading Report
 
-Capital initial: ${STARTING_CAPITAL:,.2f}
-Cash: ${cash:,.2f}
-Valoare pozitii: ${open_value:,.2f}
-Valoare cont: ${account_value:,.2f}
-
-Open PnL: ${open_pnl:,.2f}
+Starting Capital: ${starting_capital_display:,.2f}
+Deposits: ${deposits_display:,.2f}
 Realized PnL: ${realized_pnl:,.2f}
+Open PnL: ${open_pnl_display:,.2f}
 Total PnL: ${total_pnl:,.2f}
-Randament cont: {account_return_pct:.2f}%
+Account Value: ${account_value_display:,.2f}
+{ACCOUNT_VALUE_FORMULA}
+Randament cont: {account_return_display:.2f}%
 
-BUY: {len(buys)}
-SELL: {len(sells)}
+BUY: {dash_perf['buy_count']}
+SELL: {dash_perf['sell_count']}
+Win Rate: {execution_win_rate:.2f}%
 Pozitii deschise: {len(open_positions)}
 """
         st.subheader("📋 Raport text")
