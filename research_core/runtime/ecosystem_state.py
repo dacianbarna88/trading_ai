@@ -22,6 +22,7 @@ STATE_SOURCES: dict[str, str] = {
     "evidence": "tae_evidence_engine_report.json",
     "strategy_evolution": "tae_strategy_evolution_daily_runner.json",
     "promotion": "tae_strategy_promotion_gate.json",
+    "integration_gate": "tae_evidence_integration_gate.json",
     "paper_tracking": "tae_paper_tracking_log.json",
     "strategic_performance": "tae_strategic_performance_audit.json",
     "accounting_integrity": "tae_accounting_integrity_audit.json",
@@ -96,6 +97,7 @@ class EcosystemStateLoader:
         orchestrator = payloads.get("ecosystem") or {}
         daily_runner = payloads.get("strategy_evolution") or {}
         promotion = payloads.get("promotion") or {}
+        integration_gate = payloads.get("integration_gate") or {}
         paper_tracking = payloads.get("paper_tracking") or {}
         evidence = payloads.get("evidence") or {}
         registry = payloads.get("registry") or {}
@@ -122,11 +124,20 @@ class EcosystemStateLoader:
             orchestrator.get("top_ranked_strategy_score")
             or daily_runner.get("top_ranked_strategy_score")
         )
-        review_candidate = (
-            promotion.get("review_candidate_id")
-            or orchestrator.get("promotion_review_candidate_id")
-            or daily_runner.get("promotion_review_candidate_id")
-        )
+        promotion_chain = integration_gate.get("promotion_gate_chain") or {}
+        if isinstance(promotion_chain, dict) and promotion_chain.get(
+            "promotion_gate_registered"
+        ):
+            review_candidate = (
+                promotion_chain.get("review_candidate_id")
+                or orchestrator.get("promotion_review_candidate_id")
+                or daily_runner.get("promotion_review_candidate_id")
+            )
+        else:
+            review_candidate = (
+                orchestrator.get("promotion_review_candidate_id")
+                or daily_runner.get("promotion_review_candidate_id")
+            )
 
         paper_needs = self._paper_tracking_needs(orchestrator, paper_tracking)
         missing = self._merge_missing(inventory, orchestrator, interconnection)
@@ -134,6 +145,7 @@ class EcosystemStateLoader:
         missing = self._filter_resolved_evidence_gap_missing(missing, evidence)
         missing = self._filter_resolved_regional_validation_missing(missing, promotion)
         missing = self._filter_resolved_confidence_missing(missing, evidence)
+        missing = self._filter_resolved_integration_gate_chain_missing(missing, integration_gate)
         conflicts = interconnection.get("conflict_warnings", [])
         if not isinstance(conflicts, list):
             conflicts = []
@@ -146,7 +158,18 @@ class EcosystemStateLoader:
             "interconnection": interconnection.get("verdict"),
             "evidence": evidence.get("verdict"),
             "strategy_evolution": daily_runner.get("verdict"),
-            "promotion": promotion.get("verdict"),
+            "promotion": (
+                promotion_chain.get("promotion_gate_status")
+                if isinstance(promotion_chain, dict)
+                and promotion_chain.get("promotion_gate_registered")
+                else promotion.get("verdict")
+            ),
+            "integration_gate": integration_gate.get("verdict"),
+            "integration_gate_chain": (
+                promotion_chain.get("integration_gate_status")
+                if isinstance(promotion_chain, dict)
+                else None
+            ),
             "paper_tracking": paper_tracking.get("verdict"),
             "registry": registry.get("verdict"),
             "ranking": (payloads.get("ranking") or {}).get("verdict"),
@@ -310,3 +333,21 @@ class EcosystemStateLoader:
         if not is_confidence_registration_resolved(self._root, evidence or None):
             return missing
         return [item for item in missing if item != MISSING_CONNECTION_CONFIDENCE_EVIDENCE]
+
+    def _filter_resolved_integration_gate_chain_missing(
+        self,
+        missing: list[str],
+        integration_gate: dict[str, Any],
+    ) -> list[str]:
+        try:
+            from integration_layer.integration_gate_chain import (
+                MISSING_CONNECTION_INTEGRATION_GATE_CHAIN,
+                is_integration_gate_chain_resolved,
+            )
+        except ImportError:
+            return missing
+        if not is_integration_gate_chain_resolved(self._root, integration_gate or None):
+            return missing
+        return [
+            item for item in missing if item != MISSING_CONNECTION_INTEGRATION_GATE_CHAIN
+        ]

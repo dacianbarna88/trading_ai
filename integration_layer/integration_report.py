@@ -67,6 +67,8 @@ class IntegrationGateReport:
     paper_candidate_count: int
     deployment_review_count: int
     allowlist: list[str]
+    promotion_gate_chain: dict[str, Any] | None = None
+    sources_loaded: dict[str, bool] = field(default_factory=dict)
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -85,6 +87,10 @@ class IntegrationGateReport:
             "paper_candidate_count": self.paper_candidate_count,
             "deployment_review_count": self.deployment_review_count,
             "decisions": [d.to_dict() for d in self.decisions],
+            "promotion_gate_chain": dict(self.promotion_gate_chain)
+            if self.promotion_gate_chain
+            else None,
+            "sources_loaded": dict(self.sources_loaded),
         }
 
     def format_text(self) -> str:
@@ -104,8 +110,22 @@ class IntegrationGateReport:
             f"  PAPER_CANDIDATE: {self.paper_candidate_count}",
             f"  DEPLOYMENT_REVIEW_REQUIRED: {self.deployment_review_count}",
             "",
-            "===== DECIZII GATE =====",
         ]
+        if self.promotion_gate_chain:
+            chain = self.promotion_gate_chain
+            lines.extend([
+                "===== PROMOTION GATE CHAIN =====",
+                f"  promotion_gate_registered: {chain.get('promotion_gate_registered')}",
+                f"  promotion_gate_status: {chain.get('promotion_gate_status')}",
+                f"  promotion_gate_source: {chain.get('promotion_gate_source')}",
+                f"  promotion_gate_last_refresh: {chain.get('promotion_gate_last_refresh')}",
+                f"  integration_gate_status: {chain.get('integration_gate_status')}",
+                f"  review_candidate_id: {chain.get('review_candidate_id')}",
+                "",
+            ])
+        lines.extend([
+            "===== DECIZII GATE =====",
+        ])
         for decision in self.decisions:
             allowed = "ALLOWED" if decision.implementation_allowed else "DENIED"
             lines.append(

@@ -81,6 +81,7 @@ class RuntimeHealth:
         checks.append(self._check_evidence_gap_registration(state, issues))
         checks.append(self._check_regional_validation_integration(state, issues))
         checks.append(self._check_confidence_registration(state, issues))
+        checks.append(self._check_integration_gate_chain(state, issues))
 
         statuses = [check.status for check in checks]
         if HealthStatus.CRITICAL.value in statuses or any(
@@ -168,25 +169,38 @@ class RuntimeHealth:
         state: EcosystemState,
         issues: list[str],
     ) -> HealthCheck:
-        review = state.promotion_review_candidate_id
-        promotion_verdict = state.verdicts.get("promotion")
-        if review and promotion_verdict != "STRATEGY_PROMOTION_GATE_READY":
-            issues.append(f"Promotion candidate {review} without gate ready verdict")
+        integration = state.sections.get("integration_gate") or {}
+        chain = integration.get("promotion_gate_chain") or {}
+
+        if not isinstance(chain, dict) or not chain.get("promotion_gate_registered"):
+            issues.append("Integration gate not chained to promotion gate for runtime")
+            return HealthCheck(
+                check_id="promotion_gate_bypass",
+                status=HealthStatus.DEGRADED.value,
+                message="Promotion gate not registered in integration gate chain",
+            )
+
+        review = chain.get("review_candidate_id")
+        promotion_status = chain.get("promotion_gate_status")
+        if review and promotion_status != "STRATEGY_PROMOTION_GATE_READY":
+            issues.append(
+                f"Integration chain review candidate {review} without gate ready verdict"
+            )
             return HealthCheck(
                 check_id="promotion_gate_bypass",
                 status=HealthStatus.CRITICAL.value,
-                message="Promotion candidate bypasses gate",
+                message="Promotion candidate bypasses chained gate",
             )
         if review:
             return HealthCheck(
                 check_id="promotion_gate_bypass",
                 status=HealthStatus.DEGRADED.value,
-                message=f"Review candidate present: {review}",
+                message=f"Review candidate via integration chain: {review}",
             )
         return HealthCheck(
             check_id="promotion_gate_bypass",
             status=HealthStatus.HEALTHY.value,
-            message="No promotion candidate bypassing gate",
+            message="Integration gate chain — no promotion bypass",
         )
 
     @staticmethod
@@ -441,5 +455,42 @@ class RuntimeHealth:
                 f"Confidence recalibration registered via "
                 f"{confidence_reg.get('confidence_source')} "
                 f"| candidates={report.get('candidates_recalibrated')}"
+            ),
+        )
+
+    @staticmethod
+    def _check_integration_gate_chain(
+        state: EcosystemState,
+        issues: list[str],
+    ) -> HealthCheck:
+        integration = state.sections.get("integration_gate") or {}
+        chain = integration.get("promotion_gate_chain") or {}
+        chain_status = state.verdicts.get("integration_gate_chain")
+
+        if not isinstance(chain, dict) or not chain.get("promotion_gate_registered"):
+            issues.append("Integration gate chain incomplete — promotion not registered")
+            return HealthCheck(
+                check_id="integration_gate_chain",
+                status=HealthStatus.DEGRADED.value,
+                message="Integration gate missing promotion gate chain registration",
+            )
+
+        status = str(chain.get("integration_gate_status", chain_status or ""))
+        if status == "INTEGRATION_GATE_CHAIN_PARTIAL":
+            return HealthCheck(
+                check_id="integration_gate_chain",
+                status=HealthStatus.HEALTHY.value,
+                message=(
+                    "Integration gate chained — promotion source report missing "
+                    "(INTEGRATION_GATE_CHAIN_PARTIAL)"
+                ),
+            )
+
+        return HealthCheck(
+            check_id="integration_gate_chain",
+            status=HealthStatus.HEALTHY.value,
+            message=(
+                f"Integration gate chain via {chain.get('promotion_gate_source')} "
+                f"| status={status}"
             ),
         )

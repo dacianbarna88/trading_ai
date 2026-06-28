@@ -535,11 +535,6 @@ class EcosystemInventoryAudit:
                 "Phase VIII strategy_evolution daily runner",
                 "Phase V evolution manager parallel to Phase VIII pipeline",
             ),
-            (
-                "integration_layer/evidence_gate.py",
-                "Strategy Promotion Gate",
-                "Integration gate not yet chained after promotion gate",
-            ),
         ]
         for path, _target, message in checks:
             if path in module_paths:
@@ -571,6 +566,15 @@ class EcosystemInventoryAudit:
 
             if not is_confidence_wired_in_registry():
                 missing.append(MISSING_CONNECTION_CONFIDENCE_EVIDENCE)
+
+        if "integration_layer/evidence_gate.py" in module_paths:
+            from integration_layer.integration_gate_chain import (
+                MISSING_CONNECTION_INTEGRATION_GATE_CHAIN,
+                is_integration_gate_chained,
+            )
+
+            if not is_integration_gate_chained():
+                missing.append(MISSING_CONNECTION_INTEGRATION_GATE_CHAIN)
 
         if "research_core/performance/strategic_performance_auditor.py" in module_paths:
             from research_core.performance.performance_pipeline_integration import (

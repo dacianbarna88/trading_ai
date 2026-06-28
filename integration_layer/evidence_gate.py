@@ -5,6 +5,8 @@ PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Reads tae_evidence_engine_report.json and decides which evidence items may
 progress toward implementation (paper validation only — no live changes).
+
+Phase IX.5E: consumes tae_strategy_promotion_gate.json — canonical bridge to Runtime.
 """
 
 from __future__ import annotations
@@ -18,6 +20,10 @@ from integration_layer.integration_report import (
     GateStatus,
     IntegrationGateReport,
     IntegrationGateVerdict,
+)
+from integration_layer.integration_gate_chain import (
+    PROMOTION_GATE_REPORT_PATH,
+    load_canonical_promotion_gate_report,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,6 +89,18 @@ class EvidenceIntegrationGate:
             if d.implementation_allowed:
                 allowed_count += 1
 
+        from integration_layer.integration_gate_chain import build_promotion_gate_chain
+
+        promotion_payload = load_canonical_promotion_gate_report(
+            self._evidence_report_path.parent
+        )
+        gate_verdict = IntegrationGateVerdict.EVIDENCE_INTEGRATION_GATE_READY.value
+        promotion_gate_chain = build_promotion_gate_chain(
+            self._evidence_report_path.parent,
+            promotion_payload,
+            gate_verdict=gate_verdict,
+        )
+
         return IntegrationGateReport(
             verdict=IntegrationGateVerdict.EVIDENCE_INTEGRATION_GATE_READY,
             evidence_engine_verdict=engine_verdict,
@@ -95,6 +113,11 @@ class EvidenceIntegrationGate:
                 GateStatus.DEPLOYMENT_REVIEW_REQUIRED.value, 0
             ),
             allowlist=sorted(self._allowlist),
+            promotion_gate_chain=promotion_gate_chain,
+            sources_loaded={
+                EVIDENCE_ENGINE_REPORT_PATH.name: True,
+                PROMOTION_GATE_REPORT_PATH.name: promotion_payload is not None,
+            },
         )
 
     def _decide(self, item: dict, engine_aligned: bool) -> GateDecision:
