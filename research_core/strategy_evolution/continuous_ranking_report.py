@@ -97,6 +97,7 @@ class ContinuousStrategyRankingReport:
     validation_verdict: str | None
     registry_verdict: str | None
     sources_loaded: dict[str, bool]
+    pipeline_reference: dict[str, Any] | None = None
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -111,6 +112,7 @@ class ContinuousStrategyRankingReport:
             "validation_verdict": self.validation_verdict,
             "registry_verdict": self.registry_verdict,
             "sources_loaded": dict(self.sources_loaded),
+            "pipeline_reference": self.pipeline_reference,
             "rankings": [entry.to_dict() for entry in self.rankings],
         }
 

@@ -92,6 +92,7 @@ class PaperTrackingLogReport:
     ranking_verdict: str | None
     validation_verdict: str | None
     sources_loaded: dict[str, bool]
+    pipeline_reference: dict[str, Any] | None = None
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -107,6 +108,7 @@ class PaperTrackingLogReport:
             "ranking_verdict": self.ranking_verdict,
             "validation_verdict": self.validation_verdict,
             "sources_loaded": dict(self.sources_loaded),
+            "pipeline_reference": self.pipeline_reference,
             "entries": [entry.to_dict() for entry in self.entries],
         }
 

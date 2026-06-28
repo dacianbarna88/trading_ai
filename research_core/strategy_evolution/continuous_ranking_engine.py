@@ -1,9 +1,10 @@
 """
-Continuous Strategy Ranking Engine — Phase VIII B3
+Continuous Strategy Ranking Engine — Phase VIII B3 / IX.2C pipeline step 3
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Ranks candidate strategies from parallel paper validation results.
+Pipeline step — official ranking conclusions via Daily Runner only.
 """
 
 from __future__ import annotations
@@ -31,8 +32,11 @@ from research_core.strategy_evolution.continuous_ranking_report import (
     RankingVerdict,
     StrategyRankingEntry,
 )
+from research_core.strategy_evolution.pipeline_integration import pipeline_reference
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_ROLE = "PIPELINE_STEP_RANKING"
 
 VALIDATION_PATH = Path("tae_parallel_paper_validation.json")
 REGISTRY_PATH = Path("tae_candidate_strategy_registry.json")
@@ -85,6 +89,11 @@ class ContinuousStrategyRankingEngine:
             sources_loaded={
                 self._validation_path.name: validation_payload is not None,
                 self._registry_path.name: registry_payload is not None,
+            },
+            pipeline_reference={
+                **pipeline_reference(),
+                "pipeline_role": PIPELINE_ROLE,
+                "pipeline_step": 3,
             },
         )
 

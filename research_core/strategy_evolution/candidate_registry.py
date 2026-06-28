@@ -1,10 +1,10 @@
 """
-Candidate Strategy Registry — Phase VIII B1
+Candidate Strategy Registry — Phase VIII B1 / IX.2C pipeline step 1
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
-Registers strategy candidates from Evidence Engine and Simulation Lab,
-with FIFO-attributed metrics from portfolio.csv.
+Registers strategy candidates from Evidence Engine and Simulation Lab.
+Official conclusions require Strategy Evolution Daily Runner orchestration.
 """
 
 from __future__ import annotations
@@ -27,8 +27,11 @@ from research_core.strategy_evolution.candidate_report import (
     RegistryVerdict,
     StrategyCandidate,
 )
+from research_core.strategy_evolution.pipeline_integration import pipeline_reference
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_ROLE = "PIPELINE_STEP_REGISTRY"
 
 PORTFOLIO_PATH = Path("portfolio.csv")
 EVIDENCE_REPORT_PATH = Path("tae_evidence_engine_report.json")
@@ -213,6 +216,11 @@ class CandidateStrategyRegistry:
                 self._portfolio_csv.name: self._portfolio_csv.is_file(),
                 self._evidence_report_path.name: evidence is not None,
                 self._simulation_lab_path.name: simulation is not None,
+            },
+            pipeline_reference={
+                **pipeline_reference(),
+                "pipeline_role": PIPELINE_ROLE,
+                "pipeline_step": 1,
             },
         )
 

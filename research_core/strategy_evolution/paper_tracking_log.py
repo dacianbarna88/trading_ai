@@ -1,10 +1,10 @@
 """
-Paper Tracking Log — Phase VIII B5
+Paper Tracking Log — Phase VIII B5 / IX.2C pipeline step 5
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
-Tracks how many additional trades each paper candidate needs
-before promotion review eligibility.
+Paper-only tracking of trades needed before promotion review eligibility.
+Pipeline step — not an official entry point.
 """
 
 from __future__ import annotations
@@ -24,8 +24,11 @@ from research_core.strategy_evolution.paper_tracking_report import (
     TrackingStatus,
 )
 from research_core.strategy_evolution.promotion_gate_report import PromotionGateDecision
+from research_core.strategy_evolution.pipeline_integration import pipeline_reference
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_ROLE = "PIPELINE_STEP_PAPER_TRACKING"
 
 PROMOTION_GATE_PATH = Path("tae_strategy_promotion_gate.json")
 RANKING_PATH = Path("tae_continuous_strategy_ranking.json")
@@ -190,6 +193,12 @@ class PaperTrackingLog:
                 self._ranking_path.name: ranking_payload is not None,
                 self._validation_path.name: validation_payload is not None,
                 self._portfolio_csv.name: self._portfolio_csv.is_file(),
+            },
+            pipeline_reference={
+                **pipeline_reference(),
+                "pipeline_role": PIPELINE_ROLE,
+                "pipeline_step": 5,
+                "paper_only": True,
             },
         )
 

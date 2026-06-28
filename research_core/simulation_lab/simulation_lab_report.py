@@ -94,6 +94,7 @@ class SimulationLabReport:
     strategy_rankings: list[StrategyRanking]
     baseline_total_pnl: float
     buy_rows_total: int
+    pipeline_reference: dict[str, Any] | None = None
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -108,6 +109,7 @@ class SimulationLabReport:
             "best_strategy_by_profit_factor": self.best_strategy_by_profit_factor,
             "baseline_total_pnl": _round_num(self.baseline_total_pnl, 2),
             "buy_rows_total": self.buy_rows_total,
+            "pipeline_reference": self.pipeline_reference,
             "strategies": [s.to_dict() for s in self.strategies],
             "strategy_rankings": [r.to_dict() for r in self.strategy_rankings],
         }

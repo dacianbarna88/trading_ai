@@ -104,6 +104,7 @@ class ParallelPaperValidationReport:
     baseline_candidate_id: str
     registry_verdict: str | None
     sources_loaded: dict[str, bool]
+    pipeline_reference: dict[str, Any] | None = None
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -117,6 +118,7 @@ class ParallelPaperValidationReport:
             "baseline_candidate_id": self.baseline_candidate_id,
             "registry_verdict": self.registry_verdict,
             "sources_loaded": dict(self.sources_loaded),
+            "pipeline_reference": self.pipeline_reference,
             "validations": [v.to_dict() for v in self.validations],
         }
 

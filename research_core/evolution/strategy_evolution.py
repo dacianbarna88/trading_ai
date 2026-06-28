@@ -1,9 +1,10 @@
 """
-Strategy evolution manager — Phase V Sprint A4
+Strategy evolution manager — Phase V Sprint A4 / IX.2C LEGACY_PLANNING_ONLY
 
 RESEARCH_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Converts eligible strategy recommendations into auditable evolution plans.
+Legacy Phase V planning — superseded by Phase VIII Strategy Evolution Daily Runner.
 Does not modify live bot, config, portfolio, or execution paths.
 """
 
@@ -33,6 +34,9 @@ from research_core.learning.learning_report import LearningReportStore
 from research_core.validation.validation_report import DEFAULT_REPORT_PATH as VALIDATION_PATH
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_ROLE = "LEGACY_PLANNING_ONLY"
+CANONICAL_PIPELINE = "research_core/strategy_evolution/daily_runner.py"
 
 
 def _load_json(path) -> dict[str, Any] | None:

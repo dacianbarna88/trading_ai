@@ -1,10 +1,10 @@
 """
-Strategy Evolution Daily Runner — Phase VIII B6
+Strategy Evolution Daily Runner — Phase VIII B6 / IX.2C canonical pipeline
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Runs the full Strategy Evolution pipeline in order and produces
-a consolidated daily summary.
+a consolidated daily summary. Single official entry point for strategy evolution.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from research_core.strategy_evolution.daily_runner_report import (
     DailyRunnerVerdict,
     PaperTrackingNeed,
 )
+from research_core.strategy_evolution.pipeline_integration import CANONICAL_PIPELINE_MODULE
 from research_core.strategy_evolution.paper_tracking_log import PaperTrackingLog
 from research_core.strategy_evolution.paper_tracking_report import (
     DEFAULT_JSON_PATH as TRACKING_JSON,
@@ -60,6 +61,8 @@ from research_core.strategy_evolution.promotion_gate_report import (
 )
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["CANONICAL_PIPELINE_MODULE", "StrategyEvolutionDailyRunner"]
 
 PROTECTED_PATHS = [
     Path("live_bot.py"),

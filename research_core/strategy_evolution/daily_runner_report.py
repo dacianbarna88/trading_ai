@@ -95,6 +95,7 @@ class DailyRunnerReport:
         return {
             "version": SCHEMA_VERSION,
             "schema": SCHEMA_NAME,
+            "canonical_pipeline": "research_core/strategy_evolution/daily_runner.py",
             "generated_at": self.generated_at.isoformat(),
             "safety_mode": self.safety_mode,
             "verdict": self.verdict.value,

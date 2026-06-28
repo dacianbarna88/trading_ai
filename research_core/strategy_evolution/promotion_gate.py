@@ -1,10 +1,10 @@
 """
-Strategy Promotion Gate — Phase VIII B4
+Strategy Promotion Gate — Phase VIII B4 / IX.2C pipeline step 4
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
-Decides whether paper candidates are eligible for implementation review.
-No execution or live strategy changes.
+Review-only gate: decides whether paper candidates are eligible for implementation review.
+No execution or live strategy changes. Not a direct entry point.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from research_core.strategy_evolution.pipeline_integration import pipeline_reference
 from research_core.strategy_evolution.promotion_gate_report import (
     PROMOTION_MIN_TRADES,
     PROMOTION_SCORE_THRESHOLD,
@@ -25,6 +26,8 @@ from research_core.strategy_evolution.promotion_gate_report import (
 )
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_ROLE = "PIPELINE_STEP_PROMOTION_REVIEW_ONLY"
 
 RANKING_PATH = Path("tae_continuous_strategy_ranking.json")
 VALIDATION_PATH = Path("tae_parallel_paper_validation.json")
@@ -100,6 +103,12 @@ class StrategyPromotionGate:
                 self._ranking_path.name: ranking_payload is not None,
                 self._validation_path.name: validation_payload is not None,
                 self._registry_path.name: registry_payload is not None,
+            },
+            pipeline_reference={
+                **pipeline_reference(),
+                "pipeline_role": PIPELINE_ROLE,
+                "pipeline_step": 4,
+                "review_only": True,
             },
         )
 

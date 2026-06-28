@@ -1,10 +1,10 @@
 """
-Continuous Strategy Simulation Lab — Phase VII
+Continuous Strategy Simulation Lab — Phase VII / IX.2C feeder
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
-Compares baseline portfolio BUY behavior against alternative entry filters
-using FIFO-attributed PnL from portfolio.csv.
+Compares baseline portfolio BUY behavior against alternative entry filters.
+Feeds candidate_registry — official conclusions via Strategy Evolution Daily Runner.
 """
 
 from __future__ import annotations
@@ -25,8 +25,14 @@ from research_core.simulation_lab.simulation_lab_report import (
     StrategyMetrics,
     StrategyRanking,
 )
+from research_core.strategy_evolution.pipeline_integration import (
+    CANONICAL_PIPELINE_MODULE,
+    pipeline_reference,
+)
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_ROLE = "FEEDER_READER"
 
 PORTFOLIO_PATH = Path("portfolio.csv")
 INDEPENDENT_JSON = Path("tae_independent_double_entry_verification.json")
@@ -166,6 +172,12 @@ class StrategySimulationLab:
             strategy_rankings=rankings,
             baseline_total_pnl=baseline.total_pnl,
             buy_rows_total=len(buys),
+            pipeline_reference={
+                **pipeline_reference(),
+                "pipeline_role": PIPELINE_ROLE,
+                "feeds_module": "research_core/strategy_evolution/candidate_registry.py",
+                "canonical_pipeline": CANONICAL_PIPELINE_MODULE,
+            },
         )
 
     def _read_csv(self, path: Path) -> list[dict[str, str]]:

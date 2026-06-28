@@ -1,10 +1,10 @@
 """
-Parallel Paper Validator — Phase VIII B2
+Parallel Paper Validator — Phase VIII B2 / IX.2C pipeline step 2
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
-Validates each candidate strategy from the Candidate Strategy Registry
-in parallel against portfolio.csv and compares to LIVE_BASELINE.
+Validates each candidate strategy from the Candidate Strategy Registry.
+Pipeline step — not an official entry point; use Strategy Evolution Daily Runner.
 """
 
 from __future__ import annotations
@@ -26,8 +26,11 @@ from research_core.strategy_evolution.parallel_paper_report import (
     ValidationStatus,
     ValidatorVerdict,
 )
+from research_core.strategy_evolution.pipeline_integration import pipeline_reference
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_ROLE = "PIPELINE_STEP_VALIDATOR"
 
 REGISTRY_PATH = Path("tae_candidate_strategy_registry.json")
 PORTFOLIO_PATH = Path("portfolio.csv")
@@ -75,6 +78,11 @@ class ParallelPaperValidator:
             sources_loaded={
                 self._registry_path.name: registry_payload is not None,
                 self._portfolio_csv.name: self._portfolio_csv.is_file(),
+            },
+            pipeline_reference={
+                **pipeline_reference(),
+                "pipeline_role": PIPELINE_ROLE,
+                "pipeline_step": 2,
             },
         )
 
