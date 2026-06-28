@@ -22,3 +22,7 @@ bot_status.txt
 bot_pid.txt
 
 # Keep source code and markdown tracked manually
+
+# Python cache
+__pycache__/
+*.pyc
