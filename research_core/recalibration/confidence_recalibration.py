@@ -4,6 +4,7 @@ Confidence recalibrator — Phase VI Sprint B4
 RESEARCH_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Recalibrates TAE research confidence after accounting integrity fix — read-only analysis.
+Phase IX.5D: Evidence Registry consumes tae_confidence_recalibration.json on refresh.
 """
 
 from __future__ import annotations

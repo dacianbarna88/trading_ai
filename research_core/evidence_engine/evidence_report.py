@@ -108,6 +108,7 @@ class EvidenceEngineReport:
     contradictions: list[EvidenceContradiction] = field(default_factory=list)
     sources_loaded: dict[str, bool] = field(default_factory=dict)
     evidence_gap_registration: dict[str, Any] | None = None
+    confidence_registration: dict[str, Any] | None = None
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -128,6 +129,9 @@ class EvidenceEngineReport:
             "sources_loaded": dict(self.sources_loaded),
             "evidence_gap_registration": dict(self.evidence_gap_registration)
             if self.evidence_gap_registration
+            else None,
+            "confidence_registration": dict(self.confidence_registration)
+            if self.confidence_registration
             else None,
             "evidence_items": [item.to_dict() for item in self.evidence_items],
         }
@@ -161,6 +165,21 @@ class EvidenceEngineReport:
                 f"  evidence_gap_source_report: {gap.get('evidence_gap_source_report')}",
                 f"  evidence_gap_last_loaded: {gap.get('evidence_gap_last_loaded')}",
                 f"  evidence_gap_warning_count: {gap.get('evidence_gap_warning_count')}",
+            ])
+        if self.confidence_registration:
+            conf = self.confidence_registration
+            report = conf.get("confidence_report") or {}
+            lines.extend([
+                "",
+                "===== CONFIDENCE REGISTRATION =====",
+                f"  confidence_registered: {conf.get('confidence_registered')}",
+                f"  confidence_status: {conf.get('confidence_status')}",
+                f"  confidence_source: {conf.get('confidence_source')}",
+                f"  confidence_last_refresh: {conf.get('confidence_last_refresh')}",
+                f"  confidence_report.candidates_recalibrated: "
+                f"{report.get('candidates_recalibrated')}",
+                f"  confidence_report.top_candidate_after: "
+                f"{report.get('top_candidate_after')}",
             ])
         if self.contradictions:
             lines.extend(["", "Contradicții detectate:"])

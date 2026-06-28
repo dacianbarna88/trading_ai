@@ -133,6 +133,7 @@ class EcosystemStateLoader:
         missing = self._filter_resolved_performance_missing(missing, daily_runner)
         missing = self._filter_resolved_evidence_gap_missing(missing, evidence)
         missing = self._filter_resolved_regional_validation_missing(missing, promotion)
+        missing = self._filter_resolved_confidence_missing(missing, evidence)
         conflicts = interconnection.get("conflict_warnings", [])
         if not isinstance(conflicts, list):
             conflicts = []
@@ -172,6 +173,11 @@ class EcosystemStateLoader:
                     "regional_validation_status"
                 )
                 if isinstance(promotion.get("regional_validation_registration"), dict)
+                else None
+            ),
+            "confidence_registration": (
+                (evidence.get("confidence_registration") or {}).get("confidence_status")
+                if isinstance(evidence.get("confidence_registration"), dict)
                 else None
             ),
         }
@@ -288,3 +294,19 @@ class EcosystemStateLoader:
         return [
             item for item in missing if item != MISSING_CONNECTION_REGIONAL_PROMOTION_GATE
         ]
+
+    def _filter_resolved_confidence_missing(
+        self,
+        missing: list[str],
+        evidence: dict[str, Any],
+    ) -> list[str]:
+        try:
+            from research_core.evidence_engine.confidence_registration import (
+                MISSING_CONNECTION_CONFIDENCE_EVIDENCE,
+                is_confidence_registration_resolved,
+            )
+        except ImportError:
+            return missing
+        if not is_confidence_registration_resolved(self._root, evidence or None):
+            return missing
+        return [item for item in missing if item != MISSING_CONNECTION_CONFIDENCE_EVIDENCE]

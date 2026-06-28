@@ -80,6 +80,7 @@ class RuntimeHealth:
         checks.append(self._check_performance_pipeline(state, issues))
         checks.append(self._check_evidence_gap_registration(state, issues))
         checks.append(self._check_regional_validation_integration(state, issues))
+        checks.append(self._check_confidence_registration(state, issues))
 
         statuses = [check.status for check in checks]
         if HealthStatus.CRITICAL.value in statuses or any(
@@ -397,5 +398,48 @@ class RuntimeHealth:
                 f"Regional validation registered via "
                 f"{regional_reg.get('regional_validation_source')} "
                 f"| refresh={regional_reg.get('regional_validation_last_refresh')}"
+            ),
+        )
+
+    @staticmethod
+    def _check_confidence_registration(
+        state: EcosystemState,
+        issues: list[str],
+    ) -> HealthCheck:
+        evidence_section = state.sections.get("evidence") or {}
+        confidence_reg = evidence_section.get("confidence_registration")
+        confidence_status = state.verdicts.get("confidence_registration")
+
+        if not isinstance(confidence_reg, dict) or not confidence_reg.get(
+            "confidence_registered"
+        ):
+            issues.append(
+                "Confidence recalibration not registered in Evidence Registry refresh"
+            )
+            return HealthCheck(
+                check_id="confidence_registration",
+                status=HealthStatus.DEGRADED.value,
+                message="Confidence recalibration feeder not registered in evidence engine report",
+            )
+
+        status = str(confidence_reg.get("confidence_status", confidence_status or ""))
+        if status == "CONFIDENCE_REGISTERED_MISSING_REPORT":
+            return HealthCheck(
+                check_id="confidence_registration",
+                status=HealthStatus.HEALTHY.value,
+                message=(
+                    "Confidence recalibration registered in registry — source report "
+                    "missing (CONFIDENCE_REGISTERED_MISSING_REPORT)"
+                ),
+            )
+
+        report = confidence_reg.get("confidence_report") or {}
+        return HealthCheck(
+            check_id="confidence_registration",
+            status=HealthStatus.HEALTHY.value,
+            message=(
+                f"Confidence recalibration registered via "
+                f"{confidence_reg.get('confidence_source')} "
+                f"| candidates={report.get('candidates_recalibrated')}"
             ),
         )

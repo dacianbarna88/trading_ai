@@ -45,6 +45,7 @@ OPTIONAL_LAYER_REPORTS = {
     "performance_pipeline": Path("tae_performance_pipeline_report.json"),
     "evidence_gap_registration": Path("tae_evidence_gap_registration.json"),
     "regional_validation_integration": Path("tae_regional_validation_integration.json"),
+    "confidence_registration": Path("tae_confidence_registration.json"),
 }
 
 ORCHESTRATOR_JSON = Path("tae_ecosystem_orchestrator.json")
@@ -166,6 +167,10 @@ class QuickHealthWrapper:
             regional_validation_integration_status=(
                 state.verdicts.get("regional_validation_integration")
                 or layer_status.get("regional_validation_integration")
+            ),
+            confidence_registration_status=(
+                state.verdicts.get("confidence_registration")
+                or layer_status.get("confidence_registration")
             ),
             git_status=git_status,
             protected_files_unchanged=protected_ok,
@@ -351,6 +356,12 @@ class QuickHealthWrapper:
                 "OK" if layer_status.get("regional_validation_integration") else "WARN",
                 layer_status.get("regional_validation_integration")
                 or "integration report missing — run tae_phase9_regional_validation_integration_demo.py",
+            ),
+            QuickHealthCheckItem(
+                "confidence_registration",
+                "OK" if layer_status.get("confidence_registration") else "WARN",
+                layer_status.get("confidence_registration")
+                or "registration report missing — run tae_phase9_confidence_registration_demo.py",
             ),
             QuickHealthCheckItem(
                 "bot_process",

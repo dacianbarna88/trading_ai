@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RECALIBRATION_JSON_PATH = Path("tae_confidence_recalibration.json")
 DEFAULT_RECALIBRATION_TXT_PATH = Path("tae_confidence_recalibration_summary.txt")
+EVIDENCE_REGISTRY_CONSUMER_MODULE = (
+    "research_core/evidence_engine/evidence_registry.py"
+)
 SCHEMA_VERSION = 1
 SCHEMA_NAME = "tae_confidence_recalibration"
 

@@ -531,11 +531,6 @@ class EcosystemInventoryAudit:
 
         checks = [
             (
-                "research_core/recalibration/confidence_recalibration.py",
-                "Evidence Engine",
-                "Confidence recalibration outputs not registered as evidence items",
-            ),
-            (
                 "research_core/evolution/strategy_evolution.py",
                 "Phase VIII strategy_evolution daily runner",
                 "Phase V evolution manager parallel to Phase VIII pipeline",
@@ -567,6 +562,15 @@ class EcosystemInventoryAudit:
 
             if not is_regional_validation_wired_in_promotion_gate():
                 missing.append(MISSING_CONNECTION_REGIONAL_PROMOTION_GATE)
+
+        if "research_core/recalibration/confidence_recalibration.py" in module_paths:
+            from research_core.evidence_engine.confidence_registration import (
+                MISSING_CONNECTION_CONFIDENCE_EVIDENCE,
+                is_confidence_wired_in_registry,
+            )
+
+            if not is_confidence_wired_in_registry():
+                missing.append(MISSING_CONNECTION_CONFIDENCE_EVIDENCE)
 
         if "research_core/performance/strategic_performance_auditor.py" in module_paths:
             from research_core.performance.performance_pipeline_integration import (

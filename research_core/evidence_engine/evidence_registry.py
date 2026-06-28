@@ -28,6 +28,9 @@ from research_core.evidence_engine.evidence_report import (
     SCHEMA_NAME as CANONICAL_SCHEMA,
 )
 from research_core.evidence_engine.evidence_gap_registration import EVIDENCE_GAP_REPORT_PATH
+from research_core.evidence_engine.confidence_registration import (
+    CONFIDENCE_RECALIBRATION_REPORT_PATH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,7 @@ class _SourceBundle:
     profit_attribution: dict[str, Any] | None = None
     simulation_lab: dict[str, Any] | None = None
     evidence_gap: dict[str, Any] | None = None
+    confidence_recalibration: dict[str, Any] | None = None
     flags: list[str] = field(default_factory=list)
     contradictions: list[EvidenceContradiction] = field(default_factory=list)
 
@@ -95,6 +99,7 @@ class _SourceBundle:
             PROFIT_ATTRIBUTION_PATH.name: self.profit_attribution is not None,
             SIMULATION_LAB_PATH.name: self.simulation_lab is not None,
             EVIDENCE_GAP_REPORT_PATH.name: self.evidence_gap is not None,
+            CONFIDENCE_RECALIBRATION_REPORT_PATH.name: self.confidence_recalibration is not None,
         }
 
 
@@ -151,6 +156,7 @@ def _load_sources() -> _SourceBundle:
         profit_attribution=_load_json(PROFIT_ATTRIBUTION_PATH),
         simulation_lab=_load_json(SIMULATION_LAB_PATH),
         evidence_gap=_load_json(EVIDENCE_GAP_REPORT_PATH),
+        confidence_recalibration=_load_json(CONFIDENCE_RECALIBRATION_REPORT_PATH),
     )
     _cross_check_closed_freeze_sources(bundle)
     return bundle
@@ -759,6 +765,9 @@ class EvidenceRegistry:
         return len(items)
 
     def build_report(self) -> EvidenceEngineReport:
+        from research_core.evidence_engine.confidence_registration import (
+            build_confidence_registration,
+        )
         from research_core.evidence_engine.evidence_gap_registration import (
             build_evidence_gap_registration,
         )
@@ -781,6 +790,10 @@ class EvidenceRegistry:
             Path("."),
             bundle.evidence_gap,
         )
+        confidence_registration = build_confidence_registration(
+            Path("."),
+            bundle.confidence_recalibration,
+        )
 
         return EvidenceEngineReport(
             verdict=verdict,
@@ -793,6 +806,7 @@ class EvidenceRegistry:
             contradictions=contradictions,
             sources_loaded=bundle.sources_loaded,
             evidence_gap_registration=evidence_gap_registration,
+            confidence_registration=confidence_registration,
         )
 
 

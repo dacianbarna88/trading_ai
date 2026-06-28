@@ -66,6 +66,7 @@ class QuickHealthReport:
     accounting_integrity_status: str | None
     evidence_gap_registration_status: str | None
     regional_validation_integration_status: str | None
+    confidence_registration_status: str | None
     git_status: str
     protected_files_unchanged: bool
     live_ops_summary: dict[str, Any]
@@ -99,6 +100,7 @@ class QuickHealthReport:
             "regional_validation_integration_status": (
                 self.regional_validation_integration_status
             ),
+            "confidence_registration_status": self.confidence_registration_status,
             "git_status": self.git_status,
             "protected_files_unchanged": self.protected_files_unchanged,
             "live_ops_summary": dict(self.live_ops_summary),
@@ -142,6 +144,7 @@ class QuickHealthReport:
             f"12e. Evidence gap registration: {self.evidence_gap_registration_status or 'N/A'}",
             f"12f. Regional validation integration: "
             f"{self.regional_validation_integration_status or 'N/A'}",
+            f"12g. Confidence registration: {self.confidence_registration_status or 'N/A'}",
             "",
             "13. Bot process status (read-only):",
             f"    {self.live_ops_summary.get('bot_process', 'N/A')}",
