@@ -43,6 +43,7 @@ OPTIONAL_LAYER_REPORTS = {
     "contracts": Path("tae_contract_report.json"),
     "adapters": Path("tae_adapter_report.json"),
     "performance_pipeline": Path("tae_performance_pipeline_report.json"),
+    "evidence_gap_registration": Path("tae_evidence_gap_registration.json"),
 }
 
 ORCHESTRATOR_JSON = Path("tae_ecosystem_orchestrator.json")
@@ -157,6 +158,10 @@ class QuickHealthWrapper:
             or state.verdicts.get("performance_pipeline"),
             strategic_performance_status=state.verdicts.get("strategic_performance"),
             accounting_integrity_status=state.verdicts.get("accounting_integrity"),
+            evidence_gap_registration_status=(
+                state.verdicts.get("evidence_gap_registration")
+                or layer_status.get("evidence_gap_registration")
+            ),
             git_status=git_status,
             protected_files_unchanged=protected_ok,
             live_ops_summary=live_ops,
@@ -329,6 +334,12 @@ class QuickHealthWrapper:
                 "OK" if layer_status.get("performance_pipeline") else "WARN",
                 layer_status.get("performance_pipeline")
                 or "pipeline report missing — run tae_phase9_performance_pipeline_demo.py",
+            ),
+            QuickHealthCheckItem(
+                "evidence_gap_registration",
+                "OK" if layer_status.get("evidence_gap_registration") else "WARN",
+                layer_status.get("evidence_gap_registration")
+                or "registration report missing — run tae_phase9_evidence_gap_registration_demo.py",
             ),
             QuickHealthCheckItem(
                 "bot_process",

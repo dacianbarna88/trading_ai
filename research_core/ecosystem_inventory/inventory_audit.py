@@ -531,11 +531,6 @@ class EcosystemInventoryAudit:
 
         checks = [
             (
-                "research_core/evidence_gap/evidence_gap.py",
-                "Evidence Engine",
-                "Evidence gap analyzer not wired to evidence_registry refresh",
-            ),
-            (
                 "research_core/regional_validation/regional_gap_closure.py",
                 "Evidence Engine / Strategy Evolution",
                 "Regional validation not connected to promotion gate",
@@ -559,6 +554,15 @@ class EcosystemInventoryAudit:
         for path, _target, message in checks:
             if path in module_paths:
                 missing.append(message)
+
+        if "research_core/evidence_gap/evidence_gap.py" in module_paths:
+            from research_core.evidence_engine.evidence_gap_registration import (
+                MISSING_CONNECTION_EVIDENCE_GAP_REGISTRY,
+                is_evidence_gap_wired_in_registry,
+            )
+
+            if not is_evidence_gap_wired_in_registry():
+                missing.append(MISSING_CONNECTION_EVIDENCE_GAP_REGISTRY)
 
         if "research_core/performance/strategic_performance_auditor.py" in module_paths:
             from research_core.performance.performance_pipeline_integration import (

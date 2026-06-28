@@ -64,6 +64,7 @@ class QuickHealthReport:
     performance_pipeline_status: str | None
     strategic_performance_status: str | None
     accounting_integrity_status: str | None
+    evidence_gap_registration_status: str | None
     git_status: str
     protected_files_unchanged: bool
     live_ops_summary: dict[str, Any]
@@ -93,6 +94,7 @@ class QuickHealthReport:
             "performance_pipeline_status": self.performance_pipeline_status,
             "strategic_performance_status": self.strategic_performance_status,
             "accounting_integrity_status": self.accounting_integrity_status,
+            "evidence_gap_registration_status": self.evidence_gap_registration_status,
             "git_status": self.git_status,
             "protected_files_unchanged": self.protected_files_unchanged,
             "live_ops_summary": dict(self.live_ops_summary),
@@ -133,6 +135,7 @@ class QuickHealthReport:
             f"12b. Performance pipeline status: {self.performance_pipeline_status or 'N/A'}",
             f"12c. Strategic performance: {self.strategic_performance_status or 'N/A'}",
             f"12d. Accounting integrity audit: {self.accounting_integrity_status or 'N/A'}",
+            f"12e. Evidence gap registration: {self.evidence_gap_registration_status or 'N/A'}",
             "",
             "13. Bot process status (read-only):",
             f"    {self.live_ops_summary.get('bot_process', 'N/A')}",

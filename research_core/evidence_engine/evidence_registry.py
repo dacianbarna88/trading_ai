@@ -27,6 +27,7 @@ from research_core.evidence_engine.evidence_report import (
     ImplementationEligibility,
     SCHEMA_NAME as CANONICAL_SCHEMA,
 )
+from research_core.evidence_engine.evidence_gap_registration import EVIDENCE_GAP_REPORT_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class _SourceBundle:
     exit_counterfactual: dict[str, Any] | None = None
     profit_attribution: dict[str, Any] | None = None
     simulation_lab: dict[str, Any] | None = None
+    evidence_gap: dict[str, Any] | None = None
     flags: list[str] = field(default_factory=list)
     contradictions: list[EvidenceContradiction] = field(default_factory=list)
 
@@ -92,6 +94,7 @@ class _SourceBundle:
             EXIT_COUNTERFACTUAL_PATH.name: self.exit_counterfactual is not None,
             PROFIT_ATTRIBUTION_PATH.name: self.profit_attribution is not None,
             SIMULATION_LAB_PATH.name: self.simulation_lab is not None,
+            EVIDENCE_GAP_REPORT_PATH.name: self.evidence_gap is not None,
         }
 
 
@@ -147,6 +150,7 @@ def _load_sources() -> _SourceBundle:
         exit_counterfactual=_load_json(EXIT_COUNTERFACTUAL_PATH),
         profit_attribution=_load_json(PROFIT_ATTRIBUTION_PATH),
         simulation_lab=_load_json(SIMULATION_LAB_PATH),
+        evidence_gap=_load_json(EVIDENCE_GAP_REPORT_PATH),
     )
     _cross_check_closed_freeze_sources(bundle)
     return bundle
@@ -755,6 +759,10 @@ class EvidenceRegistry:
         return len(items)
 
     def build_report(self) -> EvidenceEngineReport:
+        from research_core.evidence_engine.evidence_gap_registration import (
+            build_evidence_gap_registration,
+        )
+
         items = self.list_all()
         confirmed = sum(1 for i in items if i.status == EvidenceStatus.CONFIRMED)
         inconclusive = sum(1 for i in items if i.status == EvidenceStatus.INCONCLUSIVE)
@@ -769,6 +777,11 @@ class EvidenceRegistry:
         else:
             verdict = EvidenceEngineVerdict.EVIDENCE_ENGINE_SOURCE_OF_TRUTH_ALIGNED
 
+        evidence_gap_registration = build_evidence_gap_registration(
+            Path("."),
+            bundle.evidence_gap,
+        )
+
         return EvidenceEngineReport(
             verdict=verdict,
             evidence_items=items,
@@ -779,6 +792,7 @@ class EvidenceRegistry:
             data_source_flags=flags,
             contradictions=contradictions,
             sources_loaded=bundle.sources_loaded,
+            evidence_gap_registration=evidence_gap_registration,
         )
 
 

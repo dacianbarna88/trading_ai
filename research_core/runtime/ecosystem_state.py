@@ -131,6 +131,7 @@ class EcosystemStateLoader:
         paper_needs = self._paper_tracking_needs(orchestrator, paper_tracking)
         missing = self._merge_missing(inventory, orchestrator, interconnection)
         missing = self._filter_resolved_performance_missing(missing, daily_runner)
+        missing = self._filter_resolved_evidence_gap_missing(missing, evidence)
         conflicts = interconnection.get("conflict_warnings", [])
         if not isinstance(conflicts, list):
             conflicts = []
@@ -160,6 +161,11 @@ class EcosystemStateLoader:
                 else None
             ),
             "performance_pipeline": performance_pipeline.get("verdict"),
+            "evidence_gap_registration": (
+                (evidence.get("evidence_gap_registration") or {}).get("evidence_gap_status")
+                if isinstance(evidence.get("evidence_gap_registration"), dict)
+                else None
+            ),
         }
 
         return EcosystemState(
@@ -240,3 +246,19 @@ class EcosystemStateLoader:
         if not is_performance_pipeline_resolved(self._root, daily_runner or None):
             return missing
         return [item for item in missing if item != MISSING_CONNECTION_PERFORMANCE_DAILY_RUNNER]
+
+    def _filter_resolved_evidence_gap_missing(
+        self,
+        missing: list[str],
+        evidence: dict[str, Any],
+    ) -> list[str]:
+        try:
+            from research_core.evidence_engine.evidence_gap_registration import (
+                MISSING_CONNECTION_EVIDENCE_GAP_REGISTRY,
+                is_evidence_gap_registration_resolved,
+            )
+        except ImportError:
+            return missing
+        if not is_evidence_gap_registration_resolved(self._root, evidence or None):
+            return missing
+        return [item for item in missing if item != MISSING_CONNECTION_EVIDENCE_GAP_REGISTRY]

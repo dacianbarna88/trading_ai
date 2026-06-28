@@ -107,6 +107,7 @@ class EvidenceEngineReport:
     data_source_flags: list[str] = field(default_factory=list)
     contradictions: list[EvidenceContradiction] = field(default_factory=list)
     sources_loaded: dict[str, bool] = field(default_factory=dict)
+    evidence_gap_registration: dict[str, Any] | None = None
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -125,6 +126,9 @@ class EvidenceEngineReport:
             "data_source_flags": list(self.data_source_flags),
             "contradictions": [c.to_dict() for c in self.contradictions],
             "sources_loaded": dict(self.sources_loaded),
+            "evidence_gap_registration": dict(self.evidence_gap_registration)
+            if self.evidence_gap_registration
+            else None,
             "evidence_items": [item.to_dict() for item in self.evidence_items],
         }
 
@@ -147,6 +151,17 @@ class EvidenceEngineReport:
             lines.append("Surse JSON încărcate:")
             for name, loaded in sorted(self.sources_loaded.items()):
                 lines.append(f"  {name}: {'yes' if loaded else 'no'}")
+        if self.evidence_gap_registration:
+            gap = self.evidence_gap_registration
+            lines.extend([
+                "",
+                "===== EVIDENCE GAP REGISTRATION =====",
+                f"  evidence_gap_registered: {gap.get('evidence_gap_registered')}",
+                f"  evidence_gap_status: {gap.get('evidence_gap_status')}",
+                f"  evidence_gap_source_report: {gap.get('evidence_gap_source_report')}",
+                f"  evidence_gap_last_loaded: {gap.get('evidence_gap_last_loaded')}",
+                f"  evidence_gap_warning_count: {gap.get('evidence_gap_warning_count')}",
+            ])
         if self.contradictions:
             lines.extend(["", "Contradicții detectate:"])
             for c in self.contradictions:
