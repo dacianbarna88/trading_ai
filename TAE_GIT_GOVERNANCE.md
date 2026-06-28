@@ -214,7 +214,8 @@ Tags mark **reproducible ecosystem checkpoints**. Use annotated tags with a mess
 | **v1.x** | `v1.0`, `v1.1` | Protocol/governance or major ecosystem milestones |
 | **v2.x** | `v2.0` | Breaking architecture or constitution revisions |
 | **Phase checkpoint** | `tae-phase-viii-complete` | All Phase VIII deliverables merged and validated |
-| **Stable checkpoint** | `stable-2026-06-28` | Orchestrator + runtime + evidence aligned; demos pass |
+| **Stable checkpoint** | `tae-v9.6-stable` @ `b2bbd1e` | TAE V9.6 — IX.5 integration complete; runtime HEALTHY; backlog NONE; official quick health |
+| **Prior checkpoint** | `stable-2026-06-28` | Orchestrator + runtime + evidence aligned; demos pass |
 
 ### Tag message should include
 

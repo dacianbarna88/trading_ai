@@ -564,6 +564,8 @@ python3 tae_phase9_runtime_foundation_demo.py
 | 1.1 | 2026-06-28 | Ecosystem constitution, decision hierarchy, knowledge evolution, architecture review process, mathematical governance |
 | 1.0 | 2026-06-28 | Initial protocol: governance, canonical modules, validation, integration, paper-only default |
 
+**Stable release:** TAE V9.6 Stable (`b2bbd1e`) — Sprint IX.6; see `TAE_PROJECT_STATUS.md` and `archive/v9_6_stable/`.
+
 ---
 
 *TAE Development Protocol v1.1 — Documentation only. No runtime behavior change.*

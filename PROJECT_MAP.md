@@ -102,6 +102,8 @@ NO_AUTO_EXECUTION
 python3 tae_quick_health_check.py
 ```
 
+**TAE V9.6 Stable** (Sprint IX.6) — official ecosystem checkpoint at `b2bbd1e`. See `TAE_PROJECT_STATUS.md` and `archive/v9_6_stable/`.
+
 Legacy learning stack runner (not daily quick health):
 
 ```bash
