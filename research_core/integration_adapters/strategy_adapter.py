@@ -50,4 +50,36 @@ class StrategyAdapter(BaseAdapter):
     def load_strategy_state_for_orchestrator(cls, root: str | None = None) -> dict[str, Any]:
         """Read-only approved path for orchestrator to consume strategy evolution state."""
         adapter = cls(root=root or ".")
-        return adapter.to_contract_payload()
+        loaded = adapter.load_source()
+        validation = adapter.validate_contract_payload()
+        contract_payload = adapter.to_contract_payload()
+        primary = loaded.sources.get(cls.PRIMARY_REPORT) or {}
+
+        missing_step_reports = [
+            name
+            for name in cls.CANONICAL_REPORTS
+            if name != cls.PRIMARY_REPORT and loaded.sources.get(name) is None
+        ]
+
+        if loaded.missing_reports:
+            state_completeness = "DEGRADED"
+        elif missing_step_reports:
+            state_completeness = "PARTIAL"
+        else:
+            state_completeness = "FULL"
+
+        daily_runner_verdict = primary.get("verdict") if primary else None
+        if not daily_runner_verdict and loaded.missing_reports:
+            daily_runner_verdict = "STRATEGY_EVOLUTION_STATE_DEGRADED"
+
+        contract_payload["contract_validation"] = validation
+        contract_payload["strategy_state_completeness"] = state_completeness
+        contract_payload["missing_step_reports"] = missing_step_reports
+        contract_payload["missing_primary_report"] = bool(loaded.missing_reports)
+        contract_payload["daily_runner_verdict"] = daily_runner_verdict
+        contract_payload["promotion_gate"] = loaded.sources.get("tae_strategy_promotion_gate.json")
+        contract_payload["paper_tracking"] = loaded.sources.get("tae_paper_tracking_log.json")
+        contract_payload["adapter_path"] = (
+            "StrategyAdapter.load_strategy_state_for_orchestrator()"
+        )
+        return contract_payload
