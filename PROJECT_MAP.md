@@ -28,7 +28,11 @@ Master Intelligence Score
 
 ## Core Daily Runner
 
-- `daily_intelligence_runner.py` — OK
+- `tae_quick_health_check.py` — OK (official quick health entry point)
+
+## Legacy Daily Ops (not canonical quick health)
+
+- `daily_intelligence_runner.py` — LEGACY (V32 learning stack; use quick health for daily ops)
 
 ## Decision Registry & Outcome
 
@@ -93,6 +97,12 @@ NO_AUTO_EXECUTION
 ```
 
 ## Operational Command
+
+```bash
+python3 tae_quick_health_check.py
+```
+
+Legacy learning stack runner (not daily quick health):
 
 ```bash
 python3 daily_intelligence_runner.py

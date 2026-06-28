@@ -528,11 +528,17 @@ When ChatGPT Architect and Codex Implementer disagree, **measured reports and ve
 ## Appendix A — Recommended Daily Operator Command
 
 ```bash
+python3 tae_quick_health_check.py
+```
+
+Official read-only quick health check consolidating Phase IX runtime health, live-ops readiness signals, and ecosystem artifact status. Does not start/stop bot or broker.
+
+For full ecosystem regeneration (optional, not required daily):
+
+```bash
 python3 tae_phase8_ecosystem_orchestrator_demo.py
 python3 tae_phase9_runtime_foundation_demo.py
 ```
-
-Use Orchestrator as the daily ecosystem intelligence entry point. Use Runtime Foundation for state, health, and learning memory.
 
 ---
 
@@ -547,6 +553,7 @@ Use Orchestrator as the daily ecosystem intelligence entry point. Use Runtime Fo
 | `tae_strategy_evolution_daily_runner.json` | Strategy evolution pipeline summary |
 | `tae_runtime_foundation.json` | Runtime state, health, workflow |
 | `tae_runtime_learning_memory.json` | Persistent learning snapshot |
+| `tae_quick_health_check.json` | Official daily quick health summary |
 
 ---
 
