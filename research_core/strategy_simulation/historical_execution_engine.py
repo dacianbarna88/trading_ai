@@ -83,73 +83,51 @@ class HistoricalExecutionEngine:
 
         checkpoint = HistoricalExecutionCheckpointStore()
         checkpoint.load()
-        completed_ids = checkpoint.completed_ids()
+        processed_ids = checkpoint.processed_ids()
 
-        pending_jobs = [
-            job
-            for job in jobs
-            if str(job.get("research_job_id", "")) not in completed_ids
-            and str(job.get("research_status", "")) == "RESEARCH_QUEUED"
-        ]
+        pending_jobs = sorted(
+            (
+                job
+                for job in jobs
+                if str(job.get("research_job_id", "")) not in processed_ids
+                and str(job.get("research_status", "")) == "RESEARCH_QUEUED"
+            ),
+            key=lambda item: str(item.get("research_job_id", "")),
+        )
 
         batch_jobs = pending_jobs[:batch_size]
         runner = StrategyBacktestRunner(self._root)
         batches_executed = 0
+        jobs_processed_this_run = 0
 
         if batch_jobs:
             batches_executed = 1
             for job in batch_jobs:
                 job_id = str(job.get("research_job_id", ""))
                 strategy_id = str(job.get("strategy_id", ""))
-                strategy = strategy_map.get(strategy_id)
-                if strategy is None:
+                try:
+                    result = self._execute_job(job, strategy_map, runner, data)
+                except Exception as exc:
+                    logger.exception("Job %s failed with exception", job_id)
                     result = ExecutionJobResult(
                         research_job_id=job_id,
                         strategy_id=strategy_id,
                         simulation_id=str(job.get("simulation_id", "")),
                         market=str(job.get("market", "")),
                         time_horizon=str(job.get("time_horizon", "")),
-                        execution_status="BLOCKED",
-                        block_reason=f"Strategy definition missing for {strategy_id}",
-                    )
-                    checkpoint.upsert(result)
-                    continue
-
-                outcome = runner.run_job(
-                    market=str(job.get("market", "")),
-                    time_horizon=str(job.get("time_horizon", "")),
-                    strategy=strategy,
-                    data=data,
-                )
-
-                if outcome.status == "COMPLETED" and outcome.metrics:
-                    result = ExecutionJobResult(
-                        research_job_id=job_id,
-                        strategy_id=strategy_id,
-                        simulation_id=str(job.get("simulation_id", "")),
-                        market=str(job.get("market", "")),
-                        time_horizon=str(job.get("time_horizon", "")),
-                        execution_status="COMPLETED",
-                        metrics=outcome.metrics,
-                        trade_count=outcome.trade_count,
-                        tickers_used=outcome.tickers_used,
-                    )
-                else:
-                    result = ExecutionJobResult(
-                        research_job_id=job_id,
-                        strategy_id=strategy_id,
-                        simulation_id=str(job.get("simulation_id", "")),
-                        market=str(job.get("market", "")),
-                        time_horizon=str(job.get("time_horizon", "")),
-                        execution_status="BLOCKED",
-                        block_reason=outcome.block_reason or "Backtest blocked",
-                        trade_count=outcome.trade_count,
-                        tickers_used=outcome.tickers_used,
+                        execution_status="FAILED",
+                        block_reason=f"Execution exception: {exc}",
                     )
 
                 checkpoint.upsert(result)
-
-            checkpoint.persist()
+                checkpoint.persist()
+                jobs_processed_this_run += 1
+        elif pending_jobs:
+            self._warnings.append(
+                f"No jobs processed despite {len(pending_jobs)} pending — batch_size={batch_size}"
+            )
+        elif len(processed_ids) < len(jobs):
+            self._warnings.append("All jobs appear processed but counts mismatch — verify checkpoint.")
 
         all_results = checkpoint.all_results()
         completed = [r for r in all_results if r.execution_status == "COMPLETED"]
@@ -185,8 +163,10 @@ class HistoricalExecutionEngine:
             jobs_blocked=len(blocked),
             jobs_failed=len(failed),
             jobs_pending=pending_count,
+            jobs_processed_this_run=jobs_processed_this_run,
             batch_size=batch_size,
             batches_executed=batches_executed,
+            last_checkpoint_saved_at=checkpoint.last_saved_at,
             data_availability={
                 "available": data.available,
                 "ohlcv_available": data.ohlcv_available,
@@ -238,8 +218,10 @@ class HistoricalExecutionEngine:
             jobs_blocked=0,
             jobs_failed=0,
             jobs_pending=jobs_total,
+            jobs_processed_this_run=0,
             batch_size=batch_size,
             batches_executed=0,
+            last_checkpoint_saved_at=None,
             data_availability=data_payload,
             results=[],
             schema_validation_passed=False,
@@ -284,6 +266,59 @@ class HistoricalExecutionEngine:
                 if discovery_id:
                     mapping[discovery_id] = item
         return mapping
+
+    def _execute_job(
+        self,
+        job: dict[str, Any],
+        strategy_map: dict[str, dict[str, Any]],
+        runner: StrategyBacktestRunner,
+        data: Any,
+    ) -> ExecutionJobResult:
+        job_id = str(job.get("research_job_id", ""))
+        strategy_id = str(job.get("strategy_id", ""))
+        strategy = strategy_map.get(strategy_id)
+        if strategy is None:
+            return ExecutionJobResult(
+                research_job_id=job_id,
+                strategy_id=strategy_id,
+                simulation_id=str(job.get("simulation_id", "")),
+                market=str(job.get("market", "")),
+                time_horizon=str(job.get("time_horizon", "")),
+                execution_status="BLOCKED",
+                block_reason=f"Strategy definition missing for {strategy_id}",
+            )
+
+        outcome = runner.run_job(
+            market=str(job.get("market", "")),
+            time_horizon=str(job.get("time_horizon", "")),
+            strategy=strategy,
+            data=data,
+        )
+
+        if outcome.status == "COMPLETED" and outcome.metrics:
+            return ExecutionJobResult(
+                research_job_id=job_id,
+                strategy_id=strategy_id,
+                simulation_id=str(job.get("simulation_id", "")),
+                market=str(job.get("market", "")),
+                time_horizon=str(job.get("time_horizon", "")),
+                execution_status="COMPLETED",
+                metrics=outcome.metrics,
+                trade_count=outcome.trade_count,
+                tickers_used=outcome.tickers_used,
+            )
+
+        return ExecutionJobResult(
+            research_job_id=job_id,
+            strategy_id=strategy_id,
+            simulation_id=str(job.get("simulation_id", "")),
+            market=str(job.get("market", "")),
+            time_horizon=str(job.get("time_horizon", "")),
+            execution_status="BLOCKED",
+            block_reason=outcome.block_reason or "Backtest blocked",
+            trade_count=outcome.trade_count,
+            tickers_used=outcome.tickers_used,
+        )
 
     def _determine_verdict(
         self,

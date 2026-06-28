@@ -102,6 +102,7 @@ class HistoricalExecutionReport:
     jobs_blocked: int
     jobs_failed: int
     jobs_pending: int
+    jobs_processed_this_run: int
     batch_size: int
     batches_executed: int
     data_availability: dict[str, Any]
@@ -110,6 +111,7 @@ class HistoricalExecutionReport:
     warnings: list[str] = field(default_factory=list)
     protected_files_unchanged: bool = True
     input_files_unchanged: bool = True
+    last_checkpoint_saved_at: str | None = None
     safety_mode: str = EXECUTION_SAFETY_BANNER
     research_only: bool = True
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -127,8 +129,10 @@ class HistoricalExecutionReport:
             "jobs_blocked": self.jobs_blocked,
             "jobs_failed": self.jobs_failed,
             "jobs_pending": self.jobs_pending,
+            "jobs_processed_this_run": self.jobs_processed_this_run,
             "batch_size": self.batch_size,
             "batches_executed": self.batches_executed,
+            "last_checkpoint_saved_at": self.last_checkpoint_saved_at,
             "data_availability": dict(self.data_availability),
             "schema_validation_passed": self.schema_validation_passed,
             "execution_results": [result.to_dict() for result in self.results],
@@ -154,11 +158,18 @@ class HistoricalExecutionReport:
             f"  Jobs blocked: {self.jobs_blocked}",
             f"  Jobs failed: {self.jobs_failed}",
             f"  Jobs pending: {self.jobs_pending}",
+            f"  Jobs processed this run: {self.jobs_processed_this_run}",
             f"  Batch size: {self.batch_size}",
             f"  Batches executed this run: {self.batches_executed}",
-            "",
-            "===== DATA AVAILABILITY =====",
         ]
+        if self.last_checkpoint_saved_at:
+            lines.append(f"  Last checkpoint saved: {self.last_checkpoint_saved_at}")
+        lines.extend(
+            [
+                "",
+                "===== DATA AVAILABILITY =====",
+            ]
+        )
         for key, value in self.data_availability.items():
             lines.append(f"  {key}: {value}")
 
@@ -220,6 +231,7 @@ class HistoricalExecutionCheckpointStore:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or CHECKPOINT_PATH
         self._results: dict[str, ExecutionJobResult] = {}
+        self._last_saved_at: str | None = None
 
     @property
     def path(self) -> Path:
@@ -245,6 +257,7 @@ class HistoricalExecutionCheckpointStore:
             if result is not None:
                 restored[job_id] = result
         self._results = restored
+        self._last_saved_at = payload.get("saved_at") if isinstance(payload.get("saved_at"), str) else None
         return True
 
     def get(self, job_id: str) -> ExecutionJobResult | None:
@@ -256,14 +269,24 @@ class HistoricalExecutionCheckpointStore:
     def all_results(self) -> list[ExecutionJobResult]:
         return sorted(self._results.values(), key=lambda item: item.research_job_id)
 
-    def completed_ids(self) -> set[str]:
+    def processed_ids(self) -> set[str]:
+        """All job IDs already handled (completed, blocked, or failed)."""
         return set(self._results.keys())
 
+    def completed_ids(self) -> set[str]:
+        return self.processed_ids()
+
+    @property
+    def last_saved_at(self) -> str | None:
+        return self._last_saved_at
+
     def persist(self) -> Path:
+        saved_at = datetime.now(timezone.utc).isoformat()
+        self._last_saved_at = saved_at
         payload = {
             "version": SCHEMA_VERSION,
             "schema": CHECKPOINT_SCHEMA,
-            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "saved_at": saved_at,
             "completed_count": len(self._results),
             "completed_jobs": {
                 job_id: result.to_dict() for job_id, result in sorted(self._results.items())

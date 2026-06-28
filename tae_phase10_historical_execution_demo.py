@@ -75,8 +75,8 @@ def main() -> int:
     logger.info("Jobs total: %d", report.jobs_total)
     logger.info("Jobs completed: %d", report.jobs_completed)
     logger.info("Jobs blocked: %d", report.jobs_blocked)
+    logger.info("Jobs processed this run: %d", report.jobs_processed_this_run)
     logger.info("Jobs pending: %d", report.jobs_pending)
-    logger.info("Schema validation: %s", report.schema_validation_passed)
     logger.info("Reports: %s, %s", json_path, txt_path)
     logger.info("Final verdict: %s", report.verdict.value)
 
