@@ -529,13 +529,7 @@ class EcosystemInventoryAudit:
         module_paths = {m.path for m in modules}
         missing: list[str] = []
 
-        checks = [
-            (
-                "research_core/evolution/strategy_evolution.py",
-                "Phase VIII strategy_evolution daily runner",
-                "Phase V evolution manager parallel to Phase VIII pipeline",
-            ),
-        ]
+        checks: list[tuple[str, str, str]] = []
         for path, _target, message in checks:
             if path in module_paths:
                 missing.append(message)
@@ -575,6 +569,15 @@ class EcosystemInventoryAudit:
 
             if not is_integration_gate_chained():
                 missing.append(MISSING_CONNECTION_INTEGRATION_GATE_CHAIN)
+
+        if "research_core/evolution/strategy_evolution.py" in module_paths:
+            from research_core.strategy_evolution.phase_v_legacy_retirement import (
+                MISSING_CONNECTION_PHASE_V_PARALLEL,
+                is_phase_v_legacy_retirement_resolved,
+            )
+
+            if not is_phase_v_legacy_retirement_resolved():
+                missing.append(MISSING_CONNECTION_PHASE_V_PARALLEL)
 
         if "research_core/performance/strategic_performance_auditor.py" in module_paths:
             from research_core.performance.performance_pipeline_integration import (

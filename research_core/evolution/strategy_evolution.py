@@ -5,6 +5,7 @@ RESEARCH_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Converts eligible strategy recommendations into auditable evolution plans.
 Legacy Phase V planning — superseded by Phase VIII Strategy Evolution Daily Runner.
+Phase IX.5F: LEGACY_COMPATIBILITY_ONLY — never an active decision pipeline.
 Does not modify live bot, config, portfolio, or execution paths.
 """
 
@@ -35,7 +36,7 @@ from research_core.validation.validation_report import DEFAULT_REPORT_PATH as VA
 
 logger = logging.getLogger(__name__)
 
-PIPELINE_ROLE = "LEGACY_PLANNING_ONLY"
+PIPELINE_ROLE = "LEGACY_COMPATIBILITY_ONLY"
 CANONICAL_PIPELINE = "research_core/strategy_evolution/daily_runner.py"
 
 

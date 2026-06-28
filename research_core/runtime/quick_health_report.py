@@ -68,6 +68,7 @@ class QuickHealthReport:
     regional_validation_integration_status: str | None
     confidence_registration_status: str | None
     integration_gate_chain_status: str | None
+    phase_v_legacy_retirement_status: str | None
     git_status: str
     protected_files_unchanged: bool
     live_ops_summary: dict[str, Any]
@@ -103,6 +104,7 @@ class QuickHealthReport:
             ),
             "confidence_registration_status": self.confidence_registration_status,
             "integration_gate_chain_status": self.integration_gate_chain_status,
+            "phase_v_legacy_retirement_status": self.phase_v_legacy_retirement_status,
             "git_status": self.git_status,
             "protected_files_unchanged": self.protected_files_unchanged,
             "live_ops_summary": dict(self.live_ops_summary),
@@ -148,6 +150,7 @@ class QuickHealthReport:
             f"{self.regional_validation_integration_status or 'N/A'}",
             f"12g. Confidence registration: {self.confidence_registration_status or 'N/A'}",
             f"12h. Integration gate chain: {self.integration_gate_chain_status or 'N/A'}",
+            f"12i. Phase V legacy retirement: {self.phase_v_legacy_retirement_status or 'N/A'}",
             "",
             "13. Bot process status (read-only):",
             f"    {self.live_ops_summary.get('bot_process', 'N/A')}",

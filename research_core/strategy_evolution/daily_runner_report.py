@@ -88,6 +88,8 @@ class DailyRunnerReport:
     promotion_review_candidate_id: str | None
     paper_tracking_needs: list[PaperTrackingNeed]
     protected_files_unchanged: bool
+    performance_pipeline_reference: dict[str, Any] | None = None
+    phase_v_legacy_status: dict[str, Any] | None = None
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -107,6 +109,8 @@ class DailyRunnerReport:
             "promotion_review_candidate_id": self.promotion_review_candidate_id,
             "paper_tracking_needs": [need.to_dict() for need in self.paper_tracking_needs],
             "protected_files_unchanged": self.protected_files_unchanged,
+            "performance_pipeline_reference": self.performance_pipeline_reference,
+            "phase_v_legacy_status": self.phase_v_legacy_status,
         }
 
     def format_text(self) -> str:

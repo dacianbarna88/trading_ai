@@ -47,6 +47,7 @@ OPTIONAL_LAYER_REPORTS = {
     "regional_validation_integration": Path("tae_regional_validation_integration.json"),
     "confidence_registration": Path("tae_confidence_registration.json"),
     "integration_gate_chain": Path("tae_integration_gate_chain.json"),
+    "phase_v_legacy_retirement": Path("tae_phase_v_legacy_retirement.json"),
 }
 
 ORCHESTRATOR_JSON = Path("tae_ecosystem_orchestrator.json")
@@ -176,6 +177,10 @@ class QuickHealthWrapper:
             integration_gate_chain_status=(
                 state.verdicts.get("integration_gate_chain")
                 or layer_status.get("integration_gate_chain")
+            ),
+            phase_v_legacy_retirement_status=(
+                state.verdicts.get("phase_v_legacy_retirement")
+                or layer_status.get("phase_v_legacy_retirement")
             ),
             git_status=git_status,
             protected_files_unchanged=protected_ok,
@@ -373,6 +378,12 @@ class QuickHealthWrapper:
                 "OK" if layer_status.get("integration_gate_chain") else "WARN",
                 layer_status.get("integration_gate_chain")
                 or "chain report missing — run tae_phase9_integration_gate_chain_demo.py",
+            ),
+            QuickHealthCheckItem(
+                "phase_v_legacy_retirement",
+                "OK" if layer_status.get("phase_v_legacy_retirement") else "WARN",
+                layer_status.get("phase_v_legacy_retirement")
+                or "retirement report missing — run tae_phase9_phase_v_legacy_retirement_demo.py",
             ),
             QuickHealthCheckItem(
                 "bot_process",

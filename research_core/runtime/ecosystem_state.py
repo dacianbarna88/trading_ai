@@ -146,6 +146,7 @@ class EcosystemStateLoader:
         missing = self._filter_resolved_regional_validation_missing(missing, promotion)
         missing = self._filter_resolved_confidence_missing(missing, evidence)
         missing = self._filter_resolved_integration_gate_chain_missing(missing, integration_gate)
+        missing = self._filter_resolved_phase_v_legacy_missing(missing, daily_runner)
         conflicts = interconnection.get("conflict_warnings", [])
         if not isinstance(conflicts, list):
             conflicts = []
@@ -201,6 +202,11 @@ class EcosystemStateLoader:
             "confidence_registration": (
                 (evidence.get("confidence_registration") or {}).get("confidence_status")
                 if isinstance(evidence.get("confidence_registration"), dict)
+                else None
+            ),
+            "phase_v_legacy_retirement": (
+                (daily_runner.get("phase_v_legacy_status") or {}).get("legacy_phase_v_status")
+                if isinstance(daily_runner.get("phase_v_legacy_status"), dict)
                 else None
             ),
         }
@@ -351,3 +357,19 @@ class EcosystemStateLoader:
         return [
             item for item in missing if item != MISSING_CONNECTION_INTEGRATION_GATE_CHAIN
         ]
+
+    def _filter_resolved_phase_v_legacy_missing(
+        self,
+        missing: list[str],
+        daily_runner: dict[str, Any],
+    ) -> list[str]:
+        try:
+            from research_core.strategy_evolution.phase_v_legacy_retirement import (
+                MISSING_CONNECTION_PHASE_V_PARALLEL,
+                is_phase_v_legacy_retirement_resolved,
+            )
+        except ImportError:
+            return missing
+        if not is_phase_v_legacy_retirement_resolved(self._root, daily_runner or None):
+            return missing
+        return [item for item in missing if item != MISSING_CONNECTION_PHASE_V_PARALLEL]

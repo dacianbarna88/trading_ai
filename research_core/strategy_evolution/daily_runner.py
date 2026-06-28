@@ -118,6 +118,12 @@ class StrategyEvolutionDailyRunner:
         tracking_needs = self._paper_tracking_needs()
         perf_ref = pipeline_reference()
 
+        from research_core.strategy_evolution.phase_v_legacy_retirement import (
+            build_phase_v_legacy_status,
+        )
+
+        phase_v_legacy_status = build_phase_v_legacy_status(Path("."))
+
         return DailyRunnerReport(
             verdict=(
                 DailyRunnerVerdict.STRATEGY_EVOLUTION_DAILY_RUNNER_READY
@@ -131,6 +137,7 @@ class StrategyEvolutionDailyRunner:
             paper_tracking_needs=tracking_needs,
             protected_files_unchanged=protected_ok,
             performance_pipeline_reference=perf_ref,
+            phase_v_legacy_status=phase_v_legacy_status,
         )
 
     def _step_definitions(self) -> list[_StepDef]:

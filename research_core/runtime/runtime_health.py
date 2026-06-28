@@ -82,6 +82,7 @@ class RuntimeHealth:
         checks.append(self._check_regional_validation_integration(state, issues))
         checks.append(self._check_confidence_registration(state, issues))
         checks.append(self._check_integration_gate_chain(state, issues))
+        checks.append(self._check_phase_v_legacy_retirement(state, issues))
 
         statuses = [check.status for check in checks]
         if HealthStatus.CRITICAL.value in statuses or any(
@@ -492,5 +493,43 @@ class RuntimeHealth:
             message=(
                 f"Integration gate chain via {chain.get('promotion_gate_source')} "
                 f"| status={status}"
+            ),
+        )
+
+    @staticmethod
+    def _check_phase_v_legacy_retirement(
+        state: EcosystemState,
+        issues: list[str],
+    ) -> HealthCheck:
+        daily_runner = state.sections.get("strategy_evolution") or {}
+        legacy = daily_runner.get("phase_v_legacy_status") or {}
+        legacy_status = state.verdicts.get("phase_v_legacy_retirement")
+
+        if not isinstance(legacy, dict) or not legacy.get("legacy_phase_v_status"):
+            issues.append("Phase V legacy status not registered in daily runner report")
+            return HealthCheck(
+                check_id="phase_v_legacy_retirement",
+                status=HealthStatus.DEGRADED.value,
+                message="Phase V legacy retirement not documented in canonical daily runner",
+            )
+
+        if legacy.get("legacy_phase_v_runtime_usage"):
+            issues.append("Runtime still consumes Phase V evolution outputs")
+            return HealthCheck(
+                check_id="phase_v_legacy_retirement",
+                status=HealthStatus.DEGRADED.value,
+                message=(
+                    f"Phase V runtime usage detected: "
+                    f"{legacy.get('legacy_phase_v_runtime_consumer_paths')}"
+                ),
+            )
+
+        status = str(legacy.get("legacy_phase_v_status", legacy_status or ""))
+        return HealthCheck(
+            check_id="phase_v_legacy_retirement",
+            status=HealthStatus.HEALTHY.value,
+            message=(
+                f"Phase V {status} — canonical pipeline "
+                f"{legacy.get('canonical_pipeline')}"
             ),
         )
