@@ -4,7 +4,7 @@ Accounting integrity auditor — V1 / IX.2A consumer
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Read-only audit of portfolio.csv accounting consistency — no modifications.
-Canonical FIFO/PnL totals are read from independent_double_entry verification JSON.
+Canonical FIFO/PnL totals are read via AccountingAdapter (accounting contract JSON).
 """
 
 from __future__ import annotations
@@ -20,10 +20,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from research_core.accounting.independent_double_entry import (
-    DEFAULT_JSON_PATH as CANONICAL_VERIFICATION_JSON,
-    load_canonical_verification,
-)
+from research_core.integration_adapters.accounting_adapter import AccountingAdapter
 from research_core.performance.performance_report import ANALYSIS_SAFETY_BANNER
 
 logger = logging.getLogger(__name__)
@@ -31,6 +28,8 @@ logger = logging.getLogger(__name__)
 PORTFOLIO_PATH = Path("portfolio.csv")
 LATEST_PORTFOLIO_PATH = Path("latest_portfolio.txt")
 BOT_LOG_PATH = Path("bot_output.log")
+
+ACCOUNTING_STATE_DEGRADED = "ACCOUNTING_STATE_DEGRADED"
 
 DEFAULT_INTEGRITY_JSON_PATH = Path("tae_accounting_integrity_audit.json")
 DEFAULT_INTEGRITY_TXT_PATH = Path("tae_accounting_integrity_audit.txt")
@@ -238,6 +237,9 @@ class AccountingIntegrityAudit:
     stale_snapshot_detected: bool
     sources_loaded: dict[str, bool] = field(default_factory=dict)
     canonical_reference: dict[str, Any] | None = None
+    accounting_state_source: str = "AccountingAdapter.load_accounting_state_for_auditor()"
+    accounting_state_completeness: str | None = None
+    csv_validation_view_only: bool = True
     safety_mode: str = ANALYSIS_SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -255,6 +257,9 @@ class AccountingIntegrityAudit:
             "stale_snapshot_detected": self.stale_snapshot_detected,
             "sources_loaded": dict(self.sources_loaded),
             "canonical_reference": self.canonical_reference,
+            "accounting_state_source": self.accounting_state_source,
+            "accounting_state_completeness": self.accounting_state_completeness,
+            "csv_validation_view_only": self.csv_validation_view_only,
             "sell_validations": [v.to_dict() for v in self.sell_validations],
             "anomalies": [a.to_dict() for a in self.anomalies],
             "focus_ticker_audits": [f.to_dict() for f in self.focus_ticker_audits],
@@ -274,6 +279,9 @@ class AccountingIntegrityAudit:
             f"  HIGH: {self.high_severity_count} | MEDIUM: {self.medium_severity_count} | "
             f"LOW: {self.low_severity_count}",
             f"Snapshot învechit (latest_portfolio.txt): {self.stale_snapshot_detected}",
+            f"Accounting state source: {self.accounting_state_source}",
+            f"Accounting state completeness: {self.accounting_state_completeness or 'N/A'}",
+            f"CSV validation view-only: {self.csv_validation_view_only}",
             "",
             "===== VALIDARE SELL (REZUMAT) =====",
         ]
@@ -362,18 +370,26 @@ class AccountingIntegrityAuditor:
     def __init__(self, store: AccountingIntegrityStore | None = None) -> None:
         self._store = store or AccountingIntegrityStore()
         self._sources_loaded: dict[str, bool] = {}
+        self._accounting_state: dict[str, Any] | None = None
+
+    def _get_accounting_state(self) -> dict[str, Any]:
+        if self._accounting_state is None:
+            self._accounting_state = AccountingAdapter.load_accounting_state_for_auditor()
+        return self._accounting_state
 
     def audit(self) -> AccountingIntegrityAudit:
         now = datetime.now(timezone.utc)
+        accounting_state = self._get_accounting_state()
         rows_raw = _read_csv_rows(PORTFOLIO_PATH)
         self._sources_loaded["portfolio.csv"] = bool(rows_raw)
         self._sources_loaded["latest_portfolio.txt"] = LATEST_PORTFOLIO_PATH.is_file()
         self._sources_loaded["bot_output.log"] = BOT_LOG_PATH.is_file()
         self._sources_loaded["tae_independent_double_entry_verification.json"] = (
-            CANONICAL_VERIFICATION_JSON.is_file()
+            not accounting_state.get("missing_primary_report", True)
         )
+        self._sources_loaded["accounting_adapter"] = True
 
-        canonical_reference = self._load_canonical_reference()
+        canonical_reference = self._load_canonical_reference(accounting_state)
 
         parsed = self._parse_rows(rows_raw)
         sell_validations, anomalies = self._validate_sells(parsed)
@@ -409,6 +425,12 @@ class AccountingIntegrityAuditor:
             stale_snapshot_detected=stale is not None,
             sources_loaded=dict(self._sources_loaded),
             canonical_reference=canonical_reference,
+            accounting_state_source=accounting_state.get(
+                "adapter_path",
+                "AccountingAdapter.load_accounting_state_for_auditor()",
+            ),
+            accounting_state_completeness=accounting_state.get("accounting_state_completeness"),
+            csv_validation_view_only=True,
             safety_mode=ANALYSIS_SAFETY_BANNER,
             generated_at=now,
         )
@@ -416,18 +438,42 @@ class AccountingIntegrityAuditor:
         self._store.persist_txt(report)
         return report
 
-    def _load_canonical_reference(self) -> dict[str, Any] | None:
-        data = load_canonical_verification()
-        if data is None:
-            return None
+    @staticmethod
+    def _load_canonical_reference(state: dict[str, Any]) -> dict[str, Any] | None:
+        if state.get("missing_primary_report"):
+            validation = state.get("contract_validation") or {}
+            return {
+                "schema": None,
+                "verdict": ACCOUNTING_STATE_DEGRADED,
+                "independent_account_value": None,
+                "independent_realized_pnl": None,
+                "independent_open_unrealized_pnl": None,
+                "independent_total_pnl": None,
+                "source_module": state.get(
+                    "adapter_path",
+                    "AccountingAdapter.load_accounting_state_for_auditor()",
+                ),
+                "adapter_id": state.get("adapter_id"),
+                "contract_validation_status": validation.get("compatibility_status"),
+                "accounting_state_completeness": state.get("accounting_state_completeness"),
+            }
+
         return {
-            "schema": data.get("schema"),
-            "verdict": data.get("verdict"),
-            "independent_account_value": data.get("independent_account_value"),
-            "independent_realized_pnl": data.get("independent_realized_pnl"),
-            "independent_open_unrealized_pnl": data.get("independent_open_unrealized_pnl"),
-            "independent_total_pnl": data.get("independent_total_pnl"),
-            "source_module": "research_core/accounting/independent_double_entry.py",
+            "schema": state.get("schema"),
+            "verdict": state.get("verdict") or state.get("primary_verdict"),
+            "independent_account_value": state.get("independent_account_value"),
+            "independent_realized_pnl": state.get("independent_realized_pnl"),
+            "independent_open_unrealized_pnl": state.get("independent_open_unrealized_pnl"),
+            "independent_total_pnl": state.get("independent_total_pnl"),
+            "source_module": state.get(
+                "adapter_path",
+                "AccountingAdapter.load_accounting_state_for_auditor()",
+            ),
+            "adapter_id": state.get("adapter_id"),
+            "contract_validation_status": (state.get("contract_validation") or {}).get(
+                "compatibility_status"
+            ),
+            "accounting_state_completeness": state.get("accounting_state_completeness"),
         }
 
     def _parse_rows(self, rows_raw: list[dict[str, str]]) -> list[ParsedTrade]:
