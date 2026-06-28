@@ -48,6 +48,9 @@ OPTIONAL_LAYER_REPORTS = {
     "confidence_registration": Path("tae_confidence_registration.json"),
     "integration_gate_chain": Path("tae_integration_gate_chain.json"),
     "phase_v_legacy_retirement": Path("tae_phase_v_legacy_retirement.json"),
+    "governance_daily_intelligence_migration": Path(
+        "tae_governance_daily_intelligence_migration.json"
+    ),
 }
 
 ORCHESTRATOR_JSON = Path("tae_ecosystem_orchestrator.json")
@@ -181,6 +184,10 @@ class QuickHealthWrapper:
             phase_v_legacy_retirement_status=(
                 state.verdicts.get("phase_v_legacy_retirement")
                 or layer_status.get("phase_v_legacy_retirement")
+            ),
+            governance_daily_intelligence_migration_status=(
+                state.verdicts.get("governance_daily_intelligence_migration")
+                or layer_status.get("governance_daily_intelligence_migration")
             ),
             git_status=git_status,
             protected_files_unchanged=protected_ok,
@@ -384,6 +391,15 @@ class QuickHealthWrapper:
                 "OK" if layer_status.get("phase_v_legacy_retirement") else "WARN",
                 layer_status.get("phase_v_legacy_retirement")
                 or "retirement report missing — run tae_phase9_phase_v_legacy_retirement_demo.py",
+            ),
+            QuickHealthCheckItem(
+                "governance_daily_intelligence_migration",
+                "OK" if layer_status.get("governance_daily_intelligence_migration") else "WARN",
+                layer_status.get("governance_daily_intelligence_migration")
+                or (
+                    "migration report missing — run "
+                    "tae_phase9_governance_daily_intelligence_migration_demo.py"
+                ),
             ),
             QuickHealthCheckItem(
                 "bot_process",

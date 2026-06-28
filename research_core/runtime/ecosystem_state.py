@@ -31,6 +31,7 @@ STATE_SOURCES: dict[str, str] = {
     "ranking": "tae_continuous_strategy_ranking.json",
     "validation": "tae_parallel_paper_validation.json",
     "inventory": "tae_ecosystem_inventory_audit.json",
+    "governance": "tae_daily_intelligence_report.json",
 }
 
 
@@ -147,6 +148,7 @@ class EcosystemStateLoader:
         missing = self._filter_resolved_confidence_missing(missing, evidence)
         missing = self._filter_resolved_integration_gate_chain_missing(missing, integration_gate)
         missing = self._filter_resolved_phase_v_legacy_missing(missing, daily_runner)
+        missing = self._filter_resolved_governance_migration_missing(missing, payloads.get("governance") or {})
         conflicts = interconnection.get("conflict_warnings", [])
         if not isinstance(conflicts, list):
             conflicts = []
@@ -207,6 +209,17 @@ class EcosystemStateLoader:
             "phase_v_legacy_retirement": (
                 (daily_runner.get("phase_v_legacy_status") or {}).get("legacy_phase_v_status")
                 if isinstance(daily_runner.get("phase_v_legacy_status"), dict)
+                else None
+            ),
+            "governance_daily_intelligence_migration": (
+                "GOVERNANCE_MODERN_INPUTS_REGISTERED"
+                if isinstance(
+                    (payloads.get("governance") or {}).get("governance_modern_inputs"),
+                    dict,
+                )
+                and (payloads.get("governance") or {})
+                .get("governance_modern_inputs", {})
+                .get("governance_modern_inputs_registered")
                 else None
             ),
         }
@@ -373,3 +386,19 @@ class EcosystemStateLoader:
         if not is_phase_v_legacy_retirement_resolved(self._root, daily_runner or None):
             return missing
         return [item for item in missing if item != MISSING_CONNECTION_PHASE_V_PARALLEL]
+
+    def _filter_resolved_governance_migration_missing(
+        self,
+        missing: list[str],
+        governance: dict[str, Any],
+    ) -> list[str]:
+        try:
+            from research_core.governance.governance_daily_intelligence_migration import (
+                MISSING_CONNECTION_GOVERNANCE_MODERN,
+                is_governance_migration_resolved,
+            )
+        except ImportError:
+            return missing
+        if not is_governance_migration_resolved(self._root, governance or None):
+            return missing
+        return [item for item in missing if item != MISSING_CONNECTION_GOVERNANCE_MODERN]

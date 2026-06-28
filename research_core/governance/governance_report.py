@@ -61,6 +61,7 @@ class DailyIntelligenceReport:
     critical_issues: list[str]
     executive_summary: list[str]
     sources_loaded: dict[str, bool] = field(default_factory=dict)
+    governance_modern_inputs: dict[str, Any] | None = None
     safety_mode: str = RESEARCH_SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -82,6 +83,9 @@ class DailyIntelligenceReport:
             "critical_issues": list(self.critical_issues),
             "executive_summary": list(self.executive_summary),
             "sources_loaded": dict(self.sources_loaded),
+            "governance_modern_inputs": dict(self.governance_modern_inputs)
+            if isinstance(self.governance_modern_inputs, dict)
+            else None,
         }
 
     def format_text(self) -> str:
@@ -258,6 +262,20 @@ class DailyIntelligenceReport:
         for line in self.executive_summary:
             lines.append(line)
         lines.append("")
+        if isinstance(self.governance_modern_inputs, dict):
+            reg = self.governance_modern_inputs
+            lines.extend([
+                "==================================================",
+                "11. GOVERNANCE MODERN INPUTS (Phase VIII/IX)",
+                "==================================================",
+                "",
+                f"- Modern inputs registered: {reg.get('governance_modern_inputs_registered')}",
+                f"- Modern input count: {reg.get('governance_modern_input_count')}",
+                f"- Legacy input count: {reg.get('governance_legacy_input_count')}",
+                f"- Legacy fallback only: {reg.get('governance_legacy_fallback_only')}",
+                f"- Strategy evolution source: {reg.get('governance_strategy_evolution_source')}",
+                "",
+            ])
         lines.append("No live trading files modified by this report.")
         lines.append("")
         return "\n".join(lines)

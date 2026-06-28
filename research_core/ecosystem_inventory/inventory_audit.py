@@ -589,10 +589,14 @@ class EcosystemInventoryAudit:
                 missing.append(MISSING_CONNECTION_PERFORMANCE_DAILY_RUNNER)
 
         if "research_core/governance/daily_intelligence.py" in module_paths:
-            missing.append(
-                "Governance daily intelligence reads legacy JSON set; "
-                "extend to Phase VIII strategy_evolution outputs"
+            from research_core.governance.governance_daily_intelligence_migration import (
+                MISSING_CONNECTION_GOVERNANCE_MODERN,
+                is_governance_migration_resolved,
             )
+
+            if not is_governance_migration_resolved():
+                missing.append(MISSING_CONNECTION_GOVERNANCE_MODERN)
+
         return missing
 
     @staticmethod

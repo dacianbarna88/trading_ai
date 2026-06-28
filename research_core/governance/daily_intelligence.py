@@ -4,6 +4,7 @@ Daily intelligence collector — Phase V Sprint A5
 RESEARCH_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Aggregates TAE ecosystem artifacts into one executive governance report.
+Phase IX.5G: consumes Phase VIII/IX canonical strategy JSON; legacy inputs are fallback only.
 Read-only — does not modify live bot, config, portfolio, or execution paths.
 """
 
@@ -16,6 +17,10 @@ from pathlib import Path
 from typing import Any
 
 from research_core.constants import RESEARCH_SAFETY_BANNER
+from research_core.governance.governance_daily_intelligence_migration import (
+    MODERN_CANONICAL_INPUT_PATHS,
+    build_governance_modern_inputs_registration,
+)
 from research_core.governance.governance_report import (
     ComponentHealth,
     DailyIntelligenceReport,
@@ -122,6 +127,10 @@ class DailyIntelligenceCollector:
         executive = self._build_executive_summary(
             ecosystem, research, learning, validation, evolution, trading, issues
         )
+        governance_modern_inputs = build_governance_modern_inputs_registration(
+            Path("."),
+            sources_loaded=dict(self._sources_loaded),
+        )
 
         return DailyIntelligenceReport(
             report_date=day,
@@ -136,6 +145,7 @@ class DailyIntelligenceCollector:
             critical_issues=issues,
             executive_summary=executive,
             sources_loaded=dict(self._sources_loaded),
+            governance_modern_inputs=governance_modern_inputs,
         )
 
     def generate_and_persist(self, report_date: str | None = None) -> DailyIntelligenceReport:
@@ -144,7 +154,11 @@ class DailyIntelligenceCollector:
         return report
 
     def _load_all(self) -> None:
-        for name, path in INPUT_PATHS.items():
+        all_paths: dict[str, Path] = dict(INPUT_PATHS)
+        for name, path in MODERN_CANONICAL_INPUT_PATHS.items():
+            all_paths[name] = path
+
+        for name, path in all_paths.items():
             if path.suffix == ".json":
                 payload = _load_json(path)
                 self._data[name] = payload
@@ -202,13 +216,24 @@ class DailyIntelligenceCollector:
         ))
 
         plans = _list_items(self._data.get("tae_strategy_evolution_plan.json"), "plans")
-        evo_status = HealthStatus.HEALTHY if plans else (
-            HealthStatus.WARNING if self._data.get("tae_strategy_evolution_plan.json") else HealthStatus.ATTENTION
-        )
+        daily_runner = self._data.get("tae_strategy_evolution_daily_runner.json")
+        if daily_runner:
+            evo_status = HealthStatus.HEALTHY
+            verdict = daily_runner.get("verdict", "?")
+            evo_detail = f"Phase VIII canonical daily runner: {verdict}"
+        elif plans:
+            evo_status = HealthStatus.WARNING
+            evo_detail = f"{len(plans)} legacy evolution plan(s) — modern pipeline preferred"
+        elif self._data.get("tae_strategy_evolution_plan.json"):
+            evo_status = HealthStatus.WARNING
+            evo_detail = "Legacy evolution plan artifact present"
+        else:
+            evo_status = HealthStatus.ATTENTION
+            evo_detail = "No strategy evolution artifacts"
         components.append(ComponentHealth(
             "Evolution Manager",
             evo_status,
-            f"{len(plans)} evolution plan(s) documented",
+            evo_detail,
         ))
 
         bot_txt = self._text.get("bot_status.txt")
@@ -315,6 +340,37 @@ class DailyIntelligenceCollector:
         }
 
     def _build_strategy_evolution(self) -> dict[str, Any]:
+        daily_runner = self._data.get("tae_strategy_evolution_daily_runner.json")
+        registry = self._data.get("tae_candidate_strategy_registry.json")
+        promotion = self._data.get("tae_strategy_promotion_gate.json")
+
+        if daily_runner or registry:
+            candidates = _list_items(registry, "candidates")
+            paper_needs = daily_runner.get("paper_tracking_needs", []) if daily_runner else []
+            if not isinstance(paper_needs, list):
+                paper_needs = []
+            review_id = (
+                daily_runner.get("promotion_review_candidate_id")
+                if daily_runner
+                else promotion.get("review_candidate_id") if promotion else None
+            )
+            return {
+                "recommendations": len(candidates) if candidates else NOT_AVAILABLE,
+                "evolution_plans": daily_runner.get("verdict", NOT_AVAILABLE)
+                if daily_runner
+                else NOT_AVAILABLE,
+                "implementation_ready": daily_runner.get("top_ranked_strategy_id", NOT_AVAILABLE)
+                if daily_runner
+                else NOT_AVAILABLE,
+                "blocked": 0 if review_id is None else 1,
+                "requiring_validation": len(paper_needs) if paper_needs else NOT_AVAILABLE,
+                "governance_strategy_evolution_source": (
+                    "tae_strategy_evolution_daily_runner.json"
+                    if daily_runner
+                    else "tae_candidate_strategy_registry.json"
+                ),
+            }
+
         rec_payload = self._data.get("tae_strategy_recommendations.json")
         recs = _list_items(rec_payload, "recommendations")
         blocked = sum(
@@ -339,6 +395,7 @@ class DailyIntelligenceCollector:
             "implementation_ready": implementation_ready if plans else NOT_AVAILABLE,
             "blocked": blocked if recs else NOT_AVAILABLE,
             "requiring_validation": requiring if plans else NOT_AVAILABLE,
+            "governance_strategy_evolution_source": "legacy_fallback",
         }
 
     def _build_priorities(self) -> list[dict[str, Any]]:

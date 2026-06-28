@@ -83,6 +83,7 @@ class RuntimeHealth:
         checks.append(self._check_confidence_registration(state, issues))
         checks.append(self._check_integration_gate_chain(state, issues))
         checks.append(self._check_phase_v_legacy_retirement(state, issues))
+        checks.append(self._check_governance_daily_intelligence_migration(state, issues))
 
         statuses = [check.status for check in checks]
         if HealthStatus.CRITICAL.value in statuses or any(
@@ -531,5 +532,49 @@ class RuntimeHealth:
             message=(
                 f"Phase V {status} — canonical pipeline "
                 f"{legacy.get('canonical_pipeline')}"
+            ),
+        )
+
+    @staticmethod
+    def _check_governance_daily_intelligence_migration(
+        state: EcosystemState,
+        issues: list[str],
+    ) -> HealthCheck:
+        governance = state.sections.get("governance") or {}
+        registration = governance.get("governance_modern_inputs") or {}
+        migration_status = state.verdicts.get("governance_daily_intelligence_migration")
+
+        if not isinstance(registration, dict) or not registration.get(
+            "governance_modern_inputs_registered"
+        ):
+            issues.append(
+                "Governance modern Phase VIII inputs not registered in daily intelligence report"
+            )
+            return HealthCheck(
+                check_id="governance_daily_intelligence_migration",
+                status=HealthStatus.DEGRADED.value,
+                message=(
+                    "Governance daily intelligence migration incomplete — "
+                    "modern canonical strategy outputs not registered"
+                ),
+            )
+
+        modern_count = int(registration.get("governance_modern_input_count") or 0)
+        if modern_count <= 0:
+            issues.append("Governance reports zero modern canonical strategy inputs loaded")
+            return HealthCheck(
+                check_id="governance_daily_intelligence_migration",
+                status=HealthStatus.DEGRADED.value,
+                message="Governance modern input count is zero",
+            )
+
+        source = registration.get("governance_strategy_evolution_source", "?")
+        return HealthCheck(
+            check_id="governance_daily_intelligence_migration",
+            status=HealthStatus.HEALTHY.value,
+            message=(
+                f"Governance modern inputs registered ({modern_count}) "
+                f"| strategy source={source} "
+                f"| legacy_fallback_only={registration.get('governance_legacy_fallback_only')}"
             ),
         )
