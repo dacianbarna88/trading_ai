@@ -79,6 +79,7 @@ class RuntimeHealth:
         checks.append(self._check_paper_tracking(state, issues))
         checks.append(self._check_performance_pipeline(state, issues))
         checks.append(self._check_evidence_gap_registration(state, issues))
+        checks.append(self._check_regional_validation_integration(state, issues))
 
         statuses = [check.status for check in checks]
         if HealthStatus.CRITICAL.value in statuses or any(
@@ -354,5 +355,47 @@ class RuntimeHealth:
             message=(
                 f"Evidence gap registered via {gap_reg.get('evidence_gap_source_report')} "
                 f"| warnings={warning_count}"
+            ),
+        )
+
+    @staticmethod
+    def _check_regional_validation_integration(
+        state: EcosystemState,
+        issues: list[str],
+    ) -> HealthCheck:
+        promotion_section = state.sections.get("promotion") or {}
+        regional_reg = promotion_section.get("regional_validation_registration")
+        regional_status = state.verdicts.get("regional_validation_integration")
+
+        if not isinstance(regional_reg, dict) or not regional_reg.get(
+            "regional_validation_registered"
+        ):
+            issues.append(
+                "Regional validation not registered in Promotion Gate refresh"
+            )
+            return HealthCheck(
+                check_id="regional_validation_integration",
+                status=HealthStatus.DEGRADED.value,
+                message="Regional validation feeder not registered in promotion gate report",
+            )
+
+        status = str(regional_reg.get("regional_validation_status", regional_status or ""))
+        if status == "REGIONAL_VALIDATION_REGISTERED_MISSING_REPORT":
+            return HealthCheck(
+                check_id="regional_validation_integration",
+                status=HealthStatus.HEALTHY.value,
+                message=(
+                    "Regional validation registered in promotion gate — source report "
+                    "missing (REGIONAL_VALIDATION_REGISTERED_MISSING_REPORT)"
+                ),
+            )
+
+        return HealthCheck(
+            check_id="regional_validation_integration",
+            status=HealthStatus.HEALTHY.value,
+            message=(
+                f"Regional validation registered via "
+                f"{regional_reg.get('regional_validation_source')} "
+                f"| refresh={regional_reg.get('regional_validation_last_refresh')}"
             ),
         )

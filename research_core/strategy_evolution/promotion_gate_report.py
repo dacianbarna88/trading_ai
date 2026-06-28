@@ -78,6 +78,7 @@ class PromotionGateReport:
     validation_verdict: str | None
     registry_verdict: str | None
     sources_loaded: dict[str, bool]
+    regional_validation_registration: dict[str, Any] | None = None
     pipeline_reference: dict[str, Any] | None = None
     safety_mode: str = SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -95,6 +96,9 @@ class PromotionGateReport:
             "validation_verdict": self.validation_verdict,
             "registry_verdict": self.registry_verdict,
             "sources_loaded": dict(self.sources_loaded),
+            "regional_validation_registration": dict(self.regional_validation_registration)
+            if self.regional_validation_registration
+            else None,
             "pipeline_reference": self.pipeline_reference,
             "entries": [entry.to_dict() for entry in self.entries],
         }
@@ -113,8 +117,20 @@ class PromotionGateReport:
             f"Validation: {self.validation_verdict or 'N/A'}",
             f"Registry: {self.registry_verdict or 'N/A'}",
             "",
-            "===== PROMOTION GATE =====",
         ]
+        if self.regional_validation_registration:
+            reg = self.regional_validation_registration
+            lines.extend([
+                "===== REGIONAL VALIDATION REGISTRATION =====",
+                f"  regional_validation_registered: {reg.get('regional_validation_registered')}",
+                f"  regional_validation_status: {reg.get('regional_validation_status')}",
+                f"  regional_validation_source: {reg.get('regional_validation_source')}",
+                f"  regional_validation_last_refresh: {reg.get('regional_validation_last_refresh')}",
+                "",
+            ])
+        lines.extend([
+            "===== PROMOTION GATE =====",
+        ])
         for entry in self.entries:
             blockers = ", ".join(entry.blockers) if entry.blockers else "none"
             lines.extend([

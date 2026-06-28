@@ -132,6 +132,7 @@ class EcosystemStateLoader:
         missing = self._merge_missing(inventory, orchestrator, interconnection)
         missing = self._filter_resolved_performance_missing(missing, daily_runner)
         missing = self._filter_resolved_evidence_gap_missing(missing, evidence)
+        missing = self._filter_resolved_regional_validation_missing(missing, promotion)
         conflicts = interconnection.get("conflict_warnings", [])
         if not isinstance(conflicts, list):
             conflicts = []
@@ -164,6 +165,13 @@ class EcosystemStateLoader:
             "evidence_gap_registration": (
                 (evidence.get("evidence_gap_registration") or {}).get("evidence_gap_status")
                 if isinstance(evidence.get("evidence_gap_registration"), dict)
+                else None
+            ),
+            "regional_validation_integration": (
+                (promotion.get("regional_validation_registration") or {}).get(
+                    "regional_validation_status"
+                )
+                if isinstance(promotion.get("regional_validation_registration"), dict)
                 else None
             ),
         }
@@ -262,3 +270,21 @@ class EcosystemStateLoader:
         if not is_evidence_gap_registration_resolved(self._root, evidence or None):
             return missing
         return [item for item in missing if item != MISSING_CONNECTION_EVIDENCE_GAP_REGISTRY]
+
+    def _filter_resolved_regional_validation_missing(
+        self,
+        missing: list[str],
+        promotion: dict[str, Any],
+    ) -> list[str]:
+        try:
+            from research_core.strategy_evolution.regional_validation_integration import (
+                MISSING_CONNECTION_REGIONAL_PROMOTION_GATE,
+                is_regional_validation_integration_resolved,
+            )
+        except ImportError:
+            return missing
+        if not is_regional_validation_integration_resolved(self._root, promotion or None):
+            return missing
+        return [
+            item for item in missing if item != MISSING_CONNECTION_REGIONAL_PROMOTION_GATE
+        ]

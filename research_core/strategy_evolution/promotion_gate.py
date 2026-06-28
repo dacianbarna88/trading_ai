@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from research_core.strategy_evolution.pipeline_integration import pipeline_reference
+from research_core.strategy_evolution.regional_validation_integration import (
+    REGIONAL_VALIDATION_REPORT_PATH,
+)
 from research_core.strategy_evolution.promotion_gate_report import (
     PROMOTION_MIN_TRADES,
     PROMOTION_SCORE_THRESHOLD,
@@ -70,6 +73,7 @@ class StrategyPromotionGate:
         ranking_payload = self._load_json(self._ranking_path)
         validation_payload = self._load_json(self._validation_path)
         registry_payload = self._load_json(self._registry_path)
+        regional_payload = self._load_json(REGIONAL_VALIDATION_REPORT_PATH)
 
         baseline_id = str(
             (ranking_payload or {}).get("baseline_candidate_id")
@@ -89,6 +93,22 @@ class StrategyPromotionGate:
             None,
         )
 
+        from research_core.strategy_evolution.regional_validation_integration import (
+            build_regional_validation_registration,
+        )
+
+        regional_validation_registration = build_regional_validation_registration(
+            Path("."),
+            regional_payload,
+        )
+
+        sources_loaded = {
+            self._ranking_path.name: ranking_payload is not None,
+            self._validation_path.name: validation_payload is not None,
+            self._registry_path.name: registry_payload is not None,
+            REGIONAL_VALIDATION_REPORT_PATH.name: regional_payload is not None,
+        }
+
         return PromotionGateReport(
             verdict=PromotionGateVerdict.STRATEGY_PROMOTION_GATE_READY,
             entries=entries,
@@ -99,11 +119,8 @@ class StrategyPromotionGate:
             if validation_payload
             else None,
             registry_verdict=str(registry_payload.get("verdict")) if registry_payload else None,
-            sources_loaded={
-                self._ranking_path.name: ranking_payload is not None,
-                self._validation_path.name: validation_payload is not None,
-                self._registry_path.name: registry_payload is not None,
-            },
+            sources_loaded=sources_loaded,
+            regional_validation_registration=regional_validation_registration,
             pipeline_reference={
                 **pipeline_reference(),
                 "pipeline_role": PIPELINE_ROLE,

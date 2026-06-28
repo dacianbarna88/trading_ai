@@ -531,11 +531,6 @@ class EcosystemInventoryAudit:
 
         checks = [
             (
-                "research_core/regional_validation/regional_gap_closure.py",
-                "Evidence Engine / Strategy Evolution",
-                "Regional validation not connected to promotion gate",
-            ),
-            (
                 "research_core/recalibration/confidence_recalibration.py",
                 "Evidence Engine",
                 "Confidence recalibration outputs not registered as evidence items",
@@ -563,6 +558,15 @@ class EcosystemInventoryAudit:
 
             if not is_evidence_gap_wired_in_registry():
                 missing.append(MISSING_CONNECTION_EVIDENCE_GAP_REGISTRY)
+
+        if "research_core/regional_validation/regional_gap_closure.py" in module_paths:
+            from research_core.strategy_evolution.regional_validation_integration import (
+                MISSING_CONNECTION_REGIONAL_PROMOTION_GATE,
+                is_regional_validation_wired_in_promotion_gate,
+            )
+
+            if not is_regional_validation_wired_in_promotion_gate():
+                missing.append(MISSING_CONNECTION_REGIONAL_PROMOTION_GATE)
 
         if "research_core/performance/strategic_performance_auditor.py" in module_paths:
             from research_core.performance.performance_pipeline_integration import (
