@@ -1,9 +1,10 @@
 """
-Accounting integrity auditor — V1
+Accounting integrity auditor — V1 / IX.2A consumer
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Read-only audit of portfolio.csv accounting consistency — no modifications.
+Canonical FIFO/PnL totals are read from independent_double_entry verification JSON.
 """
 
 from __future__ import annotations
@@ -19,6 +20,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from research_core.accounting.independent_double_entry import (
+    DEFAULT_JSON_PATH as CANONICAL_VERIFICATION_JSON,
+    load_canonical_verification,
+)
 from research_core.performance.performance_report import ANALYSIS_SAFETY_BANNER
 
 logger = logging.getLogger(__name__)
@@ -232,6 +237,7 @@ class AccountingIntegrityAudit:
     recommendations: list[IntegrityRecommendation]
     stale_snapshot_detected: bool
     sources_loaded: dict[str, bool] = field(default_factory=dict)
+    canonical_reference: dict[str, Any] | None = None
     safety_mode: str = ANALYSIS_SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -248,6 +254,7 @@ class AccountingIntegrityAudit:
             "low_severity_count": self.low_severity_count,
             "stale_snapshot_detected": self.stale_snapshot_detected,
             "sources_loaded": dict(self.sources_loaded),
+            "canonical_reference": self.canonical_reference,
             "sell_validations": [v.to_dict() for v in self.sell_validations],
             "anomalies": [a.to_dict() for a in self.anomalies],
             "focus_ticker_audits": [f.to_dict() for f in self.focus_ticker_audits],
@@ -362,6 +369,11 @@ class AccountingIntegrityAuditor:
         self._sources_loaded["portfolio.csv"] = bool(rows_raw)
         self._sources_loaded["latest_portfolio.txt"] = LATEST_PORTFOLIO_PATH.is_file()
         self._sources_loaded["bot_output.log"] = BOT_LOG_PATH.is_file()
+        self._sources_loaded["tae_independent_double_entry_verification.json"] = (
+            CANONICAL_VERIFICATION_JSON.is_file()
+        )
+
+        canonical_reference = self._load_canonical_reference()
 
         parsed = self._parse_rows(rows_raw)
         sell_validations, anomalies = self._validate_sells(parsed)
@@ -396,12 +408,27 @@ class AccountingIntegrityAuditor:
             recommendations=recommendations,
             stale_snapshot_detected=stale is not None,
             sources_loaded=dict(self._sources_loaded),
+            canonical_reference=canonical_reference,
             safety_mode=ANALYSIS_SAFETY_BANNER,
             generated_at=now,
         )
         self._store.persist(report)
         self._store.persist_txt(report)
         return report
+
+    def _load_canonical_reference(self) -> dict[str, Any] | None:
+        data = load_canonical_verification()
+        if data is None:
+            return None
+        return {
+            "schema": data.get("schema"),
+            "verdict": data.get("verdict"),
+            "independent_account_value": data.get("independent_account_value"),
+            "independent_realized_pnl": data.get("independent_realized_pnl"),
+            "independent_open_unrealized_pnl": data.get("independent_open_unrealized_pnl"),
+            "independent_total_pnl": data.get("independent_total_pnl"),
+            "source_module": "research_core/accounting/independent_double_entry.py",
+        }
 
     def _parse_rows(self, rows_raw: list[dict[str, str]]) -> list[ParsedTrade]:
         parsed: list[ParsedTrade] = []

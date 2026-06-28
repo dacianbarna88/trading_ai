@@ -1,10 +1,13 @@
 """
-Cash flow ledger auditor — Phase VI Sprint B5
+Cash flow ledger auditor — Phase VI Sprint B5 / IX.2A view layer
 
 ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Reconstructs the Trading AI account from transaction #1 to latest and proves
 every dollar is accounted for. Read-only — no portfolio modifications.
+
+Phase IX.2A: Canonical FIFO/PnL kernel is independent_double_entry.py.
+This module is a legacy replay view; cross-checks read canonical JSON first.
 """
 
 from __future__ import annotations
@@ -17,6 +20,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from research_core.accounting.independent_double_entry import (
+    DEFAULT_JSON_PATH as CANONICAL_VERIFICATION_JSON,
+    load_canonical_verification,
+)
 from research_core.accounting.ledger_report import (
     ANALYSIS_SAFETY_BANNER,
     CANONICAL_ACCOUNT_VALUE_SOURCE,
@@ -162,6 +169,7 @@ class CashFlowLedgerAuditor:
             "portfolio.csv": bool(portfolio_rows),
             "latest_portfolio.txt": bool(latest_rows),
             "config/settings.py": Path("config/settings.py").is_file(),
+            "tae_independent_double_entry_verification.json": CANONICAL_VERIFICATION_JSON.is_file(),
         }
 
         parsed = self._parse_transactions(portfolio_rows)
@@ -940,6 +948,9 @@ class CashFlowLedgerAuditor:
     ) -> list[CrossCheckResult]:
         results: list[CrossCheckResult] = []
 
+        canonical = self._load_independent_double_entry(summary)
+        results.append(canonical)
+
         dashboard_metrics = self._load_dashboard_metrics(portfolio_rows)
         if dashboard_metrics:
             dash_av = dashboard_metrics.get("computed_account_value")
@@ -993,6 +1004,42 @@ class CashFlowLedgerAuditor:
         )
 
         return results
+
+    def _load_independent_double_entry(
+        self,
+        summary: LedgerSummary,
+    ) -> CrossCheckResult:
+        data = load_canonical_verification()
+        if data is None:
+            return CrossCheckResult(
+                source="Independent Double Entry (canonical kernel)",
+                available=False,
+                notes="Run tae_independent_double_entry_demo.py for canonical verification",
+            )
+        try:
+            canonical_av = float(data.get("independent_account_value", 0))
+            canonical_realized = float(data.get("independent_realized_pnl", 0))
+            canonical_open = float(data.get("independent_open_unrealized_pnl", 0))
+            canonical_total = float(data.get("independent_total_pnl", 0))
+            return CrossCheckResult(
+                source="Independent Double Entry (canonical kernel)",
+                available=True,
+                account_value=canonical_av,
+                realized_pnl=canonical_realized,
+                open_pnl=canonical_open,
+                total_pnl=canonical_total,
+                delta_vs_ledger=round(canonical_av - summary.final_account_value, 2),
+                notes=(
+                    f"Verdict {data.get('verdict')} — canonical source of truth; "
+                    "ledger B5 is view-only cross-check"
+                ),
+            )
+        except (TypeError, ValueError) as exc:
+            return CrossCheckResult(
+                source="Independent Double Entry (canonical kernel)",
+                available=False,
+                notes=str(exc),
+            )
 
     def _load_dashboard_metrics(
         self,

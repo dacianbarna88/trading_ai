@@ -27,7 +27,8 @@ RECONCILIATION_FORMULA = (
     "Account Value = Starting Capital + Deposits - Withdrawals "
     "+ Realized PnL + Open Unrealized PnL"
 )
-CANONICAL_ACCOUNT_VALUE_SOURCE = "portfolio_csv_marks"
+CANONICAL_ACCOUNT_VALUE_SOURCE = "independent_double_entry_verification"
+CANONICAL_JSON_PATH = Path("tae_independent_double_entry_verification.json")
 MICRO_LOT_TOLERANCE = 0.05
 
 
