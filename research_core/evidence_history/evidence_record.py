@@ -37,6 +37,7 @@ class EvidenceRecordType(str, Enum):
     IMPLEMENTATION_PATCH = "IMPLEMENTATION_PATCH"
     PATCH_REVIEW = "PATCH_REVIEW"
     MISSING_EVIDENCE = "MISSING_EVIDENCE"
+    CANONICAL_REGISTRY = "CANONICAL_REGISTRY"
 
 
 class EvidencePolarity(str, Enum):
@@ -243,6 +244,7 @@ class EvidenceHistoryReport:
     blocked_count: int
     main_blockers: list[str]
     sources_loaded: dict[str, bool] = field(default_factory=dict)
+    canonical_reference: dict[str, Any] | None = None
     safety_mode: str = RESEARCH_SAFETY_BANNER
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -261,6 +263,7 @@ class EvidenceHistoryReport:
             "blocked_count": self.blocked_count,
             "main_blockers": list(self.main_blockers),
             "sources_loaded": dict(self.sources_loaded),
+            "canonical_reference": self.canonical_reference,
             "dossiers": [d.to_dict() for d in self.dossiers],
         }
 

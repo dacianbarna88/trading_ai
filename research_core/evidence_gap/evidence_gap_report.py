@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_GAP_JSON_PATH = Path("tae_evidence_gap_report.json")
 DEFAULT_GAP_TXT_PATH = Path("tae_evidence_gap_report.txt")
+CANONICAL_EVIDENCE_REPORT_PATH = Path("tae_evidence_engine_report.json")
 SCHEMA_VERSION = 1
 SCHEMA_NAME = "tae_evidence_gap_report"
 
@@ -272,6 +273,7 @@ class EvidenceGapReport:
     recommended_research_order: list[str]
     top_blocked_candidate_id: str
     sources_loaded: dict[str, bool] = field(default_factory=dict)
+    canonical_reference: dict[str, Any] | None = None
     gaps_created: int = 0
     gaps_updated: int = 0
     safety_mode: str = RESEARCH_SAFETY_BANNER
@@ -296,6 +298,7 @@ class EvidenceGapReport:
             "recommended_research_order": list(self.recommended_research_order),
             "top_blocked_candidate_id": self.top_blocked_candidate_id,
             "sources_loaded": dict(self.sources_loaded),
+            "canonical_reference": self.canonical_reference,
             "analyses": [a.to_dict() for a in self.analyses],
         }
 

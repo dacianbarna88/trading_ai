@@ -1,10 +1,10 @@
 """
-Evidence accumulator — Phase VI Sprint B2
+Evidence accumulator — Phase VI Sprint B2 / IX.2B feeder layer
 
 RESEARCH_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Aggregates evidence across TAE artifacts into per-candidate dossiers.
-Tracking only — does not modify strategy or trading logic.
+Phase IX.2B: feeds from canonical Evidence Registry; parallel memory is not SOT.
 """
 
 from __future__ import annotations
@@ -15,6 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from research_core.evidence_engine.evidence_registry import (
+    CANONICAL_REPORT_PATH,
+    load_canonical_evidence_report,
+)
 from research_core.evidence_history.evidence_record import (
     ConfidenceTrend,
     EvidenceDossier,
@@ -81,6 +85,7 @@ class EvidenceAccumulator:
 
     def accumulate(self) -> EvidenceHistoryReport:
         self._load_source_flags()
+        canonical_reference = self._load_canonical_reference()
 
         kc_payload = _load_json(KNOWLEDGE_CANDIDATES_PATH)
         candidates = _list_items(kc_payload, "candidates")
@@ -192,13 +197,34 @@ class EvidenceAccumulator:
             blocked_count=blocked,
             main_blockers=main_blockers,
             sources_loaded=dict(self._sources_loaded),
+            canonical_reference=canonical_reference,
         )
         self._store.persist(report)
         self._store.persist_txt(report)
         return report
 
+    def _load_canonical_reference(self) -> dict[str, Any] | None:
+        data = load_canonical_evidence_report()
+        if data is None:
+            return None
+        items = data.get("evidence_items", [])
+        return {
+            "schema": data.get("schema"),
+            "verdict": data.get("verdict"),
+            "registry_item_count": data.get("registry_item_count"),
+            "confirmed_count": data.get("confirmed_count"),
+            "source_module": "research_core/evidence_engine/evidence_registry.py",
+            "feeder_role": "READER",
+            "evidence_ids": [
+                str(item.get("evidence_id", ""))
+                for item in items
+                if isinstance(item, dict)
+            ],
+        }
+
     def _load_source_flags(self) -> None:
         for name, path in (
+            (str(CANONICAL_REPORT_PATH), CANONICAL_REPORT_PATH),
             ("tae_knowledge_candidates.json", KNOWLEDGE_CANDIDATES_PATH),
             ("tae_experiment_results.json", EXPERIMENT_RESULTS_PATH),
             ("tae_cross_validation_report.json", CROSS_VALIDATION_PATH),

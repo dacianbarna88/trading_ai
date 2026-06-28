@@ -1,9 +1,10 @@
 """
-Evidence gap analyzer — Phase VI Sprint B3
+Evidence gap analyzer — Phase VI Sprint B3 / IX.2B view layer
 
 RESEARCH_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION
 
 Transforms evidence history into an actionable research roadmap — planning only.
+Phase IX.2B: reads canonical Evidence Registry; does not compete as source of truth.
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from research_core.constants import RESEARCH_SAFETY_BANNER
+from research_core.evidence_engine.evidence_registry import (
+    CANONICAL_REPORT_PATH,
+    load_canonical_evidence_report,
+)
 from research_core.evidence_gap.evidence_gap_report import (
     CandidateGapAnalysis,
     EvidenceGapReport,
@@ -112,6 +117,9 @@ class EvidenceGapAnalyzer:
 
     def analyze(self) -> EvidenceGapReport:
         now = datetime.now(timezone.utc)
+
+        canonical_reference = self._load_canonical_reference()
+        self._sources_loaded[str(CANONICAL_REPORT_PATH)] = canonical_reference is not None
 
         history_payload = _load_json(EVIDENCE_HISTORY_PATH)
         self._sources_loaded["tae_evidence_history.json"] = history_payload is not None
@@ -309,6 +317,7 @@ class EvidenceGapAnalyzer:
             recommended_research_order=[a.candidate_id for a in research_order],
             top_blocked_candidate_id=top_blocked.candidate_id if top_blocked else "",
             sources_loaded=dict(self._sources_loaded),
+            canonical_reference=canonical_reference,
             gaps_created=gaps_created,
             gaps_updated=gaps_updated,
             safety_mode=RESEARCH_SAFETY_BANNER,
@@ -318,6 +327,26 @@ class EvidenceGapAnalyzer:
         self._gap_store.persist(report)
         self._gap_store.persist_txt(report)
         return report
+
+    def _load_canonical_reference(self) -> dict[str, Any] | None:
+        data = load_canonical_evidence_report()
+        if data is None:
+            return None
+        items = data.get("evidence_items", [])
+        return {
+            "schema": data.get("schema"),
+            "verdict": data.get("verdict"),
+            "registry_item_count": data.get("registry_item_count"),
+            "confirmed_count": data.get("confirmed_count"),
+            "rejected_count": data.get("rejected_count"),
+            "contradictions_count": len(data.get("contradictions", [])),
+            "source_module": "research_core/evidence_engine/evidence_registry.py",
+            "evidence_ids": [
+                str(item.get("evidence_id", ""))
+                for item in items
+                if isinstance(item, dict)
+            ][:20],
+        }
 
     def _build_priority_map(
         self,
