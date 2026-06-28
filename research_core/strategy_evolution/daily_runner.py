@@ -37,6 +37,15 @@ from research_core.strategy_evolution.daily_runner_report import (
     PaperTrackingNeed,
 )
 from research_core.strategy_evolution.pipeline_integration import CANONICAL_PIPELINE_MODULE
+from research_core.performance.performance_pipeline_integration import (
+    DAILY_RUNNER_PERFORMANCE_STEP_NAME,
+    INTEGRITY_REPORT_PATH,
+    STRATEGIC_REPORT_PATH,
+    daily_runner_performance_step_verdict,
+    pipeline_reference,
+    PERFORMANCE_PIPELINE_CONNECTED,
+    PERFORMANCE_PIPELINE_PARTIAL,
+)
 from research_core.strategy_evolution.paper_tracking_log import PaperTrackingLog
 from research_core.strategy_evolution.paper_tracking_report import (
     DEFAULT_JSON_PATH as TRACKING_JSON,
@@ -107,6 +116,7 @@ class StrategyEvolutionDailyRunner:
             self._gate_report.review_candidate_id if self._gate_report else None
         )
         tracking_needs = self._paper_tracking_needs()
+        perf_ref = pipeline_reference()
 
         return DailyRunnerReport(
             verdict=(
@@ -120,6 +130,7 @@ class StrategyEvolutionDailyRunner:
             promotion_review_candidate_id=review_candidate,
             paper_tracking_needs=tracking_needs,
             protected_files_unchanged=protected_ok,
+            performance_pipeline_reference=perf_ref,
         )
 
     def _step_definitions(self) -> list[_StepDef]:
@@ -164,12 +175,26 @@ class StrategyEvolutionDailyRunner:
                 output_txt=TRACKING_TXT.name,
                 expected_verdict=PaperTrackingVerdict.PAPER_TRACKING_LOG_READY.value,
             ),
+            _StepDef(
+                step_number=6,
+                step_name=DAILY_RUNNER_PERFORMANCE_STEP_NAME,
+                run=self._run_performance_pipeline,
+                output_json=STRATEGIC_REPORT_PATH.name,
+                output_txt=INTEGRITY_REPORT_PATH.name.replace(".json", ".txt"),
+                expected_verdict=PERFORMANCE_PIPELINE_CONNECTED,
+            ),
         ]
 
     def _run_step(self, step_def: _StepDef) -> DailyRunnerStepResult:
         try:
             verdict = step_def.run()
-            succeeded = verdict == step_def.expected_verdict
+            if step_def.step_name == DAILY_RUNNER_PERFORMANCE_STEP_NAME:
+                succeeded = verdict in {
+                    PERFORMANCE_PIPELINE_CONNECTED,
+                    PERFORMANCE_PIPELINE_PARTIAL,
+                }
+            else:
+                succeeded = verdict == step_def.expected_verdict
             return DailyRunnerStepResult(
                 step_name=step_def.step_name,
                 step_number=step_def.step_number,
@@ -230,6 +255,10 @@ class StrategyEvolutionDailyRunner:
         store.persist_txt(report)
         self._tracking_report = report
         return report.verdict.value
+
+    @staticmethod
+    def _run_performance_pipeline() -> str:
+        return daily_runner_performance_step_verdict()
 
     def _top_ranked_strategy(self) -> tuple[str | None, float | None]:
         if not self._ranking_report or not self._ranking_report.rankings:

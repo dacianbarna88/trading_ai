@@ -42,6 +42,7 @@ OPTIONAL_LAYER_REPORTS = {
     "evidence": Path("tae_evidence_integration_report.json"),
     "contracts": Path("tae_contract_report.json"),
     "adapters": Path("tae_adapter_report.json"),
+    "performance_pipeline": Path("tae_performance_pipeline_report.json"),
 }
 
 ORCHESTRATOR_JSON = Path("tae_ecosystem_orchestrator.json")
@@ -152,6 +153,10 @@ class QuickHealthWrapper:
             evidence_integration_status=layer_status.get("evidence"),
             contract_layer_status=layer_status.get("contracts"),
             adapter_layer_status=layer_status.get("adapters"),
+            performance_pipeline_status=layer_status.get("performance_pipeline")
+            or state.verdicts.get("performance_pipeline"),
+            strategic_performance_status=state.verdicts.get("strategic_performance"),
+            accounting_integrity_status=state.verdicts.get("accounting_integrity"),
             git_status=git_status,
             protected_files_unchanged=protected_ok,
             live_ops_summary=live_ops,
@@ -318,6 +323,12 @@ class QuickHealthWrapper:
                 "adapter_layer",
                 "OK" if layer_status.get("adapters") else "WARN",
                 layer_status.get("adapters") or "report missing",
+            ),
+            QuickHealthCheckItem(
+                "performance_pipeline",
+                "OK" if layer_status.get("performance_pipeline") else "WARN",
+                layer_status.get("performance_pipeline")
+                or "pipeline report missing — run tae_phase9_performance_pipeline_demo.py",
             ),
             QuickHealthCheckItem(
                 "bot_process",

@@ -61,6 +61,9 @@ class QuickHealthReport:
     evidence_integration_status: str | None
     contract_layer_status: str | None
     adapter_layer_status: str | None
+    performance_pipeline_status: str | None
+    strategic_performance_status: str | None
+    accounting_integrity_status: str | None
     git_status: str
     protected_files_unchanged: bool
     live_ops_summary: dict[str, Any]
@@ -87,6 +90,9 @@ class QuickHealthReport:
             "evidence_integration_status": self.evidence_integration_status,
             "contract_layer_status": self.contract_layer_status,
             "adapter_layer_status": self.adapter_layer_status,
+            "performance_pipeline_status": self.performance_pipeline_status,
+            "strategic_performance_status": self.strategic_performance_status,
+            "accounting_integrity_status": self.accounting_integrity_status,
             "git_status": self.git_status,
             "protected_files_unchanged": self.protected_files_unchanged,
             "live_ops_summary": dict(self.live_ops_summary),
@@ -124,6 +130,9 @@ class QuickHealthReport:
             f"10. Evidence integration status: {self.evidence_integration_status or 'N/A'}",
             f"11. Contract layer status: {self.contract_layer_status or 'N/A'}",
             f"12. Adapter layer status: {self.adapter_layer_status or 'N/A'}",
+            f"12b. Performance pipeline status: {self.performance_pipeline_status or 'N/A'}",
+            f"12c. Strategic performance: {self.strategic_performance_status or 'N/A'}",
+            f"12d. Accounting integrity audit: {self.accounting_integrity_status or 'N/A'}",
             "",
             "13. Bot process status (read-only):",
             f"    {self.live_ops_summary.get('bot_process', 'N/A')}",
