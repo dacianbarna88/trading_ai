@@ -1,5 +1,25 @@
 """Strategy Simulation Engine — Phase X Sprint X.3B/X.3C (infrastructure + historical research)."""
 
+from research_core.strategy_simulation.historical_backtest_runner import (
+    BacktestOutcome,
+    DataAvailability,
+    StrategyBacktestRunner,
+    check_data_availability,
+)
+from research_core.strategy_simulation.historical_execution_engine import (
+    DEFAULT_BATCH_SIZE,
+    HistoricalExecutionEngine,
+)
+from research_core.strategy_simulation.historical_execution_report import (
+    CHECKPOINT_PATH,
+    EXECUTION_SAFETY_BANNER,
+    ExecutionJobResult,
+    HistoricalExecutionCheckpointStore,
+    HistoricalExecutionReport,
+    HistoricalExecutionReportStore,
+    HistoricalExecutionVerdict,
+    validate_completed_metrics,
+)
 from research_core.strategy_simulation.historical_research_engine import (
     HistoricalResearchEngine,
     build_coverage_matrix,
@@ -51,12 +71,23 @@ from research_core.strategy_simulation.strategy_simulation_report import (
 )
 
 __all__ = [
+    "BacktestOutcome",
+    "CHECKPOINT_PATH",
     "DATA_REQUIREMENT_FIELDS",
+    "DEFAULT_BATCH_SIZE",
     "DEFAULT_JSON_PATH",
     "DEFAULT_TXT_PATH",
     "DISCOVERY_INPUT_PATH",
+    "DataAvailability",
+    "EXECUTION_SAFETY_BANNER",
+    "ExecutionJobResult",
     "FOUNDATION_RESEARCH_STATE",
     "FOUNDATION_SIMULATION_STATUS",
+    "HistoricalExecutionCheckpointStore",
+    "HistoricalExecutionEngine",
+    "HistoricalExecutionReport",
+    "HistoricalExecutionReportStore",
+    "HistoricalExecutionVerdict",
     "HistoricalResearchEngine",
     "HistoricalResearchJob",
     "HistoricalResearchReport",
@@ -71,6 +102,7 @@ __all__ = [
     "SIMULATION_SAFETY_BANNER",
     "SimulationQueueEntry",
     "SimulationRecord",
+    "StrategyBacktestRunner",
     "StrategySimulationReport",
     "StrategySimulationReportStore",
     "StrategySimulationVerdict",
@@ -83,6 +115,7 @@ __all__ = [
     "pending_performance_metrics",
     "research_job_id_for_index",
     "simulation_id_for_index",
+    "validate_completed_metrics",
     "validate_performance_metrics_schema",
     "validate_registry_completeness",
     "validate_research_jobs_schema",
