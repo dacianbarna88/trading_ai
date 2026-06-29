@@ -66,13 +66,49 @@ def run_checks(root: Path = Path(".")) -> dict[str, Any]:
         f"review={fin.get('corrected_realized_pnl')} snapshot={snapshot.get('corrected_realized_pnl')}",
     )
 
-    starting = float(snapshot.get("starting_capital") or 0)
-    deposits = float(snapshot.get("capital_deposits") or 0)
-    expected_av = round(starting + deposits + float(corrected_total or 0), 2)
+    effective = float(snapshot.get("effective_contributed_capital") or 0)
+    cash = float(snapshot.get("cash_available") or 0)
+    open_val = float(snapshot.get("open_positions_value") or 0)
+    av_cash = float(snapshot.get("account_value_cash_based") or snapshot.get("account_value_corrected") or 0)
+    av_capital = float(snapshot.get("account_value_capital_based") or 0)
+
     add(
-        "account_value_formula",
-        _approx_equal(snapshot.get("account_value_corrected"), expected_av),
-        f"account_value={snapshot.get('account_value_corrected')} expected={expected_av}",
+        "cash_plus_open_equals_account_value",
+        _approx_equal(cash + open_val, av_cash),
+        f"cash({cash})+open({open_val})={round(cash+open_val,2)} vs account_value={av_cash}",
+    )
+
+    add(
+        "effective_capital_plus_pnl_equals_account_value",
+        _approx_equal(effective + float(corrected_total or 0), av_capital),
+        f"effective({effective})+pnl({corrected_total})={round(effective+float(corrected_total or 0),2)} "
+        f"vs account_value={av_capital}",
+    )
+
+    add(
+        "account_value_dual_path_reconciles",
+        _approx_equal(av_cash, av_capital),
+        f"cash_based={av_cash} capital_based={av_capital} delta={round(av_cash-av_capital,4)}",
+    )
+
+    excluded = float(snapshot.get("capital_deposits_excluded_as_duplicate") or 0)
+    detected = float(snapshot.get("capital_deposits_detected") or 0)
+    add(
+        "virtual_deposit_not_double_counted",
+        excluded == 0 or excluded == detected,
+        f"detected={detected} excluded={excluded} counted={snapshot.get('capital_deposits_counted')} — "
+        + (
+            f"virtual ${excluded} excluded from effective capital; "
+            f"account value does NOT add deposit on top of $30k base"
+            if excluded > 0
+            else "no deposits to classify"
+        ),
+    )
+
+    add(
+        "capital_base_status_documented",
+        bool(snapshot.get("capital_base_status")),
+        f"status={snapshot.get('capital_base_status')}",
     )
 
     top_losers = drag.get("top_losing_trades") or snapshot.get("top_losers_corrected") or []
@@ -115,12 +151,20 @@ def run_checks(root: Path = Path(".")) -> dict[str, Any]:
         "verdict": "PASS" if all_pass else "FAIL",
         "snapshot_source": "file" if snapshot_file else "live_build",
         "canonical_metrics": {
+            "starting_capital_config": snapshot.get("starting_capital_config"),
+            "effective_contributed_capital": snapshot.get("effective_contributed_capital"),
+            "capital_deposits_detected": snapshot.get("capital_deposits_detected"),
+            "capital_deposits_counted": snapshot.get("capital_deposits_counted"),
+            "capital_deposits_excluded": snapshot.get("capital_deposits_excluded_as_duplicate"),
             "account_value_corrected": snapshot.get("account_value_corrected"),
+            "account_value_cash_based": snapshot.get("account_value_cash_based"),
+            "account_value_capital_based": snapshot.get("account_value_capital_based"),
             "corrected_total_trading_pnl": corrected_total,
             "corrected_realized_pnl": snapshot.get("corrected_realized_pnl"),
             "corrected_unrealized_pnl": snapshot.get("corrected_unrealized_pnl"),
-            "capital_deposits": snapshot.get("capital_deposits"),
             "cash_available": snapshot.get("cash_available"),
+            "open_positions_value": snapshot.get("open_positions_value"),
+            "capital_base_status": snapshot.get("capital_base_status"),
             "data_quality_status": snapshot.get("data_quality_status"),
             "top_drag_corrected": snapshot.get("top_drag_corrected"),
         },

@@ -1,25 +1,29 @@
 # TAE Accounting Snapshot
 
-**Generated:** 2026-06-29T23:05:33.961927+00:00  
+**Generated:** 2026-06-29T23:14:49.599006+00:00  
 **Mode:** CANONICAL_ACCOUNTING_READ_ONLY  
 **Data quality:** **HISTORICAL_RECONCILIATION_REQUIRED**
 
 ## Canonical metrics
 
-- Starting capital: 30000.0
-- Capital deposits: 10000.0
-- Cash available: 29954.03
+- Starting capital (config): 30000.0
+- Deposits detected / counted / excluded: 10000.0 / 0.0 / 10000.0
+- **Effective contributed capital:** 30000.0
+- Cash available: 19954.03
 - Open positions value: 10441.4351
 - **Corrected realized PnL:** 267.7422
 - **Corrected unrealized PnL:** 127.7219
 - **Corrected total trading PnL:** 395.4641
-- **Account value (corrected):** 40395.46
+- **Account value (corrected):** 30395.47
+- Account value cash-based: 30395.47
+- Account value capital-based: 30395.46
+- Capital base status: **NEEDS_OPERATOR_CONFIRMATION**
 - Raw PnL (incl. CASH rows): -10918.8484
 - Accounting adjustments excluded: -9913.58
 - Reported realized (stale): -700.3663
 - SELL mismatches: 26
 
-Formula: account_value_corrected = starting_capital + capital_deposits + corrected_total_trading_pnl
+Formula: account_value = effective_contributed_capital + corrected_total_trading_pnl = cash_available + open_positions_value
 
 ## Top drag (corrected)
 
@@ -45,4 +49,5 @@ Formula: account_value_corrected = starting_capital + capital_deposits + correct
 - MSFT | -72.072 | STOP LOSS -7.21%
 - ADBE | -64.2302 | STOP LOSS -6.42%
 
+- ⚠️ CAPITAL BASE NEEDS CONFIRMATION — see capital_base_explanation
 - ⚠️ 26 historical SELL row(s) have stale reported PnL — corrected values used for all canonical metrics

@@ -154,7 +154,16 @@ class TAECommandCenterContext:
         if self.accounting.get("corrected_total_trading_pnl") is not None:
             return {
                 "cash_available": self.accounting.get("cash_available"),
-                "capital_deposits": self.accounting.get("capital_deposits"),
+                "capital_deposits": self.accounting.get("capital_deposits_counted"),
+                "capital_deposits_detected": self.accounting.get("capital_deposits_detected"),
+                "capital_deposits_excluded": self.accounting.get(
+                    "capital_deposits_excluded_as_duplicate"
+                ),
+                "effective_contributed_capital": self.accounting.get(
+                    "effective_contributed_capital"
+                ),
+                "starting_capital_config": self.accounting.get("starting_capital_config"),
+                "open_positions_value": self.accounting.get("open_positions_value"),
                 "corrected_total_pnl_excluding_cash_deposits": self.accounting.get(
                     "corrected_total_trading_pnl"
                 ),
@@ -166,7 +175,10 @@ class TAECommandCenterContext:
                 ),
                 "accounting_adjustments": self.accounting.get("accounting_adjustments_excluded"),
                 "account_value_corrected": self.accounting.get("account_value_corrected"),
+                "account_value_cash_based": self.accounting.get("account_value_cash_based"),
+                "account_value_capital_based": self.accounting.get("account_value_capital_based"),
                 "data_quality_status": self.accounting.get("data_quality_status"),
+                "capital_base_status": self.accounting.get("capital_base_status"),
                 "reported_realized_pnl_stale": self.accounting.get("reported_realized_pnl_stale"),
             }
         return self.review.get("B_financial_status") or {}
@@ -372,6 +384,9 @@ def render_command_center_metrics(ctx: TAECommandCenterContext) -> None:
     rt = ctx.runtime
     mor = ctx.mor
     fin = ctx.financial
+    acct = ctx.accounting
+    if acct.get("capital_base_status") in {"NEEDS_OPERATOR_CONFIRMATION", "DOUBLE_COUNT_RISK"}:
+        st.error("CAPITAL BASE NEEDS CONFIRMATION — see Financial Performance panel")
     adv = ctx.advisory_section or (ctx.advisory.get("advisory") or {})
     sig = ctx.signals
     strat = ctx.strategy
@@ -400,13 +415,13 @@ def render_command_center_metrics(ctx: TAECommandCenterContext) -> None:
         [
             ("Advisory Action", adv.get("action", "NO_DATA")),
             ("Blocks New BUY", blocks),
-            ("Cash", fin.get("cash_available")),
-            ("Corrected Trading PnL", fin.get("corrected_total_pnl_excluding_cash_deposits")),
+            ("Effective Capital", fin.get("effective_contributed_capital")),
+            ("Account Value", fin.get("account_value_corrected")),
         ],
         [
-            ("Corrected Realized PnL", fin.get("corrected_realized_pnl")),
-            ("Corrected Unrealized PnL", fin.get("trading_unrealized_pnl")),
-            ("Account Value (corrected)", fin.get("account_value_corrected")),
+            ("Trading PnL", fin.get("corrected_total_pnl_excluding_cash_deposits")),
+            ("Cash", fin.get("cash_available")),
+            ("Open Positions Value", fin.get("open_positions_value")),
             ("Data Quality", fin.get("data_quality_status", "NO_DATA")),
         ],
         [
@@ -439,14 +454,29 @@ def render_command_center_metrics(ctx: TAECommandCenterContext) -> None:
         st.caption(f"ℹ️ {note}")
 
 
+def _render_capital_base_warning(acct: dict[str, Any]) -> None:
+    status = acct.get("capital_base_status")
+    if status in {"NEEDS_OPERATOR_CONFIRMATION", "DOUBLE_COUNT_RISK"}:
+        st.error("**CAPITAL BASE NEEDS CONFIRMATION**")
+        for line in acct.get("capital_base_explanation") or []:
+            st.caption(line)
+    excluded = acct.get("capital_deposits_excluded_as_duplicate")
+    if excluded:
+        st.warning(
+            f"${float(excluded):,.2f} DEPOSIT excluded as NON_TRADING_VIRTUAL — "
+            "not added to Effective Contributed Capital."
+        )
+
+
 def render_financial_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("💰 Financial Performance")
+    acct = ctx.accounting
+    _render_capital_base_warning(acct)
     st.caption(
         f"Canonical source: tae_accounting_snapshot.json ({ctx.accounting_status}) · "
         f"Data quality: {ctx.accounting.get('data_quality_status', 'NO_DATA')}"
     )
     fin = ctx.financial
-    acct = ctx.accounting
     drag = ctx.drag
 
     if not fin and not acct:
@@ -454,19 +484,16 @@ def render_financial_panel(ctx: TAECommandCenterContext) -> None:
         return
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Cash Available", _fmt(fin.get("cash_available"), prefix="$"))
-    c2.metric(
-        "Corrected Total PnL",
-        _fmt(fin.get("corrected_total_pnl_excluding_cash_deposits"), prefix="$"),
-    )
-    c3.metric("Account Value (corrected)", _fmt(fin.get("account_value_corrected"), prefix="$"))
-    c4.metric("Capital Deposits", _fmt(fin.get("capital_deposits"), prefix="$"))
+    c1.metric("Effective Contributed Capital", _fmt(fin.get("effective_contributed_capital"), prefix="$"))
+    c2.metric("Account Value", _fmt(fin.get("account_value_corrected"), prefix="$"))
+    c3.metric("Trading PnL", _fmt(fin.get("corrected_total_pnl_excluding_cash_deposits"), prefix="$"))
+    c4.metric("Cash", _fmt(fin.get("cash_available"), prefix="$"))
 
     c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Corrected Realized", _fmt(fin.get("corrected_realized_pnl"), prefix="$"))
-    c6.metric("Corrected Unrealized", _fmt(fin.get("trading_unrealized_pnl"), prefix="$"))
-    c7.metric("Raw PnL (incl. CASH)", _fmt(fin.get("raw_total_pnl_including_cash_rows"), prefix="$"))
-    c8.metric("Data Quality", fin.get("data_quality_status", "NO_DATA"))
+    c5.metric("Realized PnL", _fmt(fin.get("corrected_realized_pnl"), prefix="$"))
+    c6.metric("Unrealized PnL", _fmt(fin.get("trading_unrealized_pnl"), prefix="$"))
+    c7.metric("Open Positions Value", _fmt(fin.get("open_positions_value"), prefix="$"))
+    c8.metric("Capital Base Status", fin.get("capital_base_status", "NO_DATA"))
 
     if fin.get("accounting_adjustments"):
         st.warning(

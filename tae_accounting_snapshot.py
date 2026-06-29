@@ -7,6 +7,7 @@ Does not modify portfolio.csv or execute trades.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -20,6 +21,21 @@ def main() -> int:
     root = Path(".")
     snapshot = build_accounting_snapshot(root)
     json_path, md_path = persist_accounting_snapshot(snapshot, root)
+
+    from research_core.accounting.capital_base_integrity import (
+        build_capital_base_integrity_audit,
+        render_capital_base_audit_md,
+    )
+
+    audit = build_capital_base_integrity_audit(root, snapshot=snapshot)
+    Path("tae_capital_base_integrity_audit.json").write_text(
+        json.dumps(audit, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    Path("TAE_CAPITAL_BASE_INTEGRITY_AUDIT.md").write_text(
+        render_capital_base_audit_md(audit),
+        encoding="utf-8",
+    )
 
     print("===== TAE ACCOUNTING SNAPSHOT =====")
     print(f"Data quality: {snapshot.get('data_quality_status')}")

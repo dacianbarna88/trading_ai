@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from research_core.accounting.capital_base_integrity import build_capital_base_analysis
 from research_core.accounting.execution_integrity import (
     DEFAULT_PORTFOLIO_PATH,
     _is_cash_flow_row,
@@ -29,7 +30,8 @@ DEFAULT_STARTING_CAPITAL = 30000.0
 DEFAULT_SNAPSHOT_JSON = Path("tae_accounting_snapshot.json")
 DEFAULT_SNAPSHOT_MD = Path("tae_accounting_snapshot.md")
 ACCOUNT_VALUE_FORMULA = (
-    "account_value_corrected = starting_capital + capital_deposits + corrected_total_trading_pnl"
+    "account_value = effective_contributed_capital + corrected_total_trading_pnl "
+    "= cash_available + open_positions_value"
 )
 
 
@@ -213,16 +215,38 @@ def build_accounting_snapshot(
     corrected_vs_reported_delta = round(reported_realized - corrected_realized, 4)
 
     unrealized, open_positions_value, open_count, open_positions = _open_unrealized_and_value(rows)
-    deposits, cash, raw_pnl, accounting_adj, _spent = _cash_flow_totals(rows, starting_capital)
+    deposits, _cash_legacy, raw_pnl, accounting_adj, _spent = _cash_flow_totals(rows, starting_capital)
 
     corrected_total = round(corrected_realized + unrealized, 4)
-    account_value = round(starting_capital + deposits + corrected_total, 2)
-    account_value_alt = round(cash + open_positions_value, 2)
 
-    if abs(account_value - account_value_alt) > 1.0:
+    capital_base = build_capital_base_analysis(
+        rows,
+        starting_capital_config=starting_capital,
+        corrected_total_trading_pnl=corrected_total,
+        open_positions_value=open_positions_value,
+        root=root,
+    )
+
+    cash = capital_base["cash_available"]
+    account_value = capital_base["account_value_cash_based"]
+    account_value_capital = capital_base["account_value_capital_based"]
+    account_value_delta = capital_base["account_value_reconciliation_delta"]
+
+    if abs(account_value_delta) > 1.0:
         warnings.append(
-            f"cash+open_value ({account_value_alt}) differs from capital+PnL ({account_value}) by "
-            f"{round(account_value - account_value_alt, 2)}"
+            f"Account value paths differ by {account_value_delta}: "
+            f"cash_based={account_value} vs capital_based={account_value_capital}"
+        )
+
+    if capital_base.get("capital_base_status") == "NEEDS_OPERATOR_CONFIRMATION":
+        warnings.append("CAPITAL BASE NEEDS CONFIRMATION — see capital_base_explanation")
+    elif capital_base.get("capital_base_status") == "DOUBLE_COUNT_RISK":
+        warnings.append("CAPITAL BASE DOUBLE COUNT RISK — virtual/duplicate deposit detected")
+
+    if capital_base.get("capital_deposits_excluded_as_duplicate", 0) > 0:
+        notes.append(
+            f"Excluded {capital_base['capital_deposits_excluded_as_duplicate']} from "
+            "effective_contributed_capital (NON_TRADING_VIRTUAL / unclassified DEPOSIT)"
         )
 
     corrected_trades = [_trade_from_audit(a) for a in audits if a.get("expected_realized_pnl") is not None]
@@ -253,7 +277,12 @@ def build_accounting_snapshot(
         data_quality = "OK"
 
     profit_pct = (
-        round((corrected_total / starting_capital) * 100, 4) if starting_capital else None
+        round(
+            (corrected_total / capital_base["effective_contributed_capital"]) * 100,
+            4,
+        )
+        if capital_base["effective_contributed_capital"]
+        else None
     )
 
     return {
@@ -263,8 +292,13 @@ def build_accounting_snapshot(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "portfolio_path": str(portfolio_path),
         "portfolio_readable": True,
-        "starting_capital": starting_capital,
-        "capital_deposits": deposits,
+        "starting_capital_config": capital_base["starting_capital_config"],
+        "starting_capital": capital_base["starting_capital_config"],
+        "capital_deposits_detected": capital_base["capital_deposits_detected"],
+        "capital_deposits_counted": capital_base["capital_deposits_counted"],
+        "capital_deposits_excluded_as_duplicate": capital_base["capital_deposits_excluded_as_duplicate"],
+        "capital_deposits": capital_base["capital_deposits_counted"],
+        "effective_contributed_capital": capital_base["effective_contributed_capital"],
         "cash_available": cash,
         "open_positions_value": open_positions_value,
         "open_positions_count": open_count,
@@ -273,7 +307,13 @@ def build_accounting_snapshot(
         "corrected_unrealized_pnl": unrealized,
         "corrected_total_trading_pnl": corrected_total,
         "account_value_corrected": account_value,
-        "account_value_cash_plus_open": account_value_alt,
+        "account_value_cash_based": account_value,
+        "account_value_capital_based": account_value_capital,
+        "account_value_cash_plus_open": account_value,
+        "account_value_reconciliation_delta": account_value_delta,
+        "capital_base_status": capital_base["capital_base_status"],
+        "capital_base_explanation": capital_base["capital_base_explanation"],
+        "capital_base": capital_base,
         "raw_pnl_including_cash_rows": raw_pnl,
         "accounting_adjustments_excluded": accounting_adj,
         "reported_realized_pnl_stale": round(reported_realized, 4),
@@ -343,14 +383,21 @@ def render_snapshot_markdown(snapshot: dict[str, Any]) -> str:
         "",
         "## Canonical metrics",
         "",
-        f"- Starting capital: {snapshot.get('starting_capital')}",
-        f"- Capital deposits: {snapshot.get('capital_deposits')}",
+        f"- Starting capital (config): {snapshot.get('starting_capital_config')}",
+        f"- Deposits detected / counted / excluded: "
+        f"{snapshot.get('capital_deposits_detected')} / "
+        f"{snapshot.get('capital_deposits_counted')} / "
+        f"{snapshot.get('capital_deposits_excluded_as_duplicate')}",
+        f"- **Effective contributed capital:** {snapshot.get('effective_contributed_capital')}",
         f"- Cash available: {snapshot.get('cash_available')}",
         f"- Open positions value: {snapshot.get('open_positions_value')}",
         f"- **Corrected realized PnL:** {snapshot.get('corrected_realized_pnl')}",
         f"- **Corrected unrealized PnL:** {snapshot.get('corrected_unrealized_pnl')}",
         f"- **Corrected total trading PnL:** {snapshot.get('corrected_total_trading_pnl')}",
         f"- **Account value (corrected):** {snapshot.get('account_value_corrected')}",
+        f"- Account value cash-based: {snapshot.get('account_value_cash_based')}",
+        f"- Account value capital-based: {snapshot.get('account_value_capital_based')}",
+        f"- Capital base status: **{snapshot.get('capital_base_status')}**",
         f"- Raw PnL (incl. CASH rows): {snapshot.get('raw_pnl_including_cash_rows')}",
         f"- Accounting adjustments excluded: {snapshot.get('accounting_adjustments_excluded')}",
         f"- Reported realized (stale): {snapshot.get('reported_realized_pnl_stale')}",
@@ -407,7 +454,18 @@ def financial_dict_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "open_positions_count": snapshot.get("open_positions_count", 0),
         "open_positions": snapshot.get("open_positions") or [],
         "portfolio_value_estimated": snapshot.get("account_value_corrected"),
-        "capital_deposits": snapshot.get("capital_deposits"),
+        "capital_deposits": snapshot.get("capital_deposits_counted"),
+        "capital_deposits_detected": snapshot.get("capital_deposits_detected"),
+        "capital_deposits_counted": snapshot.get("capital_deposits_counted"),
+        "capital_deposits_excluded_as_duplicate": snapshot.get(
+            "capital_deposits_excluded_as_duplicate"
+        ),
+        "effective_contributed_capital": snapshot.get("effective_contributed_capital"),
+        "starting_capital_config": snapshot.get("starting_capital_config"),
+        "account_value_cash_based": snapshot.get("account_value_cash_based"),
+        "account_value_capital_based": snapshot.get("account_value_capital_based"),
+        "open_positions_value": snapshot.get("open_positions_value"),
+        "capital_base_status": snapshot.get("capital_base_status"),
         "trading_realized_pnl": snapshot.get("reported_realized_pnl_stale"),
         "trading_unrealized_pnl": snapshot.get("corrected_unrealized_pnl"),
         "trading_total_pnl": snapshot.get("corrected_total_trading_pnl"),

@@ -1,6 +1,6 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-29T23:05:34.184407+00:00  
+**Generated:** 2026-06-29T23:14:49.820418+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
@@ -9,14 +9,14 @@
 - Bot process: STOPPED
 - Dashboard process: RUNNING
 - Status file: STOPPED
-- Bot log age (s): 8788.2
-- Live signals age (s): 8788.7
+- Bot log age (s): 9343.8
+- Live signals age (s): 9344.4
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T02:05:34.126359+03:00
+- Local time: 2026-06-30T02:14:49.761420+03:00
 - Verdict: **READY**
 - Session guard reason: all_markets_closed
 - Bot stopped expected: True
@@ -31,10 +31,10 @@
 - Next action: WAIT_FOR_MARKET_OPEN_THEN_SESSION_GUARD_START
 
 ## B. Financial Status (estimated, trading-only PnL)
-- Cash: 29954.03 USD
-- Capital deposits (flows): 10000.0 USD
+- Cash: 19954.03 USD
+- Capital deposits (flows): 0.0 USD
 - Open positions: 5
-- Portfolio value (est.): 40395.46 USD
+- Portfolio value (est.): 30395.47 USD
 - Trading realized PnL: -700.3663
 - Trading unrealized PnL: 127.7219
 - **Corrected trading total PnL:** 395.4641

@@ -1287,23 +1287,33 @@ with tabs[6]:
 with tabs[7]:
     st.subheader("📈 Performance")
     st.caption(
-        "Canonical metrics from tae_accounting_snapshot.json — corrected SELL reconciliation + open marks"
+        "Canonical metrics from tae_accounting_snapshot.json — corrected SELL reconciliation + capital base audit"
     )
     acct = _accounting_snapshot or {}
+    if acct.get("capital_base_status") in {"NEEDS_OPERATOR_CONFIRMATION", "DOUBLE_COUNT_RISK"}:
+        st.error("**CAPITAL BASE NEEDS CONFIRMATION** — virtual/test DEPOSIT excluded from contributed capital")
+        for line in (acct.get("capital_base_explanation") or [])[:4]:
+            st.caption(line)
     if not acct.get("portfolio_readable"):
         st.warning("portfolio.csv missing or accounting snapshot unavailable")
     else:
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Corrected Account Value", f"${acct.get('account_value_corrected', 0):,.2f}")
-        c2.metric("Corrected Total Trading PnL", f"${acct.get('corrected_total_trading_pnl', 0):,.2f}")
-        c3.metric("Corrected Realized PnL", f"${acct.get('corrected_realized_pnl', 0):,.2f}")
-        c4.metric("Corrected Unrealized PnL", f"${acct.get('corrected_unrealized_pnl', 0):,.2f}")
+        c1.metric("Effective Contributed Capital", f"${acct.get('effective_contributed_capital', 0):,.2f}")
+        c2.metric("Account Value", f"${acct.get('account_value_corrected', 0):,.2f}")
+        c3.metric("Trading PnL", f"${acct.get('corrected_total_trading_pnl', 0):,.2f}")
+        c4.metric("Cash", f"${acct.get('cash_available', 0):,.2f}")
         c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Starting Capital", f"${acct.get('starting_capital', 0):,.2f}")
-        c6.metric("Capital Deposits", f"${acct.get('capital_deposits', 0):,.2f}")
-        c7.metric("Cash Available", f"${acct.get('cash_available', 0):,.2f}")
-        c8.metric("Data Quality", acct.get("data_quality_status", "NO_DATA"))
+        c5.metric("Realized PnL", f"${acct.get('corrected_realized_pnl', 0):,.2f}")
+        c6.metric("Unrealized PnL", f"${acct.get('corrected_unrealized_pnl', 0):,.2f}")
+        c7.metric("Open Positions Value", f"${acct.get('open_positions_value', 0):,.2f}")
+        c8.metric("Capital Base Status", acct.get("capital_base_status", "NO_DATA"))
         st.caption(acct.get("account_value_formula", ACCOUNT_VALUE_FORMULA))
+        if acct.get("capital_deposits_excluded_as_duplicate"):
+            st.warning(
+                f"Detected ${acct.get('capital_deposits_detected', 0):,.2f} DEPOSIT; "
+                f"excluded ${acct.get('capital_deposits_excluded_as_duplicate', 0):,.2f} virtual/test — "
+                f"counted toward capital: ${acct.get('capital_deposits_counted', 0):,.2f}"
+            )
 
         winners = acct.get("top_winners_corrected") or []
         losers = acct.get("top_losers_corrected") or []
@@ -1337,7 +1347,7 @@ with tabs[7]:
             l5.metric("Win Rate (legacy recompute)", f"{execution_win_rate:.2f}%")
             l6.metric("BUY / SELL count", f"{dash_perf['buy_count']} / {dash_perf['sell_count']}")
             l7.metric("Raw PnL incl. CASH rows", f"${acct.get('raw_pnl_including_cash_rows', 0):,.2f}")
-            l8.metric("Reported realized (stale)", f"${acct.get('reported_realized_pnl_stale', 0):,.2f}")
+            l8.metric("Prior inflated AV (+virtual dep)", f"$40,395.46")
 
         st.subheader("📋 Trade History")
         perf = portfolio.copy()
