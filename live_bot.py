@@ -24,6 +24,7 @@ MARKET_REGIME_SMA = 200
 
 TEST_SELL_MODE = False
 ALLOW_BUY_WHEN_MARKET_CLOSED = False
+GLOBAL_MARKET_GATE_ENABLED = False
 
 WATCHLIST_FILE = "watchlist.txt"
 LIVE_SIGNALS_FILE = "live_signals.csv"
@@ -69,8 +70,9 @@ def send_telegram(message):
         return False
 
 
-def is_market_open():
-    from markets.market_hours import any_market_open, get_market_statuses, get_open_markets
+def log_market_session_summary():
+    """Log per-market session status. Does not gate BUY globally."""
+    from markets.market_hours import get_market_statuses, get_open_markets
 
     statuses = get_market_statuses()
     open_markets = get_open_markets()
@@ -81,7 +83,14 @@ def is_market_open():
             closed=",".join(closed_markets) if closed_markets else "NONE",
         )
     )
-    return any_market_open()
+    if not GLOBAL_MARKET_GATE_ENABLED:
+        log("Global market gate disabled; evaluating BUY per ticker session.")
+
+
+def is_market_open():
+    """Backward-compatible alias — session log only, no global BUY gate."""
+    log_market_session_summary()
+    return True
 
 
 def get_ticker_market(ticker):
@@ -508,7 +517,7 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
     trade_size = get_dynamic_trade_size(signals_df, portfolio, market_regime)
 
     log(f"Market Regime activ: {market_regime}")
-    is_market_open()
+    log_market_session_summary()
 
     for _, row in signals_df.iterrows():
         ticker = row["Ticker"]
@@ -600,10 +609,8 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
                     )
 
             elif signal == "STRONG BUY":
-                skip_reason = (
-                    f"piața {ticker_market} închisă (US/EU/UK evaluate separat)"
-                )
-                log(f"BUY blocat pentru {ticker}: {skip_reason}")
+                skip_reason = "MARKET_SESSION_FILTER"
+                log(f"BUY skipped for {ticker}: ticker market closed")
                 log_buy_skipped_other_reason(
                     ticker=ticker,
                     signal=signal,
@@ -743,7 +750,7 @@ def generate_signals():
 if __name__ == "__main__":
     set_status("RUNNING")
     log("Live bot pornit.")
-    is_market_open()
+    log_market_session_summary()
 
     send_telegram(
         "🟢 Trading AI Bot pornit.\n"
