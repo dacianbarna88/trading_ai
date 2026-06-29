@@ -243,10 +243,25 @@ def update_portfolio_prices():
     portfolio["Price"] = pd.to_numeric(portfolio["Price"], errors="coerce")
     portfolio["Shares"] = pd.to_numeric(portfolio["Shares"], errors="coerce")
 
+    open_positions = get_open_positions(portfolio)
+    open_tickers = set(open_positions.keys())
+
     for i, row in portfolio.iterrows():
         ticker = row["Ticker"]
+        action = str(row.get("Action", "")).upper()
 
         if pd.isna(ticker):
+            continue
+
+        # Realized rows and capital flows must keep PnL frozen at execution time.
+        if action in {"SELL", "DEPOSIT"}:
+            continue
+
+        if str(ticker).upper() == "CASH":
+            continue
+
+        # Closed positions: do not rewrite historical BUY marks.
+        if action == "BUY" and ticker not in open_tickers:
             continue
 
         current_price = get_latest_price(ticker)
@@ -269,7 +284,7 @@ def update_portfolio_prices():
         portfolio.loc[i, "PnL_%"] = round(pnl_pct, 4)
 
     save_portfolio(portfolio)
-    log("portfolio.csv actualizat cu prețuri live.")
+    log("portfolio.csv actualizat cu prețuri live (open BUY rows only).")
 
 
 def get_open_positions(portfolio):

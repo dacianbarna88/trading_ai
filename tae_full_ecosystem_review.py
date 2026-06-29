@@ -1445,6 +1445,30 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
     financial = _portfolio_financials(root)
     portfolio_rows = financial.pop("_portfolio_rows", [])
     performance_drag = _performance_drag_analysis(portfolio_rows, financial)
+
+    try:
+        from research_core.accounting.execution_integrity import build_execution_integrity_report
+
+        execution_integrity = build_execution_integrity_report(portfolio_rows)
+    except Exception as exc:
+        execution_integrity = {
+            "summary": {"execution_integrity_status": "ERROR", "error": str(exc)},
+            "sell_audits": [],
+        }
+
+    integrity_summary = execution_integrity.get("summary") or {}
+    financial["execution_integrity_status"] = integrity_summary.get("execution_integrity_status")
+    financial["sell_mismatch_count"] = integrity_summary.get("sell_mismatched")
+    financial["corrected_realized_pnl"] = integrity_summary.get("corrected_realized_pnl")
+    biggest = (execution_integrity.get("biggest_mismatches") or [])[:1]
+    financial["biggest_sell_mismatch"] = biggest[0] if biggest else None
+    if integrity_summary.get("corrected_realized_pnl") is not None:
+        financial["calculation_notes"].append(
+            "trading_realized_pnl uses reported SELL rows; "
+            f"corrected_realized_pnl={integrity_summary.get('corrected_realized_pnl')} "
+            f"from execution integrity audit"
+        )
+
     signals = _live_signals_today(root)
     advisory = _tae_advisory_section(root)
     market_readiness = _market_readiness(root, runtime, advisory)
@@ -1466,6 +1490,18 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
         "Market_Readiness": market_readiness,
         "B_financial_status": financial,
         "Performance_Drag_Analysis": performance_drag,
+        "Execution_Integrity": {
+            "status": integrity_summary.get("execution_integrity_status"),
+            "sell_mismatch_count": integrity_summary.get("sell_mismatched"),
+            "sell_ok_count": integrity_summary.get("sell_ok"),
+            "total_sell_rows": integrity_summary.get("total_sell_rows"),
+            "biggest_sell_mismatch": financial.get("biggest_sell_mismatch"),
+            "corrected_realized_pnl": integrity_summary.get("corrected_realized_pnl"),
+            "reported_realized_pnl": integrity_summary.get("total_reported_realized_pnl"),
+            "realized_pnl_delta": integrity_summary.get("realized_pnl_delta"),
+            "root_cause": execution_integrity.get("root_cause"),
+            "recommended_next_action": integrity_summary.get("recommended_next_action"),
+        },
         "C_live_signals_today": signals,
         "D_tae_advisory": advisory,
         "E_shadow_validation": shadow,
@@ -1542,6 +1578,9 @@ def render_markdown(review: dict[str, Any]) -> str:
         f"- Accounting adjustments excluded: {fin.get('accounting_adjustments')}",
         f"- Daily trading PnL: {fin.get('daily_trading_pnl')}",
         f"- Profit % (on {STARTING_CAPITAL} baseline): {fin.get('profit_pct')}%",
+        f"- Execution integrity: {fin.get('execution_integrity_status')} "
+        f"(SELL mismatches: {fin.get('sell_mismatch_count')})",
+        f"- Corrected realized PnL: {fin.get('corrected_realized_pnl')}",
         "",
         "## Performance Drag Analysis",
         f"- Stop-loss total: {drag.get('stop_loss_losses', {}).get('total_pnl')} "
@@ -1697,6 +1736,12 @@ def print_terminal_summary(review: dict[str, Any]) -> None:
         print(
             f"  accounting_adjustments excluded: {fin.get('accounting_adjustments')} "
             f"(CASH/DEPOSIT rows)"
+        )
+    if fin.get("execution_integrity_status"):
+        print(
+            f"  execution integrity: {fin.get('execution_integrity_status')} | "
+            f"SELL mismatches: {fin.get('sell_mismatch_count')} | "
+            f"corrected realized: {fin.get('corrected_realized_pnl')}"
         )
     top_loser = (drag.get("top_losing_trades") or [])[:1]
     if top_loser:
