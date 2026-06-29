@@ -1,6 +1,6 @@
 # TAE Portfolio Reconciliation
 
-**Generated:** 2026-06-29T22:41:22.949876+00:00  
+**Generated:** 2026-06-29T23:05:31.875435+00:00  
 **Mode:** READ_ONLY_RECONCILIATION  
 **Live trading impact:** NONE
 

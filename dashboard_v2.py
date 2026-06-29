@@ -29,6 +29,11 @@ st.caption(
 
 from dashboard_tae_command_center import render_tae_command_center
 
+from research_core.accounting.accounting_snapshot import (
+    build_accounting_snapshot,
+    load_accounting_snapshot,
+)
+
 
 
 def load_json(filename):
@@ -682,6 +687,15 @@ account_return_display = (
 account_pnl = account_value_legacy - total_capital_base
 account_return_pct = (account_pnl / total_capital_base) * 100 if total_capital_base else 0
 
+_accounting_snapshot, _acct_status = load_accounting_snapshot()
+if _accounting_snapshot is None:
+    try:
+        _accounting_snapshot = build_accounting_snapshot(".")
+        _acct_status = "LIVE_BUILD"
+    except Exception:
+        _accounting_snapshot = {}
+        _acct_status = "ERROR"
+
 tabs = st.tabs([
     "🏠 TAE Command Center",
     "📊 Dashboard",
@@ -1272,39 +1286,65 @@ with tabs[6]:
 
 with tabs[7]:
     st.subheader("📈 Performance")
-    st.caption("PnL: realized SELL execution PnL + open mark-to-market PnL")
-    if portfolio.empty:
-        st.warning("Nu există portfolio.csv")
+    st.caption(
+        "Canonical metrics from tae_accounting_snapshot.json — corrected SELL reconciliation + open marks"
+    )
+    acct = _accounting_snapshot or {}
+    if not acct.get("portfolio_readable"):
+        st.warning("portfolio.csv missing or accounting snapshot unavailable")
     else:
-        closed = closed_trades_exec.copy()
-        win_rate = execution_win_rate
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Starting Capital", f"${starting_capital_display:,.2f}")
-        c2.metric("Deposits", f"${deposits_display:,.2f}")
-        c3.metric("Realized PnL", f"${realized_pnl:,.2f}")
-        c4.metric("Open PnL", f"${open_pnl_display:,.2f}")
+        c1.metric("Corrected Account Value", f"${acct.get('account_value_corrected', 0):,.2f}")
+        c2.metric("Corrected Total Trading PnL", f"${acct.get('corrected_total_trading_pnl', 0):,.2f}")
+        c3.metric("Corrected Realized PnL", f"${acct.get('corrected_realized_pnl', 0):,.2f}")
+        c4.metric("Corrected Unrealized PnL", f"${acct.get('corrected_unrealized_pnl', 0):,.2f}")
         c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Total PnL", f"${total_pnl:,.2f}")
-        c6.metric("Account Value", f"${account_value_display:,.2f}")
-        c7.metric("Win Rate", f"{win_rate:.2f}%")
-        c8.metric("BUY / SELL", f"{dash_perf['buy_count']} / {dash_perf['sell_count']}")
-        st.caption(ACCOUNT_VALUE_FORMULA)
-        if abs(legacy_account_value - account_value_display) > 0.01:
+        c5.metric("Starting Capital", f"${acct.get('starting_capital', 0):,.2f}")
+        c6.metric("Capital Deposits", f"${acct.get('capital_deposits', 0):,.2f}")
+        c7.metric("Cash Available", f"${acct.get('cash_available', 0):,.2f}")
+        c8.metric("Data Quality", acct.get("data_quality_status", "NO_DATA"))
+        st.caption(acct.get("account_value_formula", ACCOUNT_VALUE_FORMULA))
+
+        winners = acct.get("top_winners_corrected") or []
+        losers = acct.get("top_losers_corrected") or []
+        drag = acct.get("top_drag_corrected")
+        if drag:
             st.info(
-                f"Legacy cash+open-value model: ${legacy_account_value:,.2f} → "
-                f"capital+PnL model: ${account_value_display:,.2f}"
+                f"Top drag (corrected): {drag.get('ticker')} PnL ${drag.get('pnl'):,.2f} — "
+                f"{drag.get('reason', '')}"
             )
-        if abs(stale_recorded_realized - realized_pnl) > 0.01:
-            st.info(
-                f"portfolio.csv repairable SELL PnL column (stale): ${stale_recorded_realized:,.2f} → "
-                f"execution display: ${realized_pnl:,.2f}. "
-                f"Legacy all-SELL sum was ${legacy_realized_pnl:,.2f}."
+        wcol, lcol = st.columns(2)
+        with wcol:
+            if winners:
+                st.markdown("**Top winners (corrected realized)**")
+                st.dataframe(pd.DataFrame(winners[:5]), width="stretch", hide_index=True)
+        with lcol:
+            if losers:
+                st.markdown("**Top losers (corrected realized)**")
+                st.dataframe(pd.DataFrame(losers[:5]), width="stretch", hide_index=True)
+
+        with st.expander("LEGACY / DEPRECATED metrics (do not use for decisions)", expanded=False):
+            st.warning(
+                "These values use stale portfolio PnL columns or config STARTING_CAPITAL mismatch. "
+                "Use corrected metrics above."
             )
+            l1, l2, l3, l4 = st.columns(4)
+            l1.metric("Legacy Total PnL (recompute tool)", f"${total_pnl:,.2f}")
+            l2.metric("Legacy Account Value", f"${account_value_display:,.2f}")
+            l3.metric("Legacy Realized (stale column)", f"${dash_perf.get('portfolio_sell_sum_repairable', 0):,.2f}")
+            l4.metric("Legacy config starting capital", f"${starting_capital_display:,.2f}")
+            l5, l6, l7, l8 = st.columns(4)
+            l5.metric("Win Rate (legacy recompute)", f"{execution_win_rate:.2f}%")
+            l6.metric("BUY / SELL count", f"{dash_perf['buy_count']} / {dash_perf['sell_count']}")
+            l7.metric("Raw PnL incl. CASH rows", f"${acct.get('raw_pnl_including_cash_rows', 0):,.2f}")
+            l8.metric("Reported realized (stale)", f"${acct.get('reported_realized_pnl_stale', 0):,.2f}")
+
         st.subheader("📋 Trade History")
         perf = portfolio.copy()
         perf["Date"] = pd.to_datetime(perf["Date"], errors="coerce")
         st.dataframe(perf.sort_values("Date"), width="stretch")
-        st.subheader("✅ Closed Trades (execution-based PnL)")
+        st.subheader("✅ Closed Trades (legacy recompute — see snapshot for corrected)")
+        closed = closed_trades_exec.copy()
         if not closed.empty:
             st.dataframe(closed, width="stretch")
         else:

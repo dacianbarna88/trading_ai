@@ -29,6 +29,13 @@ from research_core.governance.live_advisory_runtime import (
     load_live_advisory,
     should_block_new_buy,
 )
+from research_core.accounting.accounting_snapshot import (
+    build_accounting_snapshot,
+    financial_dict_from_snapshot,
+    performance_drag_from_snapshot,
+    persist_accounting_snapshot,
+)
+from research_core.accounting.execution_integrity import load_portfolio_rows
 from tae_shadow_validation_report import build_summary as build_shadow_summary
 from tae_shadow_validation_report import load_events as load_shadow_events
 
@@ -1479,10 +1486,19 @@ def _final_verdict(
 def build_review(root: Path | str = ".") -> dict[str, Any]:
     root = Path(root)
     artifacts = _discover_artifacts(root)
+
+    accounting_snapshot = build_accounting_snapshot(root)
+    try:
+        persist_accounting_snapshot(accounting_snapshot, root)
+    except OSError as exc:
+        logger.warning("Could not persist accounting snapshot: %s", exc)
+
+    portfolio_rows = load_portfolio_rows(root / "portfolio.csv")
+    financial = financial_dict_from_snapshot(accounting_snapshot)
+    financial["_portfolio_rows"] = portfolio_rows
+    performance_drag = performance_drag_from_snapshot(accounting_snapshot)
+
     runtime = _runtime_status(root)
-    financial = _portfolio_financials(root)
-    portfolio_rows = financial.pop("_portfolio_rows", [])
-    performance_drag = _performance_drag_analysis(portfolio_rows, financial)
 
     try:
         from research_core.accounting.execution_integrity import build_execution_integrity_report
@@ -1499,7 +1515,9 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
     financial["sell_mismatch_count"] = integrity_summary.get("sell_mismatched")
     financial["corrected_realized_pnl"] = integrity_summary.get("corrected_realized_pnl")
     biggest = (execution_integrity.get("biggest_mismatches") or [])[:1]
-    financial["biggest_sell_mismatch"] = biggest[0] if biggest else None
+    financial["biggest_sell_mismatch"] = biggest[0] if biggest else accounting_snapshot.get(
+        "biggest_historical_mismatch"
+    )
     if integrity_summary.get("corrected_realized_pnl") is not None:
         financial["calculation_notes"].append(
             "trading_realized_pnl uses reported SELL rows; "
@@ -1552,6 +1570,16 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
         "A_runtime_status": runtime,
         "Market_Readiness": market_readiness,
         "Market_Open_Readiness": market_open_readiness,
+        "Accounting_Snapshot": {
+            "source": "tae_accounting_snapshot.json",
+            "generated_at": accounting_snapshot.get("generated_at"),
+            "data_quality_status": accounting_snapshot.get("data_quality_status"),
+            "account_value_corrected": accounting_snapshot.get("account_value_corrected"),
+            "corrected_total_trading_pnl": accounting_snapshot.get("corrected_total_trading_pnl"),
+            "corrected_realized_pnl": accounting_snapshot.get("corrected_realized_pnl"),
+            "corrected_unrealized_pnl": accounting_snapshot.get("corrected_unrealized_pnl"),
+            "top_drag_corrected": accounting_snapshot.get("top_drag_corrected"),
+        },
         "B_financial_status": financial,
         "Performance_Drag_Analysis": performance_drag,
         "Execution_Integrity": {

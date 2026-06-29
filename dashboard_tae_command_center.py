@@ -23,6 +23,7 @@ REVIEW_SCRIPT = "tae_full_ecosystem_review.sh"
 ARTIFACT_PATHS = {
     "ecosystem_review_json": "tae_full_ecosystem_review.json",
     "ecosystem_review_md": "tae_full_ecosystem_review.md",
+    "accounting_snapshot": "tae_accounting_snapshot.json",
     "live_advisory": "tae_live_advisory.json",
     "shadow_summary": "tae_shadow_validation_summary.json",
     "shadow_events": "tae_shadow_validation_events.csv",
@@ -118,6 +119,8 @@ class TAECommandCenterContext:
 
     review: dict[str, Any] = field(default_factory=dict)
     review_status: str = "MISSING"
+    accounting: dict[str, Any] = field(default_factory=dict)
+    accounting_status: str = "MISSING"
     advisory: dict[str, Any] = field(default_factory=dict)
     advisory_status: str = "MISSING"
     shadow: dict[str, Any] = field(default_factory=dict)
@@ -148,10 +151,34 @@ class TAECommandCenterContext:
 
     @property
     def financial(self) -> dict[str, Any]:
+        if self.accounting.get("corrected_total_trading_pnl") is not None:
+            return {
+                "cash_available": self.accounting.get("cash_available"),
+                "capital_deposits": self.accounting.get("capital_deposits"),
+                "corrected_total_pnl_excluding_cash_deposits": self.accounting.get(
+                    "corrected_total_trading_pnl"
+                ),
+                "corrected_realized_pnl": self.accounting.get("corrected_realized_pnl"),
+                "trading_unrealized_pnl": self.accounting.get("corrected_unrealized_pnl"),
+                "unrealized_pnl": self.accounting.get("corrected_unrealized_pnl"),
+                "raw_total_pnl_including_cash_rows": self.accounting.get(
+                    "raw_pnl_including_cash_rows"
+                ),
+                "accounting_adjustments": self.accounting.get("accounting_adjustments_excluded"),
+                "account_value_corrected": self.accounting.get("account_value_corrected"),
+                "data_quality_status": self.accounting.get("data_quality_status"),
+                "reported_realized_pnl_stale": self.accounting.get("reported_realized_pnl_stale"),
+            }
         return self.review.get("B_financial_status") or {}
 
     @property
     def drag(self) -> dict[str, Any]:
+        if self.accounting.get("top_losers_corrected") is not None:
+            return {
+                "top_losing_trades": self.accounting.get("top_losers_corrected") or [],
+                "top_winning_trades": self.accounting.get("top_winners_corrected") or [],
+                "top_drag_corrected": self.accounting.get("top_drag_corrected"),
+            }
         return self.review.get("Performance_Drag_Analysis") or {}
 
     @property
@@ -189,6 +216,21 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.review = review or {}
     ctx.review_status = review_st
     status["tae_full_ecosystem_review.json"] = review_st
+
+    acct_path = root / ARTIFACT_PATHS["accounting_snapshot"]
+    accounting, acct_st = _safe_read_json(acct_path)
+    if accounting is None:
+        try:
+            from research_core.accounting.accounting_snapshot import build_accounting_snapshot
+
+            accounting = build_accounting_snapshot(root)
+            acct_st = "LIVE_BUILD"
+        except Exception:
+            accounting = {}
+            acct_st = "ERROR"
+    ctx.accounting = accounting or {}
+    ctx.accounting_status = acct_st
+    status["tae_accounting_snapshot.json"] = acct_st
 
     adv_path = root / ARTIFACT_PATHS["live_advisory"]
     advisory, adv_st = _safe_read_json(adv_path)
@@ -362,14 +404,18 @@ def render_command_center_metrics(ctx: TAECommandCenterContext) -> None:
             ("Corrected Trading PnL", fin.get("corrected_total_pnl_excluding_cash_deposits")),
         ],
         [
-            ("Corrected Realized PnL", fin.get("corrected_realized_pnl") or ctx.execution.get("corrected_realized_pnl")),
-            ("Unrealized PnL", fin.get("trading_unrealized_pnl") or fin.get("unrealized_pnl")),
-            ("STRONG BUY count", sig.get("strong_buy_count", "NO_DATA")),
-            ("TAKE PROFIT count", sig.get("take_profit_count", "NO_DATA")),
+            ("Corrected Realized PnL", fin.get("corrected_realized_pnl")),
+            ("Corrected Unrealized PnL", fin.get("trading_unrealized_pnl")),
+            ("Account Value (corrected)", fin.get("account_value_corrected")),
+            ("Data Quality", fin.get("data_quality_status", "NO_DATA")),
         ],
         [
+            ("STRONG BUY count", sig.get("strong_buy_count", "NO_DATA")),
+            ("TAKE PROFIT count", sig.get("take_profit_count", "NO_DATA")),
             ("X.9 Ledger Status", x9_label),
             ("SELL Accounting Protection", sell_prot or "NO_DATA"),
+        ],
+        [
             ("Robust Strategies", counts.get("robust_shortlist_count", "NO_DATA")),
             ("Weak Strategies", counts.get("weak_shortlist_count", "NO_DATA")),
         ],
@@ -378,8 +424,13 @@ def render_command_center_metrics(ctx: TAECommandCenterContext) -> None:
     for row in rows:
         cols = st.columns(4)
         for col, (label, value) in zip(cols, row):
+            if not label:
+                continue
             with col:
                 _metric_card(label, value)
+        if len(row) < 4:
+            for col in cols[len(row) :]:
+                col.empty()
 
     st.info(f"**Next Action:** {ctx.market.get('next_action_for_market_open') or ctx.final.get('next_action', 'NO_DATA')}")
 
@@ -390,40 +441,46 @@ def render_command_center_metrics(ctx: TAECommandCenterContext) -> None:
 
 def render_financial_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("💰 Financial Performance")
+    st.caption(
+        f"Canonical source: tae_accounting_snapshot.json ({ctx.accounting_status}) · "
+        f"Data quality: {ctx.accounting.get('data_quality_status', 'NO_DATA')}"
+    )
     fin = ctx.financial
+    acct = ctx.accounting
     drag = ctx.drag
 
-    if ctx.review_status != "OK" and not fin:
-        st.warning("tae_full_ecosystem_review.json missing — run Full Ecosystem Review.")
+    if not fin and not acct:
+        st.warning("Accounting snapshot missing — run Full Ecosystem Review or tae_accounting_snapshot.py")
         return
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Cash Available", _fmt(fin.get("cash_available"), prefix="$"))
-    c2.metric("Corrected PnL", _fmt(fin.get("corrected_total_pnl_excluding_cash_deposits"), prefix="$"))
-    c3.metric("Raw PnL (incl. CASH)", _fmt(fin.get("raw_total_pnl_including_cash_rows"), prefix="$"))
+    c2.metric(
+        "Corrected Total PnL",
+        _fmt(fin.get("corrected_total_pnl_excluding_cash_deposits"), prefix="$"),
+    )
+    c3.metric("Account Value (corrected)", _fmt(fin.get("account_value_corrected"), prefix="$"))
     c4.metric("Capital Deposits", _fmt(fin.get("capital_deposits"), prefix="$"))
 
     c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Corrected Realized", _fmt(fin.get("corrected_realized_pnl") or ctx.execution.get("corrected_realized_pnl"), prefix="$"))
-    c6.metric("Unrealized PnL", _fmt(fin.get("trading_unrealized_pnl"), prefix="$"))
-    c7.metric("Accounting Adjustments", _fmt(fin.get("accounting_adjustments"), prefix="$"))
-    c8.metric("Open Positions", fin.get("open_positions_count", "NO_DATA"))
+    c5.metric("Corrected Realized", _fmt(fin.get("corrected_realized_pnl"), prefix="$"))
+    c6.metric("Corrected Unrealized", _fmt(fin.get("trading_unrealized_pnl"), prefix="$"))
+    c7.metric("Raw PnL (incl. CASH)", _fmt(fin.get("raw_total_pnl_including_cash_rows"), prefix="$"))
+    c8.metric("Data Quality", fin.get("data_quality_status", "NO_DATA"))
 
-    distortions = drag.get("biggest_accounting_distortions") or []
-    cash_dist = drag.get("cash_row_primary_distortion") or {}
-    if distortions or cash_dist.get("is_primary_reported_loss_driver"):
+    if fin.get("accounting_adjustments"):
         st.warning(
-            cash_dist.get("message")
-            or "CASH/DEPOSIT rows may distort raw portfolio PnL — corrected trading PnL excludes them."
+            f"CASH/DEPOSIT distortion excluded from canonical PnL: "
+            f"{fin.get('accounting_adjustments')} (raw column sum is not trading PnL)"
         )
 
     top_losers = drag.get("top_losing_trades") or []
     top_winners = drag.get("top_winning_trades") or []
-    if top_losers:
-        worst = top_losers[0]
+    top_drag = drag.get("top_drag_corrected") or (top_losers[0] if top_losers else None)
+    if top_drag:
         st.error(
-            f"Top drag: **{worst.get('ticker')}** PnL {worst.get('pnl')} "
-            f"({worst.get('reason', '')})"
+            f"Top drag (corrected): **{top_drag.get('ticker')}** PnL {top_drag.get('pnl')} "
+            f"({top_drag.get('reason', '')})"
         )
     col_w, col_l = st.columns(2)
     with col_w:

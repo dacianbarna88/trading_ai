@@ -1,27 +1,27 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-29T22:50:45.873765+00:00  
+**Generated:** 2026-06-29T23:05:34.184407+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
 ## A. Runtime Status
 - Bot effective: **STOPPED**
 - Bot process: STOPPED
-- Dashboard process: STOPPED
+- Dashboard process: RUNNING
 - Status file: STOPPED
-- Bot log age (s): 7899.8
-- Live signals age (s): 7900.4
+- Bot log age (s): 8788.2
+- Live signals age (s): 8788.7
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T01:50:45.822307+03:00
+- Local time: 2026-06-30T02:05:34.126359+03:00
 - Verdict: **READY**
 - Session guard reason: all_markets_closed
 - Bot stopped expected: True
 - Markets: {'US': False, 'EU': False, 'UK': False, 'ASIA': False}
-- Dashboard running: False
+- Dashboard running: True
 - X.8 blocks new BUY: False
 - Advisory blocking warnings: 0 | informational: 5
 - RISK from real blockers only: False
@@ -37,22 +37,22 @@
 - Portfolio value (est.): 40395.46 USD
 - Trading realized PnL: -700.3663
 - Trading unrealized PnL: 127.7219
-- **Corrected trading total PnL:** -572.6444
+- **Corrected trading total PnL:** 395.4641
 - Raw total PnL (incl. CASH rows): -10918.8484
 - Accounting adjustments excluded: -9913.58
 - Daily trading PnL: None
-- Profit % (on 30000.0 baseline): -1.9088%
+- Profit % (on 30000.0 baseline): 1.3182%
 - Execution integrity: MISMATCH_DETECTED (SELL mismatches: 26)
 - Corrected realized PnL: 267.7422
 
 ## Performance Drag Analysis
-- Stop-loss total: -404.0456 (10 trades)
-- Take-profit total: -490.2062 (11 trades)
+- Stop-loss total: None (None trades)
+- Take-profit total: None (None trades)
 - Recommended next fix: PORTFOLIO_ACCOUNTING_MIGRATION
 - Top losing trades:
-  - GS: -903.8957 (PROFIT +5.48%)
-  - ORCL: -138.7037 (STOP LOSS -11.64%)
-  - ADBE: -114.7791 (STOP LOSS -6.42%)
+  - AAPL: -189.2578 (STOP LOSS -8.24%)
+  - ORCL: -105.4381 (STOP LOSS -11.64%)
+  - SIE.DE: -93.6152 (STOP LOSS -3.02%)
 - CASH distortion: CASH/DEPOSIT row reported PnL -9913.58 distorts raw portfolio sums; excluded from corrected trading PnL.
 
 ## C. Live Signals Today
