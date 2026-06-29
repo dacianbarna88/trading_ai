@@ -13,6 +13,9 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
+import re
+import socket
 import statistics
 import subprocess
 import sys
@@ -48,6 +51,11 @@ LIVE_BOT_SCRIPT = "live_bot.py"
 DASHBOARD_SCRIPT = "dashboard_v2.py"
 BOT_LOG_FILE = "bot_output.log"
 BOT_STATUS_FILE = "bot_status.txt"
+BOT_PID_FILE = "bot_pid.txt"
+DASHBOARD_PID_FILE = "dashboard_pid.txt"
+DASHBOARD_STATUS_FILE = "dashboard_status.txt"
+DASHBOARD_PORT = 8501
+SESSION_GUARD_LOG = "market_session_guard.log"
 SHADOW_LEDGER_MODULE = Path("research_core/governance/shadow_validation_ledger.py")
 SHADOW_REPORT_SCRIPT = Path("tae_shadow_validation_report.py")
 
@@ -118,6 +126,80 @@ def _process_status_label(running: bool) -> str:
     return "RUNNING" if running else "STOPPED"
 
 
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _read_pid_file(path: Path) -> int | None:
+    if not path.is_file():
+        return None
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _port_in_use(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            return sock.connect_ex(("127.0.0.1", port)) == 0
+    except OSError:
+        return False
+
+
+def _probe_controller_runtime(root: Path) -> dict[str, Any]:
+    bot_pid = _read_pid_file(root / BOT_PID_FILE)
+    dashboard_pid = _read_pid_file(root / DASHBOARD_PID_FILE)
+    dash_status_path = root / DASHBOARD_STATUS_FILE
+    dashboard_status_file_value = (
+        dash_status_path.read_text(encoding="utf-8").strip()
+        if dash_status_path.is_file()
+        else "UNKNOWN"
+    )
+    port_open = _port_in_use(DASHBOARD_PORT)
+    bot_pid_alive = bot_pid is not None and _pid_alive(bot_pid)
+    dashboard_pid_alive = dashboard_pid is not None and _pid_alive(dashboard_pid)
+    return {
+        "bot_pid": bot_pid,
+        "bot_pid_alive": bot_pid_alive,
+        "dashboard_pid": dashboard_pid,
+        "dashboard_pid_alive": dashboard_pid_alive,
+        "dashboard_port_open": port_open,
+        "dashboard_status_file_value": dashboard_status_file_value,
+    }
+
+
+def _parse_market_session_guard_log(root: Path) -> dict[str, Any]:
+    path = root / SESSION_GUARD_LOG
+    if not path.is_file():
+        return {"present": False, "last_line": None}
+
+    lines = [line.strip() for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+    if not lines:
+        return {"present": True, "last_line": None}
+
+    last = lines[-1]
+    parsed: dict[str, Any] = {"present": True, "last_line": last}
+    for key in (
+        "START_REASON",
+        "BOT_ACTION",
+        "DASHBOARD_ACTION",
+        "BOT",
+        "DASHBOARD",
+        "OPEN",
+        "DRY_RUN",
+    ):
+        match = re.search(rf"{key}=([^ ]+)", last)
+        if match:
+            parsed[key.lower()] = match.group(1)
+    return parsed
+
+
 def _derive_bot_status_effective(
     *,
     bot_process_running: bool,
@@ -166,6 +248,7 @@ def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, A
     local_now = datetime.now().astimezone()
     market_statuses: dict[str, Any] = {}
     any_open = False
+    open_markets: list[str] = []
 
     try:
         from markets.market_hours import get_market_statuses, get_open_markets
@@ -176,22 +259,39 @@ def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, A
     except Exception as exc:
         market_statuses = {"error": str(exc)}
 
+    guard = runtime.get("session_guard") or {}
+    start_reason = str(guard.get("start_reason") or "")
     bot_effective = runtime.get("bot_status_effective", "UNKNOWN")
     dashboard_running = runtime.get("dashboard_process_status") == "RUNNING"
     advisory_valid = advisory.get("present") and advisory.get("action")
     x8_active = bool(runtime.get("advisory_status", {}).get("block_new_buy") is not None)
     x8_blocks = bool(runtime.get("advisory_status", {}).get("block_new_buy"))
 
+    bot_stopped_expected = (
+        not any_open
+        and start_reason == "all_markets_closed"
+        and bot_effective == "STOPPED"
+    )
+    dashboard_stopped_expected = bot_stopped_expected and not dashboard_running
+
     x9 = runtime.get("x9_readiness") or {}
     shadow_csv_exists = (root / "tae_shadow_validation_events.csv").is_file()
     ledger_wired = x9.get("live_bot_wired") is True
-    buy_can_log = (
-        ledger_wired
-        and x9.get("ledger_module_present")
-        and bot_effective == "RUNNING"
-    )
+    buy_can_log = ledger_wired and x9.get("ledger_module_present") and bot_effective == "RUNNING"
 
     warnings: list[str] = []
+    notes: list[str] = []
+
+    if bot_stopped_expected:
+        notes.append(
+            "Bot STOPPED is expected overnight: market_session_guard skips start when "
+            "all markets are closed (startup_runner.sh behavior)."
+        )
+    if dashboard_stopped_expected:
+        notes.append(
+            "Dashboard STOPPED is expected overnight — session guard starts it when a market opens."
+        )
+
     if bot_effective == "RUNNING" and not any_open:
         pre_open = [
             name
@@ -209,20 +309,31 @@ def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, A
             f"using effective status {bot_effective}"
         )
 
-    if not dashboard_running:
-        warnings.append("Dashboard not detected running.")
+    if not dashboard_running and not dashboard_stopped_expected:
+        warnings.append("Dashboard not detected running (unexpected).")
+
+    if bot_effective != "RUNNING" and any_open and not bot_stopped_expected:
+        warnings.append("Market session open but bot is not RUNNING — investigate startup.")
 
     if not advisory_valid:
         warnings.append("tae_live_advisory.json missing or invalid.")
 
-    verdict = "READY"
-    if bot_effective != "RUNNING" or not advisory_valid:
+    if bot_stopped_expected and not any_open:
+        verdict = "READY" if advisory_valid else "WARNING"
+    elif bot_effective == "RUNNING" and advisory_valid:
+        verdict = "READY"
+    elif any_open and bot_effective != "RUNNING":
         verdict = "WARNING"
-    if warnings and verdict == "READY":
+    elif warnings:
         verdict = "WARNING"
+    else:
+        verdict = "READY"
 
-    next_action = "MONITOR_MARKET_OPEN"
-    if bot_effective != "RUNNING":
+    if bot_stopped_expected and not any_open:
+        next_action = "WAIT_FOR_MARKET_OPEN_THEN_SESSION_GUARD_START"
+    elif bot_effective != "RUNNING" and any_open:
+        next_action = "START_BOT_NOW_MARKET_IS_OPEN"
+    elif bot_effective != "RUNNING":
         next_action = "START_BOT_BEFORE_MARKET_OPEN"
     elif x8_blocks:
         next_action = "MARKET_OPEN_WATCH_ONLY_NO_NEW_BUY"
@@ -230,12 +341,19 @@ def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, A
         next_action = "MARKET_OPEN_COLLECT_X9_SHADOW_EVENTS"
     elif any_open:
         next_action = "MARKET_OPEN_MONITOR_SIGNALS_AND_LEDGER"
+    else:
+        next_action = "MONITOR_MARKET_OPEN"
 
     return {
         "local_time": local_now.isoformat(),
         "local_timezone": str(local_now.tzinfo),
         "market_statuses": market_statuses,
+        "open_markets": open_markets,
         "any_market_open": any_open,
+        "session_guard_start_reason": start_reason or None,
+        "session_guard_last_line": guard.get("last_line"),
+        "bot_stopped_expected": bot_stopped_expected,
+        "dashboard_stopped_expected": dashboard_stopped_expected,
         "bot_running_before_open": bot_effective == "RUNNING" and not any_open,
         "dashboard_running": dashboard_running,
         "advisory_valid": bool(advisory_valid),
@@ -244,8 +362,9 @@ def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, A
         "x9_ledger_present": x9.get("ledger_module_present"),
         "x9_report_present": x9.get("report_script_present"),
         "shadow_events_csv_exists": shadow_csv_exists,
-        "buy_path_will_log_on_open": buy_can_log,
+        "buy_path_will_log_on_open": ledger_wired and x9.get("ledger_module_present"),
         "x9_readiness_label": x9.get("readiness_label"),
+        "notes": notes,
         "warnings": warnings,
         "verdict": verdict,
         "next_action_for_market_open": next_action,
@@ -607,10 +726,17 @@ def _runtime_status(root: Path) -> dict[str, Any]:
         bot_path.read_text(encoding="utf-8").strip() if bot_path.is_file() else "UNKNOWN"
     )
 
-    bot_process_running = _process_running(LIVE_BOT_SCRIPT)
-    dashboard_process_running = _process_running(DASHBOARD_SCRIPT) or _process_running(
-        f"streamlit run {DASHBOARD_SCRIPT}"
-    ) or _process_running("streamlit")
+    controller = _probe_controller_runtime(root)
+    session_guard = _parse_market_session_guard_log(root)
+
+    bot_process_running = _process_running(LIVE_BOT_SCRIPT) or controller["bot_pid_alive"]
+    dashboard_process_running = (
+        _process_running(DASHBOARD_SCRIPT)
+        or _process_running("streamlit run dashboard_v2.py")
+        or _process_running("streamlit")
+        or controller["dashboard_pid_alive"]
+        or controller["dashboard_port_open"]
+    )
 
     last_bot_log_age_seconds = _file_age_seconds(root / BOT_LOG_FILE)
     live_signals_age_seconds = _file_age_seconds(root / "live_signals.csv")
@@ -641,6 +767,13 @@ def _runtime_status(root: Path) -> dict[str, Any]:
         "live_signals_age_seconds": live_signals_age_seconds,
         "portfolio_age_seconds": portfolio_age_seconds,
         "bot_log_fresh_threshold_seconds": BOT_LOG_FRESH_SECONDS,
+        "bot_pid": controller["bot_pid"],
+        "bot_pid_alive": controller["bot_pid_alive"],
+        "dashboard_pid": controller["dashboard_pid"],
+        "dashboard_pid_alive": controller["dashboard_pid_alive"],
+        "dashboard_port_open": controller["dashboard_port_open"],
+        "dashboard_status_file_value": controller["dashboard_status_file_value"],
+        "session_guard": session_guard,
         "dashboard_status": _process_status_label(dashboard_process_running),
         "git_status": _read_git_status(root),
         "x9_readiness": x9_readiness,
@@ -1211,6 +1344,8 @@ def render_markdown(review: dict[str, Any]) -> str:
         "## Market Readiness",
         f"- Local time: {market.get('local_time')}",
         f"- Verdict: **{market.get('verdict')}**",
+        f"- Session guard reason: {market.get('session_guard_start_reason')}",
+        f"- Bot stopped expected: {market.get('bot_stopped_expected')}",
         f"- Markets: {market.get('market_statuses')}",
         f"- Dashboard running: {market.get('dashboard_running')}",
         f"- X.8 blocks new BUY: {market.get('x8_blocks_new_buy')}",
@@ -1329,12 +1464,23 @@ def print_terminal_summary(review: dict[str, Any]) -> None:
     if rt.get("bot_status_file_stale"):
         status_file_note = f"{status_file_note} stale"
 
+    bot_label = rt.get("bot_status_effective", "UNKNOWN")
+    dash_label = rt.get("dashboard_process_status", "UNKNOWN")
+    if market.get("bot_stopped_expected"):
+        bot_label = f"{bot_label} (expected — all markets closed)"
+    if market.get("dashboard_stopped_expected"):
+        dash_label = f"{dash_label} (expected — premarket)"
+
     print("")
     print("===== TAE FULL ECOSYSTEM REVIEW =====")
     print(f"Verdict: {final.get('ecosystem_verdict')}")
-    print(f"Bot: {rt.get('bot_status_effective', 'UNKNOWN')}")
-    print(f"Dashboard: {rt.get('dashboard_process_status', 'UNKNOWN')}")
+    print(f"Bot: {bot_label}")
+    print(f"Dashboard: {dash_label}")
     print(f"Status file: {status_file_note}")
+    if market.get("session_guard_start_reason"):
+        print(f"Session guard: {market.get('session_guard_start_reason')}")
+    for note in (market.get("notes") or [])[:2]:
+        print(f"  {note}")
     print(f"Advisory: {adv.get('action')} | blocks new BUY: {adv.get('blocks_new_buy')}")
     print(f"Market readiness: {market.get('verdict', 'UNKNOWN')}")
     print(f"X.9 ledger: {x9.get('readiness_label', 'UNKNOWN')}")

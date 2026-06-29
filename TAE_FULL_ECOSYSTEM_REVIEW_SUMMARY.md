@@ -56,6 +56,10 @@ The review does **not** trust `bot_status.txt` alone. It probes:
 
 **Rule:** If `live_bot.py` process is running and logs are recent → `bot_status_effective = RUNNING` even when `bot_status.txt = STOPPED`.
 
+Also probes `bot_pid.txt`, `dashboard_pid.txt`, port **8501**, and parses `market_session_guard.log`.
+
+When `startup_runner.sh` runs overnight, `market_session_guard` sets `START_REASON=all_markets_closed` and **does not start** bot/dashboard — review marks this as **expected STOPPED** (Market Readiness `READY`, not a false alarm).
+
 New fields in `A_runtime_status`: `bot_process_status`, `dashboard_process_status`, `bot_status_file_value`, `bot_status_file_stale`, `bot_status_effective`, `last_bot_log_age_seconds`, `live_signals_age_seconds`, `portfolio_age_seconds`.
 
 ---
