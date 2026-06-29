@@ -32,6 +32,8 @@ from research_core.strategy_simulation.historical_execution_report import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 10
+DEFAULT_RUNNER_BATCH_SIZE = 50
+MAX_JOB_ATTEMPTS = 2
 INPUT_PATHS = (RESEARCH_INPUT_PATH, DISCOVERY_INPUT_PATH, SIMULATION_INPUT_PATH)
 
 
@@ -104,21 +106,7 @@ class HistoricalExecutionEngine:
             batches_executed = 1
             for job in batch_jobs:
                 job_id = str(job.get("research_job_id", ""))
-                strategy_id = str(job.get("strategy_id", ""))
-                try:
-                    result = self._execute_job(job, strategy_map, runner, data)
-                except Exception as exc:
-                    logger.exception("Job %s failed with exception", job_id)
-                    result = ExecutionJobResult(
-                        research_job_id=job_id,
-                        strategy_id=strategy_id,
-                        simulation_id=str(job.get("simulation_id", "")),
-                        market=str(job.get("market", "")),
-                        time_horizon=str(job.get("time_horizon", "")),
-                        execution_status="FAILED",
-                        block_reason=f"Execution exception: {exc}",
-                    )
-
+                result = self._execute_job_with_retry(job, strategy_map, runner, data)
                 checkpoint.upsert(result)
                 checkpoint.persist()
                 jobs_processed_this_run += 1
@@ -266,6 +254,44 @@ class HistoricalExecutionEngine:
                 if discovery_id:
                     mapping[discovery_id] = item
         return mapping
+
+    def _execute_job_with_retry(
+        self,
+        job: dict[str, Any],
+        strategy_map: dict[str, dict[str, Any]],
+        runner: StrategyBacktestRunner,
+        data: Any,
+        max_attempts: int = MAX_JOB_ATTEMPTS,
+    ) -> ExecutionJobResult:
+        job_id = str(job.get("research_job_id", ""))
+        strategy_id = str(job.get("strategy_id", ""))
+        last_exc: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self._execute_job(job, strategy_map, runner, data)
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Job %s failed attempt %d/%d: %s",
+                    job_id,
+                    attempt,
+                    max_attempts,
+                    exc,
+                )
+                if attempt < max_attempts:
+                    continue
+
+        logger.exception("Job %s failed after %d attempts", job_id, max_attempts)
+        return ExecutionJobResult(
+            research_job_id=job_id,
+            strategy_id=strategy_id,
+            simulation_id=str(job.get("simulation_id", "")),
+            market=str(job.get("market", "")),
+            time_horizon=str(job.get("time_horizon", "")),
+            execution_status="FAILED",
+            block_reason=f"Execution exception after {max_attempts} attempts: {last_exc}",
+        )
 
     def _execute_job(
         self,
