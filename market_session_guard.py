@@ -48,7 +48,7 @@ def main():
     os.chdir(PROJECT_DIR)
     sys.path.insert(0, str(PROJECT_DIR))
 
-    from bot_controller import get_status, start_bot
+    from bot_controller import get_dashboard_status, get_status, start_bot, start_dashboard
     from markets.market_hours import any_market_open, get_market_statuses, get_open_markets
 
     dry_run = is_dry_run()
@@ -57,31 +57,52 @@ def main():
     closed_markets = [name for name, is_open in statuses.items() if not is_open]
     markets_open = any_market_open()
     bot_status = get_status()
+    dashboard_status = get_dashboard_status()
 
-    action = "NONE"
-    result = ""
+    bot_action = "NONE"
+    dashboard_action = "NONE"
+    bot_result = ""
+    dashboard_result = ""
     awake_result = ""
+    start_reason = "NONE"
 
     if markets_open:
+        start_reason = "market_session_open"
         awake_result = ensure_awake_guard()
 
         if bot_status != "RUNNING":
-            action = "START"
+            bot_action = "START"
             if dry_run:
-                result = "DRY_RUN would start bot"
+                bot_result = "DRY_RUN would start bot"
             else:
-                result = start_bot()
+                bot_result = start_bot()
                 bot_status = get_status()
 
+        if dashboard_status != "RUNNING":
+            dashboard_action = "START"
+            if dry_run:
+                dashboard_result = "DRY_RUN would start dashboard"
+            else:
+                dashboard_result = start_dashboard()
+                dashboard_status = get_dashboard_status()
+    else:
+        start_reason = "all_markets_closed"
+
     log(
-        "OPEN=[{open}] CLOSED=[{closed}] BOT={bot} ACTION={action} "
-        "AWAKE={awake} result={result} DRY_RUN={dry_run}".format(
-            open=",".join(open_markets) if open_markets else "",
-            closed=",".join(closed_markets) if closed_markets else "",
+        "OPEN=[{open}] CLOSED=[{closed}] BOT={bot} DASHBOARD={dashboard} "
+        "BOT_ACTION={bot_action} DASHBOARD_ACTION={dashboard_action} "
+        "START_REASON={start_reason} AWAKE={awake} BOT_RESULT={bot_result} "
+        "DASHBOARD_RESULT={dashboard_result} DRY_RUN={dry_run}".format(
+            open=",".join(open_markets) if open_markets else "NONE",
+            closed=",".join(closed_markets) if closed_markets else "NONE",
             bot=bot_status,
-            action=action,
+            dashboard=dashboard_status,
+            bot_action=bot_action,
+            dashboard_action=dashboard_action,
+            start_reason=start_reason,
             awake=awake_result or "NONE",
-            result=result or "NONE",
+            bot_result=bot_result or "NONE",
+            dashboard_result=dashboard_result or "NONE",
             dry_run=dry_run,
         )
     )

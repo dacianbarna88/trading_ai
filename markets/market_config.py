@@ -28,4 +28,14 @@ MARKETS = {
         "close_hour": 16,
         "close_minute": 30,
     },
+
+    "ASIA": {
+        "enabled": False,
+        "watchlist": "watchlist_asia.txt",
+        "timezone": "Asia/Tokyo",
+        "open_hour": 9,
+        "open_minute": 0,
+        "close_hour": 15,
+        "close_minute": 0,
+    },
 }

@@ -70,8 +70,30 @@ def send_telegram(message):
 
 
 def is_market_open():
-    from markets.market_hours import any_market_open
+    from markets.market_hours import any_market_open, get_market_statuses, get_open_markets
+
+    statuses = get_market_statuses()
+    open_markets = get_open_markets()
+    closed_markets = [name for name, is_open in statuses.items() if not is_open]
+    log(
+        "Market sessions OPEN=[{open}] CLOSED=[{closed}]".format(
+            open=",".join(open_markets) if open_markets else "NONE",
+            closed=",".join(closed_markets) if closed_markets else "NONE",
+        )
+    )
     return any_market_open()
+
+
+def get_ticker_market(ticker):
+    from markets.market_hours import get_ticker_market as resolve_market
+
+    return resolve_market(ticker)
+
+
+def is_ticker_market_open(ticker):
+    from markets.market_hours import is_ticker_market_open as ticker_open
+
+    return ticker_open(ticker)
 
 
 def get_market_regime():
@@ -437,14 +459,11 @@ def manage_portfolio(signals_df):
     portfolio = load_portfolio()
     positions = get_open_positions(portfolio)
 
-    market_open = is_market_open()
     market_regime = get_market_regime()
     trade_size = get_dynamic_trade_size(signals_df, portfolio, market_regime)
 
     log(f"Market Regime activ: {market_regime}")
-
-    if not market_open and not ALLOW_BUY_WHEN_MARKET_CLOSED:
-        log("Piața este închisă. Nu execut BUY. Doar actualizez semnale/prețuri.")
+    is_market_open()
 
     for _, row in signals_df.iterrows():
         ticker = row["Ticker"]
@@ -456,18 +475,31 @@ def manage_portfolio(signals_df):
             continue
 
         if ticker not in positions:
-            if market_open or ALLOW_BUY_WHEN_MARKET_CLOSED:
+            ticker_market = get_ticker_market(ticker)
+            ticker_session_open = is_ticker_market_open(ticker)
+
+            if ticker_session_open or ALLOW_BUY_WHEN_MARKET_CLOSED:
                 if (
                     signal == "STRONG BUY"
                     and score >= MIN_SCORE_TO_BUY
                     and market_regime == "BULL"
                 ):
                     if len(positions) < MAX_POSITIONS:
+                        log(
+                            f"BUY permis pentru {ticker}: piața {ticker_market} deschisă, "
+                            f"signal={signal}, score={score}"
+                        )
                         portfolio = buy_position(row, portfolio, trade_size)
                         positions = get_open_positions(portfolio)
 
-                elif signal == "STRONG BUY":
+                elif signal == "STRONG BUY" and market_regime != "BULL":
                     log(f"BUY blocat pentru {ticker}: Market Regime {market_regime}")
+
+            elif signal == "STRONG BUY":
+                log(
+                    f"BUY blocat pentru {ticker}: piața {ticker_market} închisă "
+                    f"(US/EU/UK evaluate separat)"
+                )
 
         else:
             avg_price = positions[ticker]["avg_price"]
@@ -587,6 +619,7 @@ def generate_signals():
 if __name__ == "__main__":
     set_status("RUNNING")
     log("Live bot pornit.")
+    is_market_open()
 
     send_telegram(
         "🟢 Trading AI Bot pornit.\n"
