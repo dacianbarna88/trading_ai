@@ -76,6 +76,64 @@ NEGATIVE_VERDICT_MARKERS = (
     "DISTORTION",
 )
 
+WARNING_CLASS_CRITICAL = "CRITICAL"
+WARNING_CLASS_WARNING = "WARNING"
+WARNING_CLASS_INFO = "INFO"
+WARNING_CLASS_NORMAL_MARKET_CLOSED = "NORMAL_MARKET_CLOSED"
+WARNING_CLASS_STALE_BUT_EXPECTED = "STALE_BUT_EXPECTED"
+
+BLOCKING_WARNING_CLASSES = frozenset({WARNING_CLASS_CRITICAL, WARNING_CLASS_WARNING})
+INFORMATIONAL_WARNING_CLASSES = frozenset(
+    {
+        WARNING_CLASS_INFO,
+        WARNING_CLASS_NORMAL_MARKET_CLOSED,
+        WARNING_CLASS_STALE_BUT_EXPECTED,
+    }
+)
+
+
+def _classify_warning(text: str, *, markets_open: bool | None = None) -> str:
+    """Classify advisory warning for BUY-block weighting."""
+    lowered = str(text).lower()
+
+    if "bot process not detected" in lowered or "dashboard/streamlit not detected" in lowered:
+        if markets_open is False:
+            return WARNING_CLASS_NORMAL_MARKET_CLOSED
+        if markets_open is True:
+            return WARNING_CLASS_WARNING
+        return WARNING_CLASS_NORMAL_MARKET_CLOSED
+
+    if "market closed" in lowered or "all_markets_closed" in lowered:
+        return WARNING_CLASS_NORMAL_MARKET_CLOSED
+
+    if "bot status: stopped" in lowered and markets_open is False:
+        return WARNING_CLASS_NORMAL_MARKET_CLOSED
+
+    if "git working tree" in lowered or "git dirty" in lowered:
+        return WARNING_CLASS_INFO
+
+    if "not duplicate portfolio" in lowered or "research metrics helper" in lowered:
+        return WARNING_CLASS_INFO
+
+    if "paper_only" in lowered and "warning only" in lowered:
+        return WARNING_CLASS_NORMAL_MARKET_CLOSED
+
+    if any(marker.lower() in lowered for marker in NEGATIVE_VERDICT_MARKERS):
+        return WARNING_CLASS_CRITICAL
+
+    if "invalid" in lowered and "json" in lowered:
+        return WARNING_CLASS_CRITICAL
+
+    if "missing" in lowered and any(
+        token in lowered for token in ("json", "portfolio", "signals", "advisory")
+    ):
+        return WARNING_CLASS_WARNING
+
+    if "below -3% pnl" in lowered or "outlier-driven" in lowered:
+        return WARNING_CLASS_WARNING
+
+    return WARNING_CLASS_INFO
+
 
 def _load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     if not path.is_file():
@@ -114,6 +172,9 @@ class LiveAdvisoryReport:
     confidence: int
     reasons: list[str]
     blockers: list[str]
+    blocking_warnings: list[str] = field(default_factory=list)
+    informational_warnings: list[str] = field(default_factory=list)
+    warning_audit: list[dict[str, Any]] = field(default_factory=list)
     relevant_reports: dict[str, Any] = field(default_factory=dict)
     live_bot_not_modified: bool = True
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -132,6 +193,11 @@ class LiveAdvisoryReport:
                 "confidence": self.confidence,
                 "reasons": list(self.reasons),
                 "blockers": list(self.blockers),
+                "blocking_warnings": list(self.blocking_warnings),
+                "informational_warnings": list(self.informational_warnings),
+                "blocking_warnings_count": len(self.blocking_warnings),
+                "informational_warnings_count": len(self.informational_warnings),
+                "warning_audit": list(self.warning_audit),
             },
             "relevant_reports_summary": self.relevant_reports,
             "safety": {
@@ -332,6 +398,62 @@ class LiveAdvisoryBridge:
             total += len(meta.get("warnings") or [])
         return total
 
+    def _analyze_warnings(
+        self,
+        index: dict[str, Any] | None,
+        relevant: dict[str, Any],
+        *,
+        markets_open: bool | None,
+    ) -> dict[str, Any]:
+        seen: set[str] = set()
+        audit: list[dict[str, Any]] = []
+
+        def _add(source: str, text: str) -> None:
+            normalized = str(text).strip()
+            if not normalized:
+                return
+            key = normalized.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            classification = _classify_warning(normalized, markets_open=markets_open)
+            audit.append(
+                {
+                    "source": source,
+                    "text": normalized,
+                    "classification": classification,
+                }
+            )
+
+        if index:
+            for text, count in (index.get("warnings_distribution") or {}).items():
+                for _ in range(max(0, int(count))):
+                    _add("tae_advisory_index.json", str(text))
+
+        for name, meta in relevant.items():
+            for warning in meta.get("warnings") or []:
+                _add(name, str(warning))
+
+        blocking = [
+            item["text"]
+            for item in audit
+            if item["classification"] in BLOCKING_WARNING_CLASSES
+        ]
+        informational = [
+            item["text"]
+            for item in audit
+            if item["classification"] in INFORMATIONAL_WARNING_CLASSES
+        ]
+
+        return {
+            "warning_audit": audit,
+            "blocking_warnings": blocking,
+            "informational_warnings": informational,
+            "blocking_warnings_count": len(blocking),
+            "informational_warnings_count": len(informational),
+            "warning_count_total": len(audit),
+        }
+
     @staticmethod
     def _historical_median_metrics(
         historical: dict[str, Any] | None,
@@ -395,10 +517,16 @@ class LiveAdvisoryBridge:
         runtime: dict[str, Any],
         relevant: dict[str, Any],
         reports_raw: dict[str, dict[str, Any] | None],
+        warning_analysis: dict[str, Any],
     ) -> tuple[str, int, list[str], list[str]]:
         reasons: list[str] = []
         blockers: list[str] = []
         confidence = 55
+
+        blocking_warnings = list(warning_analysis.get("blocking_warnings") or [])
+        informational_warnings = list(warning_analysis.get("informational_warnings") or [])
+        blocking_warning_count = int(warning_analysis.get("blocking_warnings_count") or 0)
+        warning_count_total = int(warning_analysis.get("warning_count_total") or 0)
 
         if index_error or index is None:
             blockers.append("tae_advisory_index.json missing or invalid")
@@ -415,10 +543,15 @@ class LiveAdvisoryBridge:
                 reasons.append(f"All {valid} indexed TAE reports parse as valid JSON")
                 confidence += 10
 
-        warning_count = self._warning_count(index, relevant)
-        if warning_count:
-            reasons.append(f"Aggregated TAE/live warning count: {warning_count}")
-            confidence -= min(25, warning_count * 4)
+        if warning_count_total:
+            reasons.append(
+                f"Aggregated TAE/live warnings: total={warning_count_total}, "
+                f"blocking={blocking_warning_count}, informational={len(informational_warnings)}"
+            )
+            confidence -= min(25, blocking_warning_count * 4)
+
+        for info in informational_warnings[:8]:
+            reasons.append(f"[INFO] {info}")
 
         historical = reports_raw.get("tae_historical_results_analysis.json")
         median_profit, median_sharpe, _mean_profit, hist_notes = (
@@ -473,7 +606,14 @@ class LiveAdvisoryBridge:
                 confidence -= 12
 
         bot_status = runtime.get("bot_status", "UNKNOWN")
-        reasons.append(f"Bot status: {bot_status}")
+        markets_open = runtime.get("any_market_open")
+        if markets_open is False and str(bot_status).upper() == "STOPPED":
+            reasons.append("Bot status: STOPPED (expected — all markets closed)")
+        else:
+            reasons.append(f"Bot status: {bot_status}")
+            if markets_open and str(bot_status).upper() != "RUNNING":
+                blockers.append("Bot not RUNNING while market session open")
+                confidence -= 8
 
         strong_buys = int(runtime.get("high_score_strong_buy_count") or 0)
         take_profit = int(runtime.get("take_profit_signal_count") or 0)
@@ -495,14 +635,26 @@ class LiveAdvisoryBridge:
 
         confidence = max(0, min(100, confidence))
 
-        # --- Action selection (conservative; RISK first) ---
+        # --- Action selection (conservative; RISK only on real blocking signals) ---
         invalid_reports = int((index or {}).get("invalid_reports") or 0)
         if invalid_reports > 0:
             return "RISK_ADVISORY", confidence, reasons, blockers
 
-        if warning_count >= 3 or len(blockers) >= 3:
-            if warning_count >= 3:
-                blockers.append(f"Elevated aggregated warning count ({warning_count})")
+        trading_blockers = [
+            b
+            for b in blockers
+            if b not in informational_warnings and "expected" not in b.lower()
+        ]
+
+        if blocking_warning_count >= 2:
+            blockers.append(
+                f"Elevated blocking warning count ({blocking_warning_count})"
+            )
+            for warning in blocking_warnings[:5]:
+                blockers.append(f"Blocking warning: {warning}")
+            return "RISK_ADVISORY", confidence, reasons, blockers
+
+        if len(trading_blockers) >= 3:
             return "RISK_ADVISORY", confidence, reasons, blockers
 
         if losing_open >= 2 or any("outlier-driven" in r for r in reasons):
@@ -543,7 +695,7 @@ class LiveAdvisoryBridge:
             and meta_confidence == "HIGH"
             and median_sharpe is not None
             and median_sharpe >= 0.5
-            and warning_count == 0
+            and blocking_warning_count == 0
         )
 
         if buy_allowed:
@@ -570,18 +722,39 @@ class LiveAdvisoryBridge:
             payload, _err = _load_json(self._path(name))
             reports_raw[name] = payload
 
+        markets_open: bool | None = None
+        market_statuses: dict[str, Any] = {}
+        try:
+            from markets.market_hours import any_market_open, get_market_statuses
+
+            market_statuses = get_market_statuses()
+            markets_open = any_market_open()
+        except Exception:
+            market_statuses = {}
+
         runtime_snapshot = {
             **portfolio_part,
             **signals_part,
             "bot_status": self._bot_status(),
+            "any_market_open": markets_open,
+            "market_statuses": market_statuses,
         }
 
-        warning_count = self._warning_count(index, relevant_meta)
+        warning_analysis = self._analyze_warnings(
+            index,
+            relevant_meta,
+            markets_open=markets_open,
+        )
+        warning_count = int(warning_analysis.get("warning_count_total") or 0)
         tae_snapshot = {
             "total_reports": int((index or {}).get("total_reports") or 0),
             "valid_reports": int((index or {}).get("valid_reports") or 0),
             "invalid_reports": int((index or {}).get("invalid_reports") or 0),
             "warning_count": warning_count,
+            "blocking_warnings_count": warning_analysis.get("blocking_warnings_count", 0),
+            "informational_warnings_count": warning_analysis.get(
+                "informational_warnings_count", 0
+            ),
             "dominant_status": self._dominant_verdict(index),
             "advisory_index_present": index is not None and index_error is None,
             "advisory_index_generated_at": (index or {}).get("generated_at"),
@@ -597,6 +770,7 @@ class LiveAdvisoryBridge:
             runtime=runtime_snapshot,
             relevant=relevant_meta,
             reports_raw=reports_raw,
+            warning_analysis=warning_analysis,
         )
         blockers = all_blockers + blockers
 
@@ -613,6 +787,9 @@ class LiveAdvisoryBridge:
             confidence=confidence,
             reasons=reasons,
             blockers=blockers,
+            blocking_warnings=list(warning_analysis.get("blocking_warnings") or []),
+            informational_warnings=list(warning_analysis.get("informational_warnings") or []),
+            warning_audit=list(warning_analysis.get("warning_audit") or []),
             relevant_reports={
                 name: {
                     "state": meta.get("state"),

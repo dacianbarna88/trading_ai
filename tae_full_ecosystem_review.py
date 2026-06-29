@@ -264,8 +264,8 @@ def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, A
     bot_effective = runtime.get("bot_status_effective", "UNKNOWN")
     dashboard_running = runtime.get("dashboard_process_status") == "RUNNING"
     advisory_valid = advisory.get("present") and advisory.get("action")
-    x8_active = bool(runtime.get("advisory_status", {}).get("block_new_buy") is not None)
-    x8_blocks = bool(runtime.get("advisory_status", {}).get("block_new_buy"))
+    x8_active = advisory.get("present") is True
+    x8_blocks = bool(advisory.get("blocks_new_buy"))
 
     bot_stopped_expected = (
         not any_open
@@ -320,6 +320,8 @@ def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, A
 
     if bot_stopped_expected and not any_open:
         verdict = "READY" if advisory_valid else "WARNING"
+    elif bot_effective == "RUNNING" and advisory_valid and not adv.get("blocks_new_buy"):
+        verdict = "READY"
     elif bot_effective == "RUNNING" and advisory_valid:
         verdict = "READY"
     elif any_open and bot_effective != "RUNNING":
@@ -403,8 +405,8 @@ def _x9_readiness(root: Path) -> dict[str, Any]:
         label = "MISSING"
         message = "live_bot.py missing shadow ledger hooks."
     elif events_count == 0:
-        label = "NO_EVENTS_YET"
-        message = "X.9 ledger ready; no runtime BUY events yet."
+        label = "READY"
+        message = "X.9 ledger ready; no runtime BUY events yet (OK before market open)."
     else:
         label = "READY"
         message = f"X.9 ledger active with {events_count} event(s)."
@@ -969,6 +971,25 @@ def _runtime_status(root: Path) -> dict[str, Any]:
     }
 
 
+def _sell_accounting_protection_status(root: Path) -> str:
+    """Detect whether live_bot update_portfolio_prices skips SELL rows."""
+    path = root / LIVE_BOT_SCRIPT
+    if not path.is_file():
+        return "NOT_ACTIVE"
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError:
+        return "NOT_ACTIVE"
+    required = (
+        'if action in {"SELL", "DEPOSIT"}:',
+        "continue",
+        "open BUY rows only",
+    )
+    if all(token in source for token in required):
+        return "ACTIVE"
+    return "NOT_ACTIVE"
+
+
 def _tae_advisory_section(root: Path) -> dict[str, Any]:
     payload, err = _load_json(root / "tae_live_advisory.json")
     if not payload:
@@ -999,12 +1020,29 @@ def _tae_advisory_section(root: Path) -> dict[str, Any]:
     else:
         practical.append("NO_ACTION / neutral advisory — live bot uses inline rules only.")
 
+    tae_snapshot = payload.get("tae_snapshot") or {}
+    blocking_count = int(
+        adv.get("blocking_warnings_count") or tae_snapshot.get("blocking_warnings_count") or 0
+    )
+    informational_count = int(
+        adv.get("informational_warnings_count")
+        or tae_snapshot.get("informational_warnings_count")
+        or 0
+    )
+    risk_from_real_blockers = action == "RISK_ADVISORY" and blocking_count > 0
+
     return {
         "present": True,
         "action": action,
         "confidence": adv.get("confidence"),
         "reasons": list(adv.get("reasons") or [])[:15],
         "blockers": list(adv.get("blockers") or [])[:15],
+        "blocking_warnings": list(adv.get("blocking_warnings") or [])[:20],
+        "informational_warnings": list(adv.get("informational_warnings") or [])[:20],
+        "blocking_warnings_count": blocking_count,
+        "informational_warnings_count": informational_count,
+        "warning_audit": list(adv.get("warning_audit") or [])[:30],
+        "risk_advisory_from_real_blocking_warnings": risk_from_real_blockers,
         "blocks_new_buy": block_new_buy,
         "block_reason": block_reason,
         "practical_meaning_today": practical,
@@ -1479,6 +1517,31 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
     profit_adv = _profit_advisory(runtime, financial, signals, advisory, shadow, strategy, learning)
     cannot = _cannot_conclude(artifacts, shadow, strategy, financial, runtime)
     final = _final_verdict(runtime, financial, shadow, learning, artifacts, market_readiness)
+    sell_protection = _sell_accounting_protection_status(root)
+    x9_label = (runtime.get("x9_readiness") or {}).get("readiness_label", "NOT_READY")
+
+    market_open_readiness = {
+        "market_readiness_verdict": market_readiness.get("verdict"),
+        "session_guard_expected_action": market_readiness.get("next_action_for_market_open"),
+        "session_guard_start_reason": market_readiness.get("session_guard_start_reason"),
+        "bot_stopped_expected_overnight": market_readiness.get("bot_stopped_expected"),
+        "dashboard_stopped_expected_overnight": market_readiness.get("dashboard_stopped_expected"),
+        "advisory_action": advisory.get("action"),
+        "advisory_confidence": advisory.get("confidence"),
+        "advisory_blocks_new_buy": advisory.get("blocks_new_buy"),
+        "blocking_warnings_count": advisory.get("blocking_warnings_count", 0),
+        "informational_warnings_count": advisory.get("informational_warnings_count", 0),
+        "risk_advisory_from_real_blocking_warnings": advisory.get(
+            "risk_advisory_from_real_blocking_warnings"
+        ),
+        "blocking_warnings": list(advisory.get("blocking_warnings") or [])[:10],
+        "informational_warnings": list(advisory.get("informational_warnings") or [])[:10],
+        "sell_accounting_protection": sell_protection,
+        "x9_ledger_readiness": x9_label if x9_label in {"READY", "MISSING"} else (
+            "READY" if (runtime.get("x9_readiness") or {}).get("live_bot_wired") else "NOT_READY"
+        ),
+        "x9_buy_path_will_log": market_readiness.get("buy_path_will_log_on_open"),
+    }
 
     return {
         "schema": SCHEMA,
@@ -1488,6 +1551,7 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
         "artifacts_read": artifacts,
         "A_runtime_status": runtime,
         "Market_Readiness": market_readiness,
+        "Market_Open_Readiness": market_open_readiness,
         "B_financial_status": financial,
         "Performance_Drag_Analysis": performance_drag,
         "Execution_Integrity": {
@@ -1562,6 +1626,10 @@ def render_markdown(review: dict[str, Any]) -> str:
         f"- Markets: {market.get('market_statuses')}",
         f"- Dashboard running: {market.get('dashboard_running')}",
         f"- X.8 blocks new BUY: {market.get('x8_blocks_new_buy')}",
+        f"- Advisory blocking warnings: {adv.get('blocking_warnings_count', 0)} | "
+        f"informational: {adv.get('informational_warnings_count', 0)}",
+        f"- RISK from real blockers only: {adv.get('risk_advisory_from_real_blocking_warnings')}",
+        f"- SELL accounting protection: {review.get('Market_Open_Readiness', {}).get('sell_accounting_protection')}",
         f"- X.9 ledger: {market.get('x9_readiness_label')}",
         f"- BUY path will log on open: {market.get('buy_path_will_log_on_open')}",
         f"- Next action: {market.get('next_action_for_market_open')}",
@@ -1692,6 +1760,7 @@ def print_terminal_summary(review: dict[str, Any]) -> None:
     final = review["J_final_verdict"]
     rt = review["A_runtime_status"]
     market = review.get("Market_Readiness") or {}
+    mor = review.get("Market_Open_Readiness") or {}
     fin = review["B_financial_status"]
     sig = review["C_live_signals_today"]
     adv = review["D_tae_advisory"]
@@ -1723,8 +1792,15 @@ def print_terminal_summary(review: dict[str, Any]) -> None:
     for note in (market.get("notes") or [])[:2]:
         print(f"  {note}")
     print(f"Advisory: {adv.get('action')} | blocks new BUY: {adv.get('blocks_new_buy')}")
+    print(
+        f"  blocking={mor.get('blocking_warnings_count', adv.get('blocking_warnings_count', 0))} | "
+        f"informational={mor.get('informational_warnings_count', adv.get('informational_warnings_count', 0))}"
+    )
+    if adv.get("blocking_warnings"):
+        print(f"  blocking_warnings: {adv.get('blocking_warnings')[:3]}")
     print(f"Market readiness: {market.get('verdict', 'UNKNOWN')}")
-    print(f"X.9 ledger: {x9.get('readiness_label', 'UNKNOWN')}")
+    print(f"SELL accounting protection: {mor.get('sell_accounting_protection', 'UNKNOWN')}")
+    print(f"X.9 ledger: {mor.get('x9_ledger_readiness', x9.get('readiness_label', 'UNKNOWN'))}")
     if x9.get("message"):
         print(f"  {x9.get('message')}")
     print(

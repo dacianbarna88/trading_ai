@@ -1,6 +1,6 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-29T22:28:25.773318+00:00  
+**Generated:** 2026-06-29T22:41:23.255415+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
@@ -9,21 +9,24 @@
 - Bot process: STOPPED
 - Dashboard process: STOPPED
 - Status file: STOPPED
-- Bot log age (s): 6559.7
-- Live signals age (s): 6560.3
+- Bot log age (s): 7337.2
+- Live signals age (s): 7337.7
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
-- Advisory: RISK_ADVISORY (blocks new BUY: True)
+- Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T01:28:25.725592+03:00
+- Local time: 2026-06-30T01:41:23.199347+03:00
 - Verdict: **READY**
 - Session guard reason: all_markets_closed
 - Bot stopped expected: True
 - Markets: {'US': False, 'EU': False, 'UK': False, 'ASIA': False}
 - Dashboard running: False
-- X.8 blocks new BUY: True
-- X.9 ledger: NO_EVENTS_YET
+- X.8 blocks new BUY: False
+- Advisory blocking warnings: 0 | informational: 5
+- RISK from real blockers only: False
+- SELL accounting protection: ACTIVE
+- X.9 ledger: READY
 - BUY path will log on open: True
 - Next action: WAIT_FOR_MARKET_OPEN_THEN_SESSION_GUARD_START
 
@@ -56,9 +59,8 @@
 - Total: 15 | STRONG BUY: 5 | TAKE PROFIT: 4 | WAIT: 6
 
 ## D. TAE Advisory
-- Action: **RISK_ADVISORY** | Confidence: 53
-- RISK_ADVISORY active: new BUY orders would be blocked by X.8 gate in live_bot.
-- 5 STRONG BUY signal(s) present — TAE would block new entries today.
+- Action: **SELL_ADVISORY** | Confidence: 78
+- SELL_ADVISORY: review exits only; no auto-sell.
 
 ## E. X.9 Shadow Validation
 - Events: 0 | Allowed: 0 | Blocked: 0 | Skipped: 0
@@ -88,15 +90,14 @@
 
 ## I. Profit Maximization Advisory (no auto execution)
 - COLLECT_MORE_DATA
-- DO_NOT_BUY
 - TAKE_PROFIT_REVIEW
 - CONSIDER_TOP_STRATEGY_ALIGNMENT
 
 ## J. Final Verdict
-- **WARNING**
+- **ECOSYSTEM_HEALTHY**
 - Financial today: UNKNOWN
 - Learning progress: STATIC
-- Next action: DO_NOT_OPEN_NEW_BUY_REVIEW_EXISTING
+- Next action: WAIT_FOR_MARKET_OPEN_THEN_SESSION_GUARD_START
 
 ## Cannot Conclude Yet
 - Gate performance: no shadow validation events yet.
