@@ -1,0 +1,680 @@
+"""
+TAE Live Advisory Bridge — Phase X Sprint X.7C
+
+PAPER_ONLY | ADVISORY_ONLY | NO_BROKER | NO_EXECUTION | NO_PORTFOLIO_CHANGE
+
+Read-only bridge: advisory index + live artifacts + selected tae reports → tae_live_advisory.json.
+Does not modify live_bot.py, portfolio.csv, live_signals.csv, or trigger execution.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import logging
+import statistics
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from research_core.governance.advisory_index import (
+    TIMESTAMP_KEYS,
+    VERDICT_KEYS,
+    _extract_verdict,
+    _extract_warnings,
+)
+
+logger = logging.getLogger(__name__)
+
+LIVE_ADVISORY_SAFETY_BANNER = (
+    "PAPER_ONLY | ADVISORY_ONLY | NO_BROKER | NO_EXECUTION | NO_PORTFOLIO_CHANGE"
+)
+
+DEFAULT_OUTPUT_PATH = Path("tae_live_advisory.json")
+ADVISORY_INDEX_PATH = Path("tae_advisory_index.json")
+PORTFOLIO_PATH = Path("portfolio.csv")
+LIVE_SIGNALS_PATH = Path("live_signals.csv")
+BOT_STATUS_PATH = Path("bot_status.txt")
+LIVE_BOT_PATH = Path("live_bot.py")
+
+# Align with live_bot.py inline constants (does not import live_bot).
+LIVE_STARTING_CAPITAL = 30000.0
+LIVE_MAX_POSITIONS = 12
+LIVE_MIN_BUY_SCORE = 80
+
+RELEVANT_TAE_REPORTS = (
+    "tae_quick_health_check.json",
+    "tae_meta_intelligence.json",
+    "tae_continuous_strategy_ranking.json",
+    "tae_historical_results_analysis.json",
+    "tae_strategic_performance_audit.json",
+    "tae_full_ecosystem_run.json",
+    "tae_ecosystem_orchestrator.json",
+)
+
+ADVISORY_ACTIONS = (
+    "NO_ACTION",
+    "BUY_ADVISORY",
+    "SELL_ADVISORY",
+    "RISK_ADVISORY",
+)
+
+QUICK_HEALTH_READY = frozenset(
+    {
+        "TAE_QUICK_HEALTH_READY",
+        "TAE_QUICK_HEALTH_READY_WITH_WARNINGS",
+    }
+)
+
+NEGATIVE_VERDICT_MARKERS = (
+    "BLOCKED",
+    "FAILED",
+    "NOT_READY",
+    "ANOMALY",
+    "MISMATCH",
+    "DISTORTION",
+)
+
+
+def _load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    if not path.is_file():
+        return None, "missing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, f"invalid_json: {exc}"
+    except OSError as exc:
+        return None, f"read_error: {exc}"
+    if not isinstance(payload, dict):
+        return None, "invalid_root"
+    return payload, None
+
+
+def _parse_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return float(statistics.median(values))
+
+
+@dataclass
+class LiveAdvisoryReport:
+    runtime_snapshot: dict[str, Any]
+    tae_snapshot: dict[str, Any]
+    action: str
+    confidence: int
+    reasons: list[str]
+    blockers: list[str]
+    relevant_reports: dict[str, Any] = field(default_factory=dict)
+    live_bot_not_modified: bool = True
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "tae.live_advisory.v1",
+            "mode": "PAPER_ONLY_ADVISORY",
+            "live_trading_impact": "NONE",
+            "generated_at": self.generated_at.isoformat(),
+            "safety_mode": LIVE_ADVISORY_SAFETY_BANNER,
+            "runtime_snapshot": dict(self.runtime_snapshot),
+            "tae_snapshot": dict(self.tae_snapshot),
+            "advisory": {
+                "action": self.action,
+                "confidence": self.confidence,
+                "reasons": list(self.reasons),
+                "blockers": list(self.blockers),
+            },
+            "relevant_reports_summary": self.relevant_reports,
+            "safety": {
+                "no_broker": True,
+                "no_execution": True,
+                "live_bot_not_modified": self.live_bot_not_modified,
+                "advisory_only": True,
+            },
+        }
+
+
+class LiveAdvisoryBridge:
+    """Build read-only live advisory artifact from index + live CSV + TAE reports."""
+
+    def __init__(self, root: Path | str = ".") -> None:
+        self._root = Path(root)
+
+    def _path(self, name: str | Path) -> Path:
+        return self._root / name
+
+    def _read_portfolio_rows(self) -> tuple[list[dict[str, str]], str | None]:
+        path = self._path(PORTFOLIO_PATH)
+        if not path.is_file():
+            return [], "portfolio.csv missing"
+        try:
+            with path.open(encoding="utf-8", errors="replace", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+        except OSError as exc:
+            return [], f"portfolio.csv unreadable: {exc}"
+        if not rows:
+            return [], "portfolio.csv empty"
+        return rows, None
+
+    def _portfolio_snapshot(self) -> tuple[dict[str, Any], list[str]]:
+        rows, error = self._read_portfolio_rows()
+        blockers: list[str] = []
+        if error:
+            blockers.append(error)
+            return {
+                "open_positions_count": None,
+                "portfolio_row_count": 0,
+                "cash_available_usd": None,
+                "losing_open_positions": 0,
+                "portfolio_readable": False,
+            }, blockers
+
+        spent = 0.0
+        received = 0.0
+        deposited = 0.0
+        positions: dict[str, dict[str, float]] = {}
+
+        for row in rows:
+            action = str(row.get("Action", "")).upper()
+            ticker = str(row.get("Ticker", "")).strip().upper()
+            price = _parse_float(row.get("Price")) or 0.0
+            shares = _parse_float(row.get("Shares")) or 0.0
+
+            if action == "BUY":
+                spent += price * shares
+                if ticker:
+                    bucket = positions.setdefault(
+                        ticker, {"buy_shares": 0.0, "sell_shares": 0.0, "buy_value": 0.0}
+                    )
+                    bucket["buy_shares"] += shares
+                    bucket["buy_value"] += price * shares
+            elif action == "SELL":
+                received += price * shares
+                if ticker:
+                    bucket = positions.setdefault(
+                        ticker, {"buy_shares": 0.0, "sell_shares": 0.0, "buy_value": 0.0}
+                    )
+                    bucket["sell_shares"] += shares
+            elif action == "DEPOSIT":
+                deposited += price * shares
+
+        open_count = 0
+        losing_open = 0
+        for ticker, bucket in positions.items():
+            open_shares = bucket["buy_shares"] - bucket["sell_shares"]
+            if open_shares <= 0:
+                continue
+            open_count += 1
+            pnl_pct = None
+            for row in reversed(rows):
+                if str(row.get("Ticker", "")).upper() != ticker:
+                    continue
+                if str(row.get("Action", "")).upper() != "BUY":
+                    continue
+                pnl_pct = _parse_float(row.get("PnL_%"))
+                break
+            if pnl_pct is not None and pnl_pct <= -3.0:
+                losing_open += 1
+
+        cash = LIVE_STARTING_CAPITAL + deposited - spent + received
+
+        return {
+            "open_positions_count": open_count,
+            "portfolio_row_count": len(rows),
+            "cash_available_usd": round(cash, 2),
+            "losing_open_positions": losing_open,
+            "portfolio_readable": True,
+        }, blockers
+
+    def _live_signals_snapshot(self) -> tuple[dict[str, Any], list[str]]:
+        path = self._path(LIVE_SIGNALS_PATH)
+        blockers: list[str] = []
+        if not path.is_file():
+            return {
+                "latest_live_signal_count": 0,
+                "strong_buy_signal_count": 0,
+                "take_profit_signal_count": 0,
+                "live_signals_present": False,
+                "latest_signal_time": None,
+            }, blockers
+
+        try:
+            with path.open(encoding="utf-8", errors="replace", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+        except OSError as exc:
+            blockers.append(f"live_signals.csv unreadable: {exc}")
+            return {
+                "latest_live_signal_count": 0,
+                "strong_buy_signal_count": 0,
+                "take_profit_signal_count": 0,
+                "live_signals_present": False,
+                "latest_signal_time": None,
+            }, blockers
+
+        strong_buy = 0
+        take_profit = 0
+        high_score_buys = 0
+        latest_time = None
+
+        for row in rows:
+            signal = str(row.get("Signal", "")).upper()
+            score = _parse_float(row.get("Score")) or 0.0
+            if signal == "STRONG BUY":
+                strong_buy += 1
+                if score >= LIVE_MIN_BUY_SCORE:
+                    high_score_buys += 1
+            elif signal == "TAKE PROFIT":
+                take_profit += 1
+            ts = row.get("Time")
+            if ts and (latest_time is None or str(ts) > str(latest_time)):
+                latest_time = str(ts)
+
+        return {
+            "latest_live_signal_count": len(rows),
+            "strong_buy_signal_count": strong_buy,
+            "high_score_strong_buy_count": high_score_buys,
+            "take_profit_signal_count": take_profit,
+            "live_signals_present": True,
+            "latest_signal_time": latest_time,
+        }, blockers
+
+    def _bot_status(self) -> str:
+        path = self._path(BOT_STATUS_PATH)
+        if not path.is_file():
+            return "UNKNOWN"
+        return path.read_text(encoding="utf-8", errors="replace").strip() or "UNKNOWN"
+
+    def _load_advisory_index(self) -> tuple[dict[str, Any] | None, str | None]:
+        return _load_json(self._path(ADVISORY_INDEX_PATH))
+
+    def _load_relevant_reports(self) -> dict[str, Any]:
+        loaded: dict[str, Any] = {}
+        for name in RELEVANT_TAE_REPORTS:
+            payload, error = _load_json(self._path(name))
+            loaded[name] = {
+                "state": "ok" if payload is not None else error or "missing",
+                "verdict": _extract_verdict(payload) if payload else None,
+                "warnings": _extract_warnings(payload) if payload else [],
+            }
+            if payload:
+                for key in TIMESTAMP_KEYS:
+                    if payload.get(key):
+                        loaded[name]["timestamp"] = payload.get(key)
+                        break
+        return loaded
+
+    @staticmethod
+    def _dominant_verdict(index: dict[str, Any] | None) -> str | None:
+        if not index:
+            return None
+        distribution = index.get("verdict_status_distribution") or {}
+        if not distribution:
+            return None
+        return max(distribution.items(), key=lambda item: (item[1], item[0]))[0]
+
+    @staticmethod
+    def _warning_count(index: dict[str, Any] | None, relevant: dict[str, Any]) -> int:
+        total = 0
+        if index:
+            dist = index.get("warnings_distribution") or {}
+            total += sum(int(v) for v in dist.values())
+            total += int(index.get("invalid_reports") or 0)
+        for meta in relevant.values():
+            total += len(meta.get("warnings") or [])
+        return total
+
+    @staticmethod
+    def _historical_median_metrics(
+        historical: dict[str, Any] | None,
+    ) -> tuple[float | None, float | None, float | None, list[str]]:
+        """Median-first view of historical results (robust shortlist)."""
+        notes: list[str] = []
+        if not historical:
+            return None, None, None, ["tae_historical_results_analysis.json missing"]
+
+        shortlist = historical.get("robust_strategy_shortlist") or []
+        if not isinstance(shortlist, list) or not shortlist:
+            return None, None, None, ["historical robust shortlist empty"]
+
+        profit_values = [
+            v
+            for item in shortlist
+            if isinstance(item, dict)
+            for v in [_parse_float(item.get("avg_profit_pct"))]
+            if v is not None
+        ]
+        sharpe_values = [
+            v
+            for item in shortlist
+            if isinstance(item, dict)
+            for v in [_parse_float(item.get("avg_sharpe"))]
+            if v is not None
+        ]
+
+        median_profit = _median(profit_values)
+        median_sharpe = _median(sharpe_values)
+
+        mean_profit = None
+        for line in historical.get("research_conclusions") or []:
+            text = str(line)
+            if "profit_pct" in text and "averages" in text.lower():
+                parts = text.replace(",", "").split()
+                for token in parts:
+                    try:
+                        mean_profit = float(token)
+                    except ValueError:
+                        continue
+                break
+
+        if (
+            mean_profit is not None
+            and median_profit is not None
+            and abs(mean_profit) > max(10.0, abs(median_profit) * 10)
+        ):
+            notes.append(
+                "Historical mean profit_pct is outlier-driven vs robust median "
+                f"(mean≈{mean_profit:.2f}, median≈{median_profit:.2f})"
+            )
+
+        return median_profit, median_sharpe, mean_profit, notes
+
+    def _derive_advisory(
+        self,
+        *,
+        index: dict[str, Any] | None,
+        index_error: str | None,
+        runtime: dict[str, Any],
+        relevant: dict[str, Any],
+        reports_raw: dict[str, dict[str, Any] | None],
+    ) -> tuple[str, int, list[str], list[str]]:
+        reasons: list[str] = []
+        blockers: list[str] = []
+        confidence = 55
+
+        if index_error or index is None:
+            blockers.append("tae_advisory_index.json missing or invalid")
+        else:
+            total = int(index.get("total_reports") or 0)
+            valid = int(index.get("valid_reports") or 0)
+            invalid = int(index.get("invalid_reports") or 0)
+            if total == 0:
+                blockers.append("advisory index reports zero total_reports")
+            if invalid > 0:
+                blockers.append(f"{invalid} invalid TAE JSON report(s) in advisory index")
+                confidence -= 20
+            elif valid == total and total > 0:
+                reasons.append(f"All {valid} indexed TAE reports parse as valid JSON")
+                confidence += 10
+
+        warning_count = self._warning_count(index, relevant)
+        if warning_count:
+            reasons.append(f"Aggregated TAE/live warning count: {warning_count}")
+            confidence -= min(25, warning_count * 4)
+
+        historical = reports_raw.get("tae_historical_results_analysis.json")
+        median_profit, median_sharpe, _mean_profit, hist_notes = (
+            self._historical_median_metrics(historical)
+        )
+        for note in hist_notes:
+            if "missing" in note or "empty" in note:
+                blockers.append(note)
+            else:
+                reasons.append(note)
+
+        meta = reports_raw.get("tae_meta_intelligence.json")
+        meta_confidence = None
+        if meta:
+            obs = meta.get("strategic_observations") or {}
+            conf = obs.get("overall_ecosystem_confidence") or {}
+            meta_confidence = str(conf.get("confidence_label") or "").upper()
+            composite = _parse_float(conf.get("composite_score"))
+            if meta_confidence == "HIGH" and composite is not None and composite >= 0.85:
+                reasons.append(f"Meta intelligence confidence HIGH ({composite:.3f})")
+                confidence += 8
+            elif meta_confidence:
+                reasons.append(f"Meta intelligence confidence label: {meta_confidence}")
+        else:
+            blockers.append("tae_meta_intelligence.json missing")
+
+        quick = reports_raw.get("tae_quick_health_check.json")
+        quick_verdict = _extract_verdict(quick) if quick else None
+        if quick_verdict in QUICK_HEALTH_READY:
+            reasons.append(f"Quick health verdict: {quick_verdict}")
+            confidence += 5
+        elif quick is None:
+            blockers.append("tae_quick_health_check.json missing")
+        else:
+            blockers.append(f"Quick health not ready: {quick_verdict or 'unknown'}")
+            confidence -= 10
+
+        dominant = self._dominant_verdict(index)
+        if dominant:
+            reasons.append(f"Dominant indexed verdict/status: {dominant}")
+            if any(marker in dominant.upper() for marker in NEGATIVE_VERDICT_MARKERS):
+                blockers.append(f"Dominant status negative: {dominant}")
+                confidence -= 8
+
+        open_positions = runtime.get("open_positions_count")
+        if open_positions is None:
+            blockers.append("open_positions_count unavailable")
+        else:
+            reasons.append(f"Open positions: {open_positions}")
+            if open_positions >= LIVE_MAX_POSITIONS:
+                blockers.append(f"Open positions at live max ({LIVE_MAX_POSITIONS})")
+                confidence -= 12
+
+        bot_status = runtime.get("bot_status", "UNKNOWN")
+        reasons.append(f"Bot status: {bot_status}")
+
+        strong_buys = int(runtime.get("high_score_strong_buy_count") or 0)
+        take_profit = int(runtime.get("take_profit_signal_count") or 0)
+        losing_open = int(runtime.get("losing_open_positions") or 0)
+        signals_present = bool(runtime.get("live_signals_present"))
+
+        if signals_present:
+            reasons.append(
+                f"Live signals: {runtime.get('latest_live_signal_count')} rows, "
+                f"{strong_buys} STRONG BUY (>={LIVE_MIN_BUY_SCORE})"
+            )
+        else:
+            blockers.append("live_signals.csv missing")
+
+        if median_profit is not None:
+            reasons.append(f"Historical robust median avg_profit_pct: {median_profit:.2f}")
+        if median_sharpe is not None:
+            reasons.append(f"Historical robust median avg_sharpe: {median_sharpe:.2f}")
+
+        confidence = max(0, min(100, confidence))
+
+        # --- Action selection (conservative; RISK first) ---
+        invalid_reports = int((index or {}).get("invalid_reports") or 0)
+        if invalid_reports > 0:
+            return "RISK_ADVISORY", confidence, reasons, blockers
+
+        if warning_count >= 3 or len(blockers) >= 3:
+            if warning_count >= 3:
+                blockers.append(f"Elevated aggregated warning count ({warning_count})")
+            return "RISK_ADVISORY", confidence, reasons, blockers
+
+        if losing_open >= 2 or any("outlier-driven" in r for r in reasons):
+            if any("outlier-driven" in r for r in reasons):
+                blockers.append("Historical mean/median profit contradiction (outlier-driven)")
+            if losing_open >= 2:
+                blockers.append(f"{losing_open} open positions below -3% PnL")
+            return "RISK_ADVISORY", confidence, reasons, blockers
+
+        if quick_verdict and quick_verdict not in QUICK_HEALTH_READY:
+            blockers.append(f"Quick health not ready: {quick_verdict}")
+            return "RISK_ADVISORY", confidence, reasons, blockers
+
+        perf = reports_raw.get("tae_strategic_performance_audit.json")
+        if perf:
+            perf_verdict = str(_extract_verdict(perf) or "").upper()
+            if any(m in perf_verdict for m in ("ANOMALY", "MISMATCH", "DISTORTION")):
+                blockers.append(f"Strategic performance audit flag: {perf_verdict}")
+                return "RISK_ADVISORY", confidence, reasons, blockers
+
+        if take_profit > 0 or losing_open >= 1:
+            if take_profit > 0:
+                reasons.append(f"{take_profit} TAKE PROFIT live signal(s) — advisory exit review")
+            if losing_open >= 1:
+                reasons.append(
+                    f"{losing_open} open position(s) at or below -3% PnL — advisory risk review"
+                )
+            return "SELL_ADVISORY", confidence, reasons, blockers
+
+        buy_allowed = (
+            invalid_reports == 0
+            and not blockers
+            and signals_present
+            and strong_buys >= 1
+            and open_positions is not None
+            and open_positions < LIVE_MAX_POSITIONS
+            and quick_verdict in QUICK_HEALTH_READY
+            and meta_confidence == "HIGH"
+            and median_sharpe is not None
+            and median_sharpe >= 0.5
+            and warning_count == 0
+        )
+
+        if buy_allowed:
+            reasons.append(
+                "Aligned live STRONG BUY signals, HIGH meta confidence, valid TAE index, "
+                "and median-first historical Sharpe support — advisory only"
+            )
+            confidence = min(100, confidence + 5)
+            return "BUY_ADVISORY", confidence, reasons, blockers
+
+        if blockers:
+            reasons.append("Incomplete or blocked inputs — defaulting to NO_ACTION")
+
+        return "NO_ACTION", confidence, reasons, blockers
+
+    def build(self, *, live_bot_mtime_before: float | None = None) -> LiveAdvisoryReport:
+        index, index_error = self._load_advisory_index()
+        portfolio_part, portfolio_blockers = self._portfolio_snapshot()
+        signals_part, signal_blockers = self._live_signals_snapshot()
+        relevant_meta = self._load_relevant_reports()
+
+        reports_raw: dict[str, dict[str, Any] | None] = {}
+        for name in RELEVANT_TAE_REPORTS:
+            payload, _err = _load_json(self._path(name))
+            reports_raw[name] = payload
+
+        runtime_snapshot = {
+            **portfolio_part,
+            **signals_part,
+            "bot_status": self._bot_status(),
+        }
+
+        warning_count = self._warning_count(index, relevant_meta)
+        tae_snapshot = {
+            "total_reports": int((index or {}).get("total_reports") or 0),
+            "valid_reports": int((index or {}).get("valid_reports") or 0),
+            "invalid_reports": int((index or {}).get("invalid_reports") or 0),
+            "warning_count": warning_count,
+            "dominant_status": self._dominant_verdict(index),
+            "advisory_index_present": index is not None and index_error is None,
+            "advisory_index_generated_at": (index or {}).get("generated_at"),
+            "relevant_reports_loaded": [
+                name for name, meta in relevant_meta.items() if meta.get("state") == "ok"
+            ],
+        }
+
+        all_blockers = list(portfolio_blockers) + list(signal_blockers)
+        action, confidence, reasons, blockers = self._derive_advisory(
+            index=index,
+            index_error=index_error,
+            runtime=runtime_snapshot,
+            relevant=relevant_meta,
+            reports_raw=reports_raw,
+        )
+        blockers = all_blockers + blockers
+
+        live_bot_not_modified = True
+        if live_bot_mtime_before is not None and self._path(LIVE_BOT_PATH).is_file():
+            live_bot_not_modified = (
+                self._path(LIVE_BOT_PATH).stat().st_mtime == live_bot_mtime_before
+            )
+
+        return LiveAdvisoryReport(
+            runtime_snapshot=runtime_snapshot,
+            tae_snapshot=tae_snapshot,
+            action=action,
+            confidence=confidence,
+            reasons=reasons,
+            blockers=blockers,
+            relevant_reports={
+                name: {
+                    "state": meta.get("state"),
+                    "verdict": meta.get("verdict"),
+                    "warning_count": len(meta.get("warnings") or []),
+                }
+                for name, meta in relevant_meta.items()
+            },
+            live_bot_not_modified=live_bot_not_modified,
+        )
+
+    def build_and_persist(
+        self,
+        output_path: Path | None = None,
+        *,
+        live_bot_mtime_before: float | None = None,
+    ) -> tuple[LiveAdvisoryReport, Path]:
+        report = self.build(live_bot_mtime_before=live_bot_mtime_before)
+        path = output_path or self._path(DEFAULT_OUTPUT_PATH)
+        path.write_text(
+            json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return report, path
+
+    @staticmethod
+    def format_text(report: LiveAdvisoryReport) -> str:
+        payload = report.to_dict()
+        lines = [
+            "===== TAE LIVE ADVISORY BRIDGE — SPRINT X.7C =====",
+            "",
+            f"Mode: {payload['mode']}",
+            f"Live trading impact: {payload['live_trading_impact']}",
+            f"Generated: {payload['generated_at']}",
+            "",
+            "===== RUNTIME SNAPSHOT =====",
+        ]
+        for key, value in payload["runtime_snapshot"].items():
+            lines.append(f"  {key}: {value}")
+        lines.extend(["", "===== TAE SNAPSHOT ====="])
+        for key, value in payload["tae_snapshot"].items():
+            lines.append(f"  {key}: {value}")
+        lines.extend(
+            [
+                "",
+                "===== ADVISORY =====",
+                f"  action: {payload['advisory']['action']}",
+                f"  confidence: {payload['advisory']['confidence']}",
+                "",
+                "  reasons:",
+            ]
+        )
+        for reason in payload["advisory"]["reasons"]:
+            lines.append(f"    • {reason}")
+        lines.append("")
+        lines.append("  blockers:")
+        if payload["advisory"]["blockers"]:
+            for blocker in payload["advisory"]["blockers"]:
+                lines.append(f"    • {blocker}")
+        else:
+            lines.append("    • (none)")
+        lines.extend(["", "===== SAFETY ====="])
+        for key, value in payload["safety"].items():
+            lines.append(f"  {key}: {value}")
+        return "\n".join(lines)
