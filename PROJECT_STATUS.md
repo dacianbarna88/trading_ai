@@ -103,3 +103,78 @@ Goal:
 
 Evaluate whether virtual threshold-80 candidates outperform the current threshold-90 approach using real market outcomes.
 
+
+---
+
+## TAE Sprint X.7–X.8 Checkpoint
+
+### Status Git
+- X.7 connectivity audit: committed & pushed
+- X.7A dashboard visibility: committed & pushed
+- X.7B advisory index: committed & pushed
+- X.7C live advisory bridge: committed & pushed
+- X.8 live bot advisory risk gate: committed & pushed
+
+### Ce avem acum
+
+#### Runtime
+- Bot LIVE funcțional
+- Dashboard funcțional
+- Autostart funcțional
+- Market Session Guard per ticker
+- Awake Guard
+- Quick Health funcțional
+
+#### TAE Intelligence
+- Historical Execution finalizat
+- Historical Results Analysis finalizat
+- Strategy Discovery / Ranking / Registry existente
+- Evidence Engine existent
+- Meta Intelligence / Meta Evolution existente
+- Event Memory scaffold existent
+- 85 rapoarte `tae_*.json` valide
+
+#### Observability
+- Dashboard afișează TAE Intelligence Reports
+- Dashboard afișează TAE Advisory Index
+- `tae_advisory_index.json` agregă rapoartele TAE
+- `tae_live_advisory.json` oferă verdict consultativ unic
+
+#### Integrare LIVE
+- `live_bot.py` citește advisory prin:
+  - `research_core/governance/live_advisory_runtime.py`
+- TAE este integrat ca risk gate
+- `RISK_ADVISORY` blochează doar BUY noi
+- SELL / STOP / TAKE PROFIT rămân permise
+- TAE NU forțează BUY
+- TAE NU forțează SELL
+
+### Ce NU avem încă
+
+- TAE nu modifică sizing
+- TAE nu modifică scorurile BUY
+- TAE nu modifică trailing stop
+- TAE nu modifică pragurile din settings
+- TAE nu execută tranzacții direct
+- Nu avem încă validare shadow pe mai multe zile
+- Nu avem încă raport statistic al BUY-urilor blocate de TAE
+
+### Concluzie arhitecturală
+
+TAE a trecut de la REPORT_ONLY la CONTROLLED_RUNTIME_INTEGRATION.
+
+Flux actual:
+
+LIVE → portfolio/live_signals → TAE reports → advisory index → live advisory → live_bot risk gate
+
+Impact LIVE actual:
+- BUY noi pot fi blocate de RISK_ADVISORY
+- SELL logic rămâne neatins
+
+### Următorul pas recomandat
+
+TAE Sprint X.9 — Shadow Mode Validation:
+- log pentru fiecare BUY permis/blocat
+- comparație bot fără TAE vs bot cu TAE risk gate
+- măsurare impact asupra randamentului, drawdown-ului și numărului de oportunități blocate
+
