@@ -55,6 +55,284 @@ def read_text(name):
     return ""
 
 
+TAE_REPORT_METADATA_ONLY_BYTES = 500_000
+TAE_TIMESTAMP_KEYS = (
+    "generated_at",
+    "created_at",
+    "report_date",
+    "updated_at",
+    "last_checkpoint_saved_at",
+)
+TAE_VERDICT_KEYS = ("verdict", "status", "overall_status", "health_status")
+
+
+def discover_tae_report_files():
+    return sorted(Path(".").glob("tae_*.json"))
+
+
+def load_tae_report_file(path: Path):
+    if not path.is_file():
+        return None, "missing", "File not found"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, "invalid", f"Invalid JSON: {exc}"
+    except OSError as exc:
+        return None, "invalid", f"Read error: {exc}"
+    if not isinstance(payload, dict):
+        return None, "invalid", "Root element must be a JSON object"
+    return payload, "ok", None
+
+
+def build_tae_report_summary(payload: dict) -> str:
+    parts: list[str] = []
+
+    if payload.get("recommended_next_action"):
+        parts.append(str(payload["recommended_next_action"]))
+
+    summary = payload.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        parts.append(summary.strip())
+    elif isinstance(summary, dict) and summary:
+        parts.append(json.dumps(summary, ensure_ascii=False)[:300])
+
+    conclusions = payload.get("research_conclusions")
+    if isinstance(conclusions, list):
+        parts.extend(str(item) for item in conclusions[:2] if item)
+
+    observations = payload.get("strategic_observations")
+    if isinstance(observations, dict):
+        confidence = observations.get("overall_ecosystem_confidence") or {}
+        if isinstance(confidence, dict) and confidence.get("confidence_label"):
+            parts.append(
+                "Ecosystem confidence: {label} ({score})".format(
+                    label=confidence.get("confidence_label"),
+                    score=confidence.get("composite_score"),
+                )
+            )
+        top = observations.get("highest_quality_strategy") or {}
+        if isinstance(top, dict) and top.get("candidate_id"):
+            parts.append(
+                "Top strategy: {cid} ({decision})".format(
+                    cid=top.get("candidate_id"),
+                    decision=top.get("decision"),
+                )
+            )
+
+    if "jobs_total" in payload:
+        parts.append(
+            "Jobs {completed}/{total} completed; blocked={blocked}; failed={failed}".format(
+                completed=payload.get("jobs_completed", "?"),
+                total=payload.get("jobs_total", "?"),
+                blocked=payload.get("jobs_blocked", 0),
+                failed=payload.get("jobs_failed", 0),
+            )
+        )
+
+    if payload.get("event_count") is not None:
+        parts.append(f"Events stored: {payload.get('event_count')}")
+
+    recommendation_summary = payload.get("recommendation_summary")
+    if isinstance(recommendation_summary, dict) and recommendation_summary:
+        items = ", ".join(
+            f"{key}={value}"
+            for key, value in list(recommendation_summary.items())[:4]
+        )
+        parts.append(f"Recommendations: {items}")
+
+    checks = payload.get("checks")
+    if isinstance(checks, list) and checks:
+        failed = [
+            str(item.get("check_id"))
+            for item in checks
+            if isinstance(item, dict) and str(item.get("status", "")).upper() not in {"OK", "HEALTHY"}
+        ]
+        if failed:
+            parts.append(f"Non-OK checks: {', '.join(failed[:5])}")
+
+    return " | ".join(parts[:4]) if parts else "—"
+
+
+def extract_tae_report_view(path: Path) -> dict:
+    payload, state, error = load_tae_report_file(path)
+    if state != "ok" or payload is None:
+        return {
+            "report": path.name,
+            "state": state,
+            "timestamp": None,
+            "timestamp_key": None,
+            "verdict": None,
+            "summary": None,
+            "warning": error,
+            "file_size_kb": round(path.stat().st_size / 1024, 1) if path.is_file() else None,
+        }
+
+    timestamp = None
+    timestamp_key = None
+    for key in TAE_TIMESTAMP_KEYS:
+        value = payload.get(key)
+        if value:
+            timestamp_key = key
+            timestamp = value
+            break
+
+    verdict = None
+    for key in TAE_VERDICT_KEYS:
+        value = payload.get(key)
+        if value:
+            verdict = value
+            break
+    if verdict is None and isinstance(payload.get("ecosystem_health"), dict):
+        verdict = payload["ecosystem_health"].get("overall_status")
+
+    report_warnings = payload.get("warnings")
+    warning = None
+    if isinstance(report_warnings, list) and report_warnings:
+        warning = "; ".join(str(item) for item in report_warnings[:3])
+
+    return {
+        "report": path.name,
+        "state": "ok",
+        "timestamp": timestamp,
+        "timestamp_key": timestamp_key,
+        "verdict": verdict,
+        "summary": build_tae_report_summary(payload),
+        "warning": warning,
+        "file_size_kb": round(path.stat().st_size / 1024, 1),
+        "schema": payload.get("schema"),
+        "payload": payload,
+    }
+
+
+def load_tae_advisory_index():
+    path = Path("tae_advisory_index.json")
+    if not path.is_file():
+        return None, "Advisory index not found — run tae_advisory_index_demo.py"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, f"Invalid advisory index: {exc}"
+    if not isinstance(payload, dict):
+        return None, "Advisory index root must be a JSON object"
+    return payload, None
+
+
+def render_tae_advisory_index_summary():
+    index, error = load_tae_advisory_index()
+    if error:
+        st.info(error)
+        return
+
+    st.markdown("#### TAE Advisory Index")
+    st.caption(
+        f"{index.get('mode', 'READ_ONLY_REPORT')} | "
+        f"Live trading impact: {index.get('live_trading_impact', 'NONE')}"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total indexed", index.get("total_reports", 0))
+    c2.metric("Valid", index.get("valid_reports", 0))
+    c3.metric("Invalid", index.get("invalid_reports", 0))
+    c4.metric(
+        "Generated",
+        (index.get("generated_at") or "—")[:19],
+    )
+
+    by_category = index.get("reports_by_category") or {}
+    latest = index.get("latest_timestamp_by_category") or {}
+    category_rows = []
+    for category, files in by_category.items():
+        if not files:
+            continue
+        category_rows.append(
+            {
+                "Category": category,
+                "Reports": len(files),
+                "Latest timestamp": latest.get(category) or "—",
+            }
+        )
+    if category_rows:
+        st.dataframe(pd.DataFrame(category_rows), width="stretch")
+
+    notes = index.get("advisory_notes") or []
+    if notes:
+        with st.expander("Advisory notes", expanded=False):
+            for note in notes:
+                st.write(f"• {note}")
+
+    verdict_dist = index.get("verdict_status_distribution") or {}
+    if verdict_dist:
+        with st.expander("Verdict / status distribution", expanded=False):
+            st.json(verdict_dist)
+
+    warnings_dist = index.get("warnings_distribution") or {}
+    if warnings_dist:
+        with st.expander("Warnings distribution", expanded=False):
+            st.json(warnings_dist)
+
+
+def render_tae_intelligence_reports():
+    st.subheader("TAE Intelligence Reports")
+    st.caption(
+        "READ-ONLY | UI ONLY | NO_AUTO_EXECUTION | Canonical tae_*.json visibility bridge"
+    )
+
+    render_tae_advisory_index_summary()
+    st.divider()
+
+    report_paths = discover_tae_report_files()
+    if not report_paths:
+        st.warning("No tae_*.json reports found in project root.")
+        return
+
+    views = [extract_tae_report_view(path) for path in report_paths]
+    ok_count = sum(1 for item in views if item["state"] == "ok")
+    invalid_count = sum(1 for item in views if item["state"] == "invalid")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Reports found", len(views))
+    c2.metric("Loaded OK", ok_count)
+    c3.metric("Invalid JSON", invalid_count)
+
+    overview_rows = []
+    for item in views:
+        overview_rows.append(
+            {
+                "Report": item["report"],
+                "State": item["state"].upper(),
+                "Timestamp": item["timestamp"] or "—",
+                "Verdict / Status": item["verdict"] or "—",
+                "Size (KB)": item.get("file_size_kb"),
+            }
+        )
+    st.dataframe(pd.DataFrame(overview_rows), width="stretch")
+
+    for item in views:
+        title = item["report"]
+        if item["state"] != "ok":
+            with st.expander(f"⚠️ {title} — {item['state'].upper()}", expanded=False):
+                st.warning(item.get("warning") or "Report unavailable")
+            continue
+
+        with st.expander(f"✅ {title}", expanded=False):
+            col_a, col_b = st.columns(2)
+            col_a.write(f"**Timestamp ({item['timestamp_key'] or 'n/a'}):** {item['timestamp'] or '—'}")
+            col_b.write(f"**Verdict / Status:** {item['verdict'] or '—'}")
+            if item.get("schema"):
+                st.write(f"**Schema:** `{item['schema']}`")
+            st.write(f"**Summary:** {item['summary']}")
+            if item.get("warning"):
+                st.warning(item["warning"])
+
+            payload = item.get("payload") or {}
+            size_kb = item.get("file_size_kb") or 0
+            if size_kb * 1024 > TAE_REPORT_METADATA_ONLY_BYTES:
+                st.info("Large report — metadata view only (full JSON not rendered).")
+            else:
+                with st.expander("Raw JSON (read-only)", expanded=False):
+                    st.json(payload)
+
+
 def get_live_price(ticker):
     try:
         data = yf.download(ticker, period="5d", auto_adjust=False, progress=False)
@@ -412,6 +690,7 @@ tabs = st.tabs([
     "📡 Live Signals Pro",
     "🧠 Investment Committee",
     "🧪 Strategic Validation",
+    "📡 TAE Intelligence Reports",
 ])
 
 with tabs[0]:
@@ -1448,6 +1727,9 @@ with tabs[11]:
     else:
         st.warning("Nu găsesc learning_automation_summary.txt")
 
+
+with tabs[12]:
+    render_tae_intelligence_reports()
 
 
 # ===== V27.4 DASHBOARD WEIGHT HISTORY PANEL =====
