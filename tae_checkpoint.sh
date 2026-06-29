@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TAE Governance Checkpoint — prepares sprint end state (no auto-commit)
+# TAE Governance Checkpoint — validation gate (commit via tae_finish_sprint.sh)
 set -u
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,6 +8,7 @@ cd "$PROJECT_DIR" || exit 1
 PYTHON="${PYTHON:-python3}"
 FAIL=0
 STEP=0
+FINISH_MODE="${TAE_FINISH_SPRINT:-0}"
 
 banner() {
   echo ""
@@ -23,6 +24,9 @@ run_step() {
 banner "TAE GOVERNANCE CHECKPOINT"
 echo "Project: $PROJECT_DIR"
 echo "Time:    $(date '+%Y-%m-%d %H:%M:%S')"
+if [[ "$FINISH_MODE" == "1" ]]; then
+  echo "Mode:    finish-sprint (autonomous commit follows)"
+fi
 
 # 1. Regenerate live advisory if demo exists
 run_step "Regenerate tae_live_advisory.json (if demo present)"
@@ -59,8 +63,11 @@ GOV_FILES=(
   research_core/governance/advisory_index_report.py
   research_core/governance/live_advisory_bridge.py
   research_core/governance/live_advisory_runtime.py
+  research_core/governance/shadow_validation_ledger.py
   tae_advisory_index_demo.py
   tae_live_advisory_demo.py
+  tae_shadow_validation_report.py
+  tae_full_ecosystem_review.py
 )
 
 for f in "${GOV_FILES[@]}"; do
@@ -83,6 +90,16 @@ if [[ -f research_core/governance/live_advisory_runtime.py ]]; then
     echo "OK: live_advisory_runtime self-check"
   else
     echo "FAIL: live_advisory_runtime self-check"
+    FAIL=1
+  fi
+fi
+
+if [[ -f research_core/governance/shadow_validation_ledger.py ]]; then
+  run_step "Shadow validation ledger self-check"
+  if "$PYTHON" research_core/governance/shadow_validation_ledger.py; then
+    echo "OK: shadow_validation_ledger self-check"
+  else
+    echo "FAIL: shadow_validation_ledger self-check"
     FAIL=1
   fi
 fi
@@ -123,37 +140,25 @@ fi
 
 banner "CHECKPOINT RESULT"
 if [[ "$FAIL" -eq 0 ]]; then
-  echo "Status: READY FOR MANUAL COMMIT"
+  if [[ "$FINISH_MODE" == "1" ]]; then
+    echo "Status: CHECKPOINT PASSED — tae_finish_sprint.sh will commit/push"
+  else
+    echo "Status: CHECKPOINT PASSED"
+  fi
 else
   echo "Status: ISSUES DETECTED — fix before commit"
 fi
 
-banner "MANUAL STEPS (not automated)"
-cat <<'EOF'
+if [[ "$FINISH_MODE" != "1" ]]; then
+  banner "NEXT STEP"
+  cat <<'EOF'
+Finish the sprint with one command:
 
-1. Update PROJECT_BOOK.md
-   - §1 Current Runtime Status
-   - §3 What Exists (if new modules)
-   - §10 Current Trading Impact
-   - §12 Next Allowed Sprint
-   - §14 Sprint history + commit hash
+  ./tae_finish_sprint.sh "TAE Sprint X.N — short description"
 
-2. Optionally update PROJECT_STATUS.md sprint pointer
-
-3. Add/update TAE_X<N>_SUMMARY.md for the sprint
-
-4. Stage changes (exclude secrets; tae_*.json usually gitignored):
-   git add PROJECT_BOOK.md SESSION_START.md tae_checkpoint.sh \
-           live_bot.py dashboard_v2.py research_core/ TAE_*.md
-
-5. Commit checkpoint:
-   git commit -m "TAE Sprint X.N — short description"
-
-6. Push when ready:
-   git push
-
-No commit was made by this script.
-
+That runs this checkpoint, stages changes, commits, and pushes.
+Update PROJECT_BOOK.md and SESSION_START.md before running finish sprint.
 EOF
+fi
 
 exit "$FAIL"
