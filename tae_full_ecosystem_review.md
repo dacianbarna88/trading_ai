@@ -1,6 +1,6 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-29T22:10:41.395352+00:00  
+**Generated:** 2026-06-29T22:22:00.823598+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
@@ -9,14 +9,14 @@
 - Bot process: STOPPED
 - Dashboard process: STOPPED
 - Status file: STOPPED
-- Bot log age (s): 5495.4
-- Live signals age (s): 5495.9
+- Bot log age (s): 6174.8
+- Live signals age (s): 6175.4
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: RISK_ADVISORY (blocks new BUY: True)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T01:10:41.346429+03:00
+- Local time: 2026-06-30T01:22:00.776001+03:00
 - Verdict: **READY**
 - Session guard reason: all_markets_closed
 - Bot stopped expected: True
@@ -27,14 +27,28 @@
 - BUY path will log on open: True
 - Next action: WAIT_FOR_MARKET_OPEN_THEN_SESSION_GUARD_START
 
-## B. Financial Status (estimated)
+## B. Financial Status (estimated, trading-only PnL)
 - Cash: 29954.03 USD
+- Capital deposits (flows): 10000.0 USD
 - Open positions: 5
 - Portfolio value (est.): 40395.46 USD
-- Realized PnL: -700.3663
-- Unrealized PnL: 127.7219
-- Daily PnL: None
-- Total PnL: -572.6444 (-1.9088%)
+- Trading realized PnL: -700.3663
+- Trading unrealized PnL: 127.7219
+- **Corrected trading total PnL:** -572.6444
+- Raw total PnL (incl. CASH rows): -10918.8484
+- Accounting adjustments excluded: -9913.58
+- Daily trading PnL: None
+- Profit % (on 30000.0 baseline): -1.9088%
+
+## Performance Drag Analysis
+- Stop-loss total: -404.0456 (10 trades)
+- Take-profit total: -490.2062 (11 trades)
+- Recommended next fix: PORTFOLIO_ACCOUNTING_MIGRATION
+- Top losing trades:
+  - GS: -903.8957 (PROFIT +5.48%)
+  - ORCL: -138.7037 (STOP LOSS -11.64%)
+  - ADBE: -114.7791 (STOP LOSS -6.42%)
+- CASH distortion: CASH/DEPOSIT row reported PnL -9913.58 distorts raw portfolio sums; excluded from corrected trading PnL.
 
 ## C. Live Signals Today
 - Total: 15 | STRONG BUY: 5 | TAKE PROFIT: 4 | WAIT: 6

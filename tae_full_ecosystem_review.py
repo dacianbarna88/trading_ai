@@ -519,6 +519,121 @@ def _discover_artifacts(root: Path) -> dict[str, Any]:
     }
 
 
+def _is_cash_flow_row(row: dict[str, Any]) -> bool:
+    ticker = str(row.get("Ticker", "")).strip().upper()
+    action = str(row.get("Action", "")).upper()
+    return ticker == "CASH" or action == "DEPOSIT"
+
+
+def _is_trading_row(row: dict[str, Any]) -> bool:
+    if _is_cash_flow_row(row):
+        return False
+    ticker = str(row.get("Ticker", "")).strip()
+    action = str(row.get("Action", "")).upper()
+    return bool(ticker) and action in {"BUY", "SELL"}
+
+
+def _performance_drag_analysis(rows: list[dict[str, str]], financial: dict[str, Any]) -> dict[str, Any]:
+    sell_rows = [
+        row
+        for row in rows
+        if str(row.get("Action", "")).upper() == "SELL" and _is_trading_row(row)
+    ]
+
+    def trade_record(row: dict[str, str]) -> dict[str, Any]:
+        pnl = _parse_float(row.get("PnL")) or 0.0
+        return {
+            "date": row.get("Date"),
+            "ticker": row.get("Ticker"),
+            "pnl": round(pnl, 4),
+            "pnl_pct": _parse_float(row.get("PnL_%")),
+            "reason": row.get("Reason"),
+            "signal": row.get("Signal"),
+        }
+
+    sells = [trade_record(row) for row in sell_rows]
+    winners = sorted([t for t in sells if t["pnl"] > 0], key=lambda x: x["pnl"], reverse=True)
+    losers = sorted([t for t in sells if t["pnl"] < 0], key=lambda x: x["pnl"])
+
+    stop_losses = [
+        t
+        for t in sells
+        if "STOP LOSS" in str(t.get("reason", "")).upper()
+        or "STOP LOSS" in str(t.get("signal", "")).upper()
+    ]
+    take_profits = [
+        t
+        for t in sells
+        if "TAKE PROFIT" in str(t.get("reason", "")).upper()
+        or "TAKE PROFIT" in str(t.get("signal", "")).upper()
+        or str(t.get("reason", "")).upper().startswith("PROFIT")
+    ]
+
+    accounting_rows = []
+    for row in rows:
+        if not _is_cash_flow_row(row):
+            continue
+        pnl = _parse_float(row.get("PnL"))
+        accounting_rows.append(
+            {
+                "date": row.get("Date"),
+                "ticker": row.get("Ticker"),
+                "action": row.get("Action"),
+                "amount": round((_parse_float(row.get("Price")) or 0.0) * (_parse_float(row.get("Shares")) or 0.0), 4),
+                "reported_pnl": round(pnl, 4) if pnl is not None else None,
+                "note": "Capital flow row — PnL column must not affect trading performance",
+            }
+        )
+
+    distortions = sorted(
+        accounting_rows,
+        key=lambda x: abs(x.get("reported_pnl") or 0.0),
+        reverse=True,
+    )
+
+    cash_main_distortion = None
+    if distortions:
+        top = distortions[0]
+        cash_main_distortion = {
+            "is_primary_reported_loss_driver": True,
+            "ticker": top.get("ticker"),
+            "reported_pnl": top.get("reported_pnl"),
+            "explains_raw_vs_corrected_gap": True,
+            "message": (
+                f"CASH/DEPOSIT row reported PnL {top.get('reported_pnl')} distorts raw portfolio sums; "
+                "excluded from corrected trading PnL."
+            ),
+        }
+
+    profit_reducers = losers[:10]
+
+    return {
+        "top_losing_trades": losers[:10],
+        "top_winning_trades": winners[:10],
+        "biggest_accounting_distortions": distortions[:10],
+        "realized_vs_unrealized": {
+            "trading_realized_pnl": financial.get("trading_realized_pnl"),
+            "trading_unrealized_pnl": financial.get("trading_unrealized_pnl"),
+            "trading_total_pnl": financial.get("trading_total_pnl"),
+        },
+        "stop_loss_losses": {
+            "count": len(stop_losses),
+            "total_pnl": round(sum(t["pnl"] for t in stop_losses), 4),
+            "trades": stop_losses[:10],
+        },
+        "take_profit_exits": {
+            "count": len(take_profits),
+            "total_pnl": round(sum(t["pnl"] for t in take_profits), 4),
+            "trades": take_profits[:10],
+        },
+        "trades_that_reduced_profit": profit_reducers,
+        "cash_row_primary_distortion": cash_main_distortion,
+        "recommended_next_fix": (
+            "PORTFOLIO_ACCOUNTING_MIGRATION" if accounting_rows else None
+        ),
+    }
+
+
 def _portfolio_financials(root: Path) -> dict[str, Any]:
     path = root / "portfolio.csv"
     result: dict[str, Any] = {
@@ -527,11 +642,19 @@ def _portfolio_financials(root: Path) -> dict[str, Any]:
         "open_positions_count": 0,
         "open_positions": [],
         "portfolio_value_estimated": None,
+        "capital_deposits": None,
+        "trading_realized_pnl": None,
+        "trading_unrealized_pnl": None,
+        "trading_total_pnl": None,
+        "accounting_adjustments": None,
+        "raw_total_pnl_including_cash_rows": None,
+        "corrected_total_pnl_excluding_cash_deposits": None,
         "realized_pnl": None,
         "unrealized_pnl": None,
-        "daily_pnl": None,
         "total_pnl": None,
         "profit_pct": None,
+        "daily_pnl": None,
+        "daily_trading_pnl": None,
         "warnings": [],
         "calculation_notes": [],
     }
@@ -553,50 +676,70 @@ def _portfolio_financials(root: Path) -> dict[str, Any]:
     result["portfolio_readable"] = True
     spent = received = deposited = 0.0
     positions: dict[str, dict[str, Any]] = {}
-    realized = 0.0
+    trading_realized = 0.0
+    raw_pnl_sum = 0.0
+    cash_flow_pnl_sum = 0.0
     today_str = date.today().isoformat()
-    daily_pnl = 0.0
+    daily_pnl_raw = 0.0
+    daily_trading_pnl = 0.0
     daily_rows = 0
 
     for row in rows:
         action = str(row.get("Action", "")).upper()
         ticker = str(row.get("Ticker", "")).strip()
+        ticker_upper = ticker.upper()
         price = _parse_float(row.get("Price")) or 0.0
         shares = _parse_float(row.get("Shares")) or 0.0
         pnl = _parse_float(row.get("PnL"))
         row_date = str(row.get("Date", ""))[:10]
+        is_cash_flow = _is_cash_flow_row(row)
+
+        if pnl is not None:
+            raw_pnl_sum += pnl
+            if is_cash_flow:
+                cash_flow_pnl_sum += pnl
 
         if row_date == today_str and pnl is not None:
-            daily_pnl += pnl
+            daily_pnl_raw += pnl
             daily_rows += 1
+            if not is_cash_flow:
+                daily_trading_pnl += pnl
+
+        if is_cash_flow:
+            if action == "DEPOSIT":
+                deposited += price * shares
+            continue
+
+        if ticker_upper == "CASH":
+            continue
 
         if action == "BUY":
             spent += price * shares
-            if ticker:
-                bucket = positions.setdefault(
-                    ticker,
-                    {"buy_shares": 0.0, "sell_shares": 0.0, "last_buy_row": None},
-                )
-                bucket["buy_shares"] += shares
-                bucket["last_buy_row"] = row
+            bucket = positions.setdefault(
+                ticker,
+                {"buy_shares": 0.0, "sell_shares": 0.0, "last_buy_row": None},
+            )
+            bucket["buy_shares"] += shares
+            bucket["last_buy_row"] = row
         elif action == "SELL":
             received += price * shares
             if pnl is not None:
-                realized += pnl
-            if ticker and ticker in positions:
+                trading_realized += pnl
+            if ticker in positions:
                 positions[ticker]["sell_shares"] += shares
-        elif action == "DEPOSIT":
-            deposited += price * shares
 
     cash = STARTING_CAPITAL + deposited - spent + received
     result["cash_available"] = round(cash, 2)
+    result["capital_deposits"] = round(deposited, 4)
 
     open_positions: list[dict[str, Any]] = []
-    unrealized = 0.0
+    trading_unrealized = 0.0
     positions_value = 0.0
     missing_marks = 0
 
     for ticker, bucket in positions.items():
+        if ticker.upper() == "CASH":
+            continue
         open_shares = bucket["buy_shares"] - bucket["sell_shares"]
         if open_shares <= 1e-9:
             continue
@@ -608,9 +751,9 @@ def _portfolio_financials(root: Path) -> dict[str, Any]:
         current_price = _parse_float(last.get("Current_Price"))
 
         if pnl is not None:
-            unrealized += pnl
+            trading_unrealized += pnl
         elif invested is not None and current_value is not None:
-            unrealized += current_value - invested
+            trading_unrealized += current_value - invested
 
         if current_value is not None:
             positions_value += current_value
@@ -628,36 +771,66 @@ def _portfolio_financials(root: Path) -> dict[str, Any]:
             }
         )
 
+    trading_total = trading_realized + trading_unrealized
+    accounting_adjustments = round(cash_flow_pnl_sum, 4)
+    corrected_total = round(trading_total, 4)
+    raw_total = round(raw_pnl_sum, 4)
+
     result["open_positions_count"] = len(open_positions)
     result["open_positions"] = open_positions
-    result["realized_pnl"] = round(realized, 4)
-    result["unrealized_pnl"] = round(unrealized, 4)
-    result["total_pnl"] = round(realized + unrealized, 4)
+    result["trading_realized_pnl"] = round(trading_realized, 4)
+    result["trading_unrealized_pnl"] = round(trading_unrealized, 4)
+    result["trading_total_pnl"] = corrected_total
+    result["accounting_adjustments"] = accounting_adjustments
+    result["raw_total_pnl_including_cash_rows"] = raw_total
+    result["corrected_total_pnl_excluding_cash_deposits"] = corrected_total
+    result["realized_pnl"] = round(trading_realized, 4)
+    result["unrealized_pnl"] = round(trading_unrealized, 4)
+    result["total_pnl"] = corrected_total
     result["portfolio_value_estimated"] = round(cash + positions_value, 2)
     result["profit_pct"] = (
-        round((result["total_pnl"] / STARTING_CAPITAL) * 100, 4)
-        if result["total_pnl"] is not None
+        round((corrected_total / STARTING_CAPITAL) * 100, 4)
+        if corrected_total is not None
         else None
     )
 
     if daily_rows:
-        result["daily_pnl"] = round(daily_pnl, 4)
+        result["daily_pnl"] = round(daily_trading_pnl, 4)
+        result["daily_trading_pnl"] = round(daily_trading_pnl, 4)
         result["calculation_notes"].append(
-            f"daily_pnl estimated from {daily_rows} portfolio row(s) on {today_str}"
+            f"daily_trading_pnl from {daily_rows} row(s) on {today_str} excluding CASH/DEPOSIT"
         )
+        if abs(daily_pnl_raw - daily_trading_pnl) > 1e-6:
+            result["calculation_notes"].append(
+                f"daily raw PnL including cash rows would be {round(daily_pnl_raw, 4)}"
+            )
     else:
         result["daily_pnl"] = None
+        result["daily_trading_pnl"] = None
         result["calculation_notes"].append(
             f"no portfolio rows dated {today_str}; daily_pnl not estimated"
         )
 
+    result["calculation_notes"].append(
+        "DEPOSIT/CASH rows treated as capital flow only — excluded from trading PnL"
+    )
+    result["calculation_notes"].append(
+        "corrected_total_pnl = trading_realized + trading_unrealized (no CASH mark-to-market)"
+    )
     result["calculation_notes"].append("portfolio_value_estimated = cash + sum(Current_Value) marks")
     result["calculation_notes"].append("marks are estimated from portfolio.csv, not live broker")
+    if accounting_adjustments:
+        result["warnings"].append(
+            f"accounting_adjustments={accounting_adjustments} removed from trading PnL "
+            f"(CASH/DEPOSIT distortion)"
+        )
+        result["warnings"].append("RECOMMENDED_NEXT_FIX: PORTFOLIO_ACCOUNTING_MIGRATION")
     if missing_marks:
         result["warnings"].append(
             f"{missing_marks} open position(s) missing Current_Value; used Invested fallback"
         )
 
+    result["_portfolio_rows"] = rows
     return result
 
 
@@ -1270,6 +1443,8 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
     artifacts = _discover_artifacts(root)
     runtime = _runtime_status(root)
     financial = _portfolio_financials(root)
+    portfolio_rows = financial.pop("_portfolio_rows", [])
+    performance_drag = _performance_drag_analysis(portfolio_rows, financial)
     signals = _live_signals_today(root)
     advisory = _tae_advisory_section(root)
     market_readiness = _market_readiness(root, runtime, advisory)
@@ -1290,6 +1465,7 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
         "A_runtime_status": runtime,
         "Market_Readiness": market_readiness,
         "B_financial_status": financial,
+        "Performance_Drag_Analysis": performance_drag,
         "C_live_signals_today": signals,
         "D_tae_advisory": advisory,
         "E_shadow_validation": shadow,
@@ -1312,6 +1488,7 @@ def render_markdown(review: dict[str, Any]) -> str:
     rt = review["A_runtime_status"]
     market = review.get("Market_Readiness") or {}
     fin = review["B_financial_status"]
+    drag = review.get("Performance_Drag_Analysis") or {}
     sig = review["C_live_signals_today"]
     adv = review["D_tae_advisory"]
     sh = review["E_shadow_validation"]
@@ -1353,22 +1530,46 @@ def render_markdown(review: dict[str, Any]) -> str:
         f"- BUY path will log on open: {market.get('buy_path_will_log_on_open')}",
         f"- Next action: {market.get('next_action_for_market_open')}",
         "",
-        "## B. Financial Status (estimated)",
+        "## B. Financial Status (estimated, trading-only PnL)",
         f"- Cash: {fin.get('cash_available')} USD",
+        f"- Capital deposits (flows): {fin.get('capital_deposits')} USD",
         f"- Open positions: {fin.get('open_positions_count')}",
         f"- Portfolio value (est.): {fin.get('portfolio_value_estimated')} USD",
-        f"- Realized PnL: {fin.get('realized_pnl')}",
-        f"- Unrealized PnL: {fin.get('unrealized_pnl')}",
-        f"- Daily PnL: {fin.get('daily_pnl')}",
-        f"- Total PnL: {fin.get('total_pnl')} ({fin.get('profit_pct')}%)",
+        f"- Trading realized PnL: {fin.get('trading_realized_pnl')}",
+        f"- Trading unrealized PnL: {fin.get('trading_unrealized_pnl')}",
+        f"- **Corrected trading total PnL:** {fin.get('corrected_total_pnl_excluding_cash_deposits')}",
+        f"- Raw total PnL (incl. CASH rows): {fin.get('raw_total_pnl_including_cash_rows')}",
+        f"- Accounting adjustments excluded: {fin.get('accounting_adjustments')}",
+        f"- Daily trading PnL: {fin.get('daily_trading_pnl')}",
+        f"- Profit % (on {STARTING_CAPITAL} baseline): {fin.get('profit_pct')}%",
         "",
-        "## C. Live Signals Today",
-        f"- Total: {sig.get('total_signals')} | STRONG BUY: {sig.get('strong_buy_count')} | "
-        f"TAKE PROFIT: {sig.get('take_profit_count')} | WAIT: {sig.get('wait_count')}",
-        "",
-        "## D. TAE Advisory",
-        f"- Action: **{adv.get('action')}** | Confidence: {adv.get('confidence')}",
+        "## Performance Drag Analysis",
+        f"- Stop-loss total: {drag.get('stop_loss_losses', {}).get('total_pnl')} "
+        f"({drag.get('stop_loss_losses', {}).get('count')} trades)",
+        f"- Take-profit total: {drag.get('take_profit_exits', {}).get('total_pnl')} "
+        f"({drag.get('take_profit_exits', {}).get('count')} trades)",
+        f"- Recommended next fix: {drag.get('recommended_next_fix') or 'none'}",
     ]
+    top_loser = (drag.get("top_losing_trades") or [])[:3]
+    if top_loser:
+        lines.append("- Top losing trades:")
+        for t in top_loser:
+            lines.append(f"  - {t.get('ticker')}: {t.get('pnl')} ({t.get('reason')})")
+    cash_dist = drag.get("cash_row_primary_distortion")
+    if cash_dist:
+        lines.append(f"- CASH distortion: {cash_dist.get('message')}")
+
+    lines.extend(
+        [
+            "",
+            "## C. Live Signals Today",
+            f"- Total: {sig.get('total_signals')} | STRONG BUY: {sig.get('strong_buy_count')} | "
+            f"TAKE PROFIT: {sig.get('take_profit_count')} | WAIT: {sig.get('wait_count')}",
+            "",
+            "## D. TAE Advisory",
+            f"- Action: **{adv.get('action')}** | Confidence: {adv.get('confidence')}",
+        ]
+    )
     for note in adv.get("practical_meaning_today") or []:
         lines.append(f"- {note}")
 
@@ -1460,6 +1661,7 @@ def print_terminal_summary(review: dict[str, Any]) -> None:
     counts = st.get("counts") or {}
     x9 = rt.get("x9_readiness") or {}
 
+    drag = review.get("Performance_Drag_Analysis") or {}
     status_file_note = rt.get("bot_status_file_value", "UNKNOWN")
     if rt.get("bot_status_file_stale"):
         status_file_note = f"{status_file_note} stale"
@@ -1488,8 +1690,18 @@ def print_terminal_summary(review: dict[str, Any]) -> None:
         print(f"  {x9.get('message')}")
     print(
         f"Financial (est.): cash={fin.get('cash_available')} | "
-        f"total_pnl={fin.get('total_pnl')} | daily_pnl={fin.get('daily_pnl')}"
+        f"corrected_pnl={fin.get('corrected_total_pnl_excluding_cash_deposits')} | "
+        f"raw_pnl={fin.get('raw_total_pnl_including_cash_rows')}"
     )
+    if fin.get("accounting_adjustments"):
+        print(
+            f"  accounting_adjustments excluded: {fin.get('accounting_adjustments')} "
+            f"(CASH/DEPOSIT rows)"
+        )
+    top_loser = (drag.get("top_losing_trades") or [])[:1]
+    if top_loser:
+        t = top_loser[0]
+        print(f"  top drag: {t.get('ticker')} {t.get('pnl')}")
     print(
         f"Signals: STRONG BUY={sig.get('strong_buy_count')} | "
         f"TAKE PROFIT={sig.get('take_profit_count')}"
