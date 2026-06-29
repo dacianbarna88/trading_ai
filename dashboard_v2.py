@@ -22,7 +22,12 @@ ACCOUNT_VALUE_FORMULA = (
 )
 
 st.title("🚀 Trading AI Dashboard")
-st.caption("Dashboard complet: Live Bot + Portfolio + Performance + Bot Health + Daily Report")
+st.caption(
+    "TAE Command Center + Live Bot + Portfolio + Performance + Bot Health + Daily Report · "
+    "UI/OBSERVABILITY ONLY"
+)
+
+from dashboard_tae_command_center import render_tae_command_center
 
 
 
@@ -678,6 +683,7 @@ account_pnl = account_value_legacy - total_capital_base
 account_return_pct = (account_pnl / total_capital_base) * 100 if total_capital_base else 0
 
 tabs = st.tabs([
+    "🏠 TAE Command Center",
     "📊 Dashboard",
     "📜 Alerts",
     "⚙️ Optimization",
@@ -694,6 +700,9 @@ tabs = st.tabs([
 ])
 
 with tabs[0]:
+    render_tae_command_center()
+
+with tabs[1]:
     st.subheader("📊 Control Center")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Bot Status", bot_status)
@@ -1155,7 +1164,7 @@ with tabs[0]:
     else:
         st.warning("Nu găsesc signals.csv")
 
-with tabs[1]:
+with tabs[2]:
     st.subheader("📜 Alerts History")
     if not alerts.empty:
         st.success(f"Am găsit {len(alerts)} alerte.")
@@ -1164,7 +1173,7 @@ with tabs[1]:
     else:
         st.warning("Nu există alerts_log.csv")
 
-with tabs[2]:
+with tabs[3]:
     st.subheader("⚙️ Optimization")
     if not optimization.empty:
         st.success(f"Am găsit {len(optimization)} rezultate.")
@@ -1176,7 +1185,7 @@ with tabs[2]:
     else:
         st.warning("Nu găsesc optimization_results.csv")
 
-with tabs[3]:
+with tabs[4]:
     st.subheader("🛡 Risk Manager")
     capital = st.number_input("Capital cont ($)", min_value=100, value=STARTING_CAPITAL, step=100)
     risk_pct = st.slider("Risc per tranzacție (%)", 1, 10, 2)
@@ -1188,7 +1197,7 @@ with tabs[3]:
     c2.metric("Poziție recomandată", f"${position_size:,.2f}")
     c3.metric("Stop Loss", f"{stop_loss_pct}%")
 
-with tabs[4]:
+with tabs[5]:
     st.subheader("🤖 Live Bot")
     try:
         from bot_controller import start_bot, stop_bot, get_status
@@ -1235,7 +1244,7 @@ with tabs[4]:
     except Exception as e:
         st.warning(f"Live Bot indisponibil: {e}")
 
-with tabs[5]:
+with tabs[6]:
     st.subheader("💰 Portfolio")
     if portfolio.empty:
         st.warning("Nu există portfolio.csv")
@@ -1261,7 +1270,7 @@ with tabs[5]:
         else:
             st.info("Nu există poziții deschise.")
 
-with tabs[6]:
+with tabs[7]:
     st.subheader("📈 Performance")
     st.caption("PnL: realized SELL execution PnL + open mark-to-market PnL")
     if portfolio.empty:
@@ -1301,7 +1310,7 @@ with tabs[6]:
         else:
             st.info("Nu există încă tranzacții închise.")
 
-with tabs[7]:
+with tabs[8]:
     st.subheader("🩺 Bot Health")
     bot_log = read_text("bot_output.log")
     last_logs = bot_log.splitlines()[-20:] if bot_log else []
@@ -1323,7 +1332,7 @@ with tabs[7]:
     else:
         st.info("Nu există bot_output.log")
 
-with tabs[8]:
+with tabs[9]:
     st.subheader("📋 Daily Report")
     st.caption("PnL: realized SELL execution PnL + open mark-to-market PnL")
     if portfolio.empty:
@@ -1401,7 +1410,7 @@ Pozitii deschise: {len(open_positions)}
             st.code(pos_summary)
 
 
-with tabs[10]:
+with tabs[11]:
     st.subheader("🧠 Investment Committee — V9 PAPER ONLY")
 
     committee_txt = read_text("strategic_committee_summary.txt").strip()
@@ -1579,7 +1588,7 @@ with tabs[10]:
     st.caption("Investment Committee is PAPER_ONLY. No broker. No automatic execution.")
 
 
-with tabs[9]:
+with tabs[10]:
     st.subheader("📡 Live Signals Pro")
     st.caption("Semnale sortate după Score, utile pentru monitorizarea deciziilor de BUY.")
 
@@ -1626,7 +1635,7 @@ with tabs[9]:
             st.dataframe(trailing_df[cols], width="stretch")
 
 
-with tabs[11]:
+with tabs[12]:
     st.subheader("🧪 Strategic Validation Engine — V20 to V26")
     st.caption("ANALYSIS_ONLY / NO_AUTO_CHANGE / PAPER_ONLY / NO_BROKER")
 
@@ -1728,7 +1737,7 @@ with tabs[11]:
         st.warning("Nu găsesc learning_automation_summary.txt")
 
 
-with tabs[12]:
+with tabs[13]:
     render_tae_intelligence_reports()
 
 
