@@ -455,9 +455,31 @@ def sell_position(row, portfolio, reason):
     return portfolio
 
 
-def manage_portfolio(signals_df):
+def manage_portfolio(signals_df, advisory_state=None):
     portfolio = load_portfolio()
     positions = get_open_positions(portfolio)
+
+    if advisory_state is None:
+        from research_core.governance.live_advisory_runtime import load_live_advisory
+
+        advisory_state = load_live_advisory()
+
+    from research_core.governance.live_advisory_runtime import (
+        advisory_runtime_summary,
+        get_advisory_action,
+        should_block_new_buy,
+    )
+
+    tae_action = get_advisory_action(advisory_state)
+    block_new_buy, tae_block_reason = should_block_new_buy(advisory_state)
+    log(f"TAE Live Advisory: {advisory_runtime_summary(advisory_state)}")
+    if advisory_state.warning:
+        log(f"TAE Live Advisory warning: {advisory_state.warning}")
+
+    if tae_action == "BUY_ADVISORY":
+        log("TAE advisory supportive (BUY_ADVISORY — no automatic buy)")
+    elif tae_action == "SELL_ADVISORY":
+        log("TAE SELL_ADVISORY — informational only; existing SELL rules unchanged")
 
     market_regime = get_market_regime()
     trade_size = get_dynamic_trade_size(signals_df, portfolio, market_regime)
@@ -484,13 +506,21 @@ def manage_portfolio(signals_df):
                     and score >= MIN_SCORE_TO_BUY
                     and market_regime == "BULL"
                 ):
-                    if len(positions) < MAX_POSITIONS:
+                    if block_new_buy:
+                        log(
+                            f"BUY blocat pentru {ticker}: {tae_block_reason}"
+                        )
+                    elif len(positions) < MAX_POSITIONS:
+                        if tae_action == "BUY_ADVISORY":
+                            log(f"TAE advisory supportive pentru {ticker}")
                         log(
                             f"BUY permis pentru {ticker}: piața {ticker_market} deschisă, "
                             f"signal={signal}, score={score}"
                         )
                         portfolio = buy_position(row, portfolio, trade_size)
                         positions = get_open_positions(portfolio)
+                    elif len(positions) >= MAX_POSITIONS:
+                        log(f"BUY blocat pentru {ticker}: MAX_POSITIONS ({MAX_POSITIONS})")
 
                 elif signal == "STRONG BUY" and market_regime != "BULL":
                     log(f"BUY blocat pentru {ticker}: Market Regime {market_regime}")
@@ -524,6 +554,10 @@ def manage_portfolio(signals_df):
     save_portfolio(portfolio)
 
 def generate_signals():
+    from research_core.governance.live_advisory_runtime import load_live_advisory
+
+    advisory_state = load_live_advisory()
+
     results = []
     tickers = load_watchlist()
 
@@ -602,7 +636,7 @@ def generate_signals():
         df.to_csv(LIVE_SIGNALS_FILE, index=False)
 
         log("live_signals.csv actualizat.")
-        manage_portfolio(df)
+        manage_portfolio(df, advisory_state=advisory_state)
         update_portfolio_prices()
 
         try:
