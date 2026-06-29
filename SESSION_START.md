@@ -8,10 +8,20 @@
 
 | Item | Value |
 |------|--------|
-| **Latest sprint** | **X.8** — Live Bot Advisory Integration |
+| **Last completed sprint** | **X.9** — Connected Shadow Validation Runtime Ledger |
 | **Canonical live runtime** | `live_bot.py` |
-| **TAE live integration** | Advisory **risk gate only** via `tae_live_advisory.json` |
+| **TAE live integration** | X.8 advisory **risk gate** + X.9 **BUY observability ledger** |
 | **Mode** | PAPER_ONLY · NO_BROKER · NO_AUTO_EXECUTION |
+
+---
+
+## Current state (2026-06-29)
+
+- **X.8 risk gate connected** — `live_bot.py` reads `tae_live_advisory.json`; `RISK_ADVISORY` blocks **new BUY only**
+- **X.9 shadow validation ledger connected** — BUY path logs to `tae_shadow_validation_events.csv` via `shadow_validation_ledger.py`
+- **BUY path observability active** — event types: `BUY_ALLOWED`, `BUY_BLOCKED_BY_TAE`, `BUY_SKIPPED_OTHER_REASON`
+- **SELL logic untouched** — STOP / TAKE PROFIT / SELL branch not modified by X.8 or X.9
+- **Outcome tracking** — `PENDING_NEXT_PHASE` (no forward PnL on blocked BUYs yet)
 
 ---
 
@@ -24,6 +34,7 @@
 - `tae_advisory_index.json` aggregator (X.7B)
 - `tae_live_advisory.json` bridge (X.7C)
 - **Live bot reads advisory** — `RISK_ADVISORY` blocks **new BUY only** (X.8)
+- **Shadow validation ledger** — structured BUY evaluation events (X.9)
 - Connectivity audits X.7 + indirect audit X.7 fix
 
 ---
@@ -33,7 +44,7 @@
 - TAE forcing BUY or SELL
 - TAE changing sizing, scores, trailing stop, or `config/settings.py`
 - Event memory ingestion / live news models
-- Shadow validation stats for blocked BUYs (planned X.9)
+- **Outcome attribution** for blocked BUYs (planned X.10 — after ledger accumulates events)
 - Automatic commit/push in checkpoint script
 
 ---
@@ -44,10 +55,20 @@
 |-------------------|-------------|
 | `live_bot.py` → CSV writes | All other `tae_*.json` |
 | `live_bot.py` → `tae_live_advisory.json` (BUY gate) | Meta evolution recommendations |
-| Dashboard → display + start/stop bot | Ranking → live watchlist |
-| TAE read-only → `portfolio.csv`, `live_signals.csv` | Implementation patches |
+| `live_bot.py` → `tae_shadow_validation_events.csv` (BUY log) | Ranking → live watchlist |
+| `tae_shadow_validation_report.py` → summary JSON | Implementation patches |
+| Dashboard → display + start/stop bot | |
+| TAE read-only → `portfolio.csv`, `live_signals.csv` | |
 
 **Legacy / not canonical:** `live_bot_v5_1.py`, `telegram_bot.py`, `signal_to_decision_engine.py`, `daily_intelligence_runner.py`
+
+---
+
+## Next allowed sprint
+
+**X.10 — Outcome Tracking / Attribution for Blocked BUYs**
+
+Start only after `tae_shadow_validation_events.csv` has accumulated real events from live bot cycles.
 
 ---
 
@@ -63,6 +84,7 @@ bash tae_checkpoint.sh
 git status
 python3 tae_quick_health_check.py
 python3 tae_live_advisory_demo.py
+python3 tae_shadow_validation_report.py
 cat bot_status.txt 2>/dev/null || echo "bot_status missing"
 python3 -c "import json; d=json.load(open('tae_live_advisory.json')); print(d['advisory']['action'])"
 ```
@@ -73,7 +95,7 @@ python3 -c "import json; d=json.load(open('tae_live_advisory.json')); print(d['a
 
 1. **`PROJECT_BOOK.md`** — full journal (what exists, what not to rebuild)
 2. **`TAE_DEVELOPMENT_PROTOCOL.md`** — rules of engagement
-3. Latest sprint summary: **`TAE_X8_LIVE_BOT_ADVISORY_INTEGRATION_SUMMARY.md`**
+3. Latest sprint summary: **`TAE_X9_SHADOW_VALIDATION_SUMMARY.md`**
 
 ---
 
@@ -81,7 +103,7 @@ python3 -c "import json; d=json.load(open('tae_live_advisory.json')); print(d['a
 
 1. Open `PROJECT_BOOK.md` §11 — **What Must NOT Be Rebuilt**
 2. Grep `research_core/` for existing module
-3. Confirm sprint mode: AUDIT / REPORT_ONLY / CONTROLLED_INTEGRATION
+3. Confirm sprint mode: AUDIT / REPORT_ONLY / CONTROLLED_INTEGRATION / CONNECTED_OBSERVABILITY
 4. Do **not** modify `live_bot.py` trading logic unless sprint explicitly says so
 
 ---
@@ -96,4 +118,4 @@ bash tae_checkpoint.sh
 
 ---
 
-*Last governance reset: 2026-06-29 — see `TAE_GOVERNANCE_RESET_SUMMARY.md`*
+*Last journal update: 2026-06-29 — Sprint X.9 closed*

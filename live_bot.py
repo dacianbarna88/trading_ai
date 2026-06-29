@@ -455,9 +455,12 @@ def sell_position(row, portfolio, reason):
     return portfolio
 
 
-def manage_portfolio(signals_df, advisory_state=None):
+def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
     portfolio = load_portfolio()
     positions = get_open_positions(portfolio)
+
+    if live_bot_cycle_id is None:
+        live_bot_cycle_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
     if advisory_state is None:
         from research_core.governance.live_advisory_runtime import load_live_advisory
@@ -468,6 +471,11 @@ def manage_portfolio(signals_df, advisory_state=None):
         advisory_runtime_summary,
         get_advisory_action,
         should_block_new_buy,
+    )
+    from research_core.governance.shadow_validation_ledger import (
+        log_buy_allowed,
+        log_buy_blocked_by_tae,
+        log_buy_skipped_other_reason,
     )
 
     tae_action = get_advisory_action(advisory_state)
@@ -510,6 +518,16 @@ def manage_portfolio(signals_df, advisory_state=None):
                         log(
                             f"BUY blocat pentru {ticker}: {tae_block_reason}"
                         )
+                        log_buy_blocked_by_tae(
+                            ticker=ticker,
+                            signal=signal,
+                            score=score,
+                            price=price,
+                            advisory_state=advisory_state,
+                            block_reason=tae_block_reason,
+                            live_bot_cycle_id=live_bot_cycle_id,
+                            warn_fn=log,
+                        )
                     elif len(positions) < MAX_POSITIONS:
                         if tae_action == "BUY_ADVISORY":
                             log(f"TAE advisory supportive pentru {ticker}")
@@ -517,18 +535,70 @@ def manage_portfolio(signals_df, advisory_state=None):
                             f"BUY permis pentru {ticker}: piața {ticker_market} deschisă, "
                             f"signal={signal}, score={score}"
                         )
+                        est_shares = (
+                            round(float(trade_size) / float(price), 4)
+                            if trade_size and price > 0
+                            else None
+                        )
+                        log_buy_allowed(
+                            ticker=ticker,
+                            signal=signal,
+                            score=score,
+                            price=price,
+                            intended_trade_usd=trade_size,
+                            shares=est_shares,
+                            advisory_state=advisory_state,
+                            block_new_buy=block_new_buy,
+                            live_bot_cycle_id=live_bot_cycle_id,
+                            warn_fn=log,
+                        )
                         portfolio = buy_position(row, portfolio, trade_size)
                         positions = get_open_positions(portfolio)
                     elif len(positions) >= MAX_POSITIONS:
-                        log(f"BUY blocat pentru {ticker}: MAX_POSITIONS ({MAX_POSITIONS})")
+                        skip_reason = f"MAX_POSITIONS ({MAX_POSITIONS})"
+                        log(f"BUY blocat pentru {ticker}: {skip_reason}")
+                        log_buy_skipped_other_reason(
+                            ticker=ticker,
+                            signal=signal,
+                            score=score,
+                            price=price,
+                            block_reason=skip_reason,
+                            advisory_state=advisory_state,
+                            block_new_buy=block_new_buy,
+                            live_bot_cycle_id=live_bot_cycle_id,
+                            warn_fn=log,
+                        )
 
                 elif signal == "STRONG BUY" and market_regime != "BULL":
-                    log(f"BUY blocat pentru {ticker}: Market Regime {market_regime}")
+                    skip_reason = f"Market Regime {market_regime}"
+                    log(f"BUY blocat pentru {ticker}: {skip_reason}")
+                    log_buy_skipped_other_reason(
+                        ticker=ticker,
+                        signal=signal,
+                        score=score,
+                        price=price,
+                        block_reason=skip_reason,
+                        advisory_state=advisory_state,
+                        block_new_buy=block_new_buy,
+                        live_bot_cycle_id=live_bot_cycle_id,
+                        warn_fn=log,
+                    )
 
             elif signal == "STRONG BUY":
-                log(
-                    f"BUY blocat pentru {ticker}: piața {ticker_market} închisă "
-                    f"(US/EU/UK evaluate separat)"
+                skip_reason = (
+                    f"piața {ticker_market} închisă (US/EU/UK evaluate separat)"
+                )
+                log(f"BUY blocat pentru {ticker}: {skip_reason}")
+                log_buy_skipped_other_reason(
+                    ticker=ticker,
+                    signal=signal,
+                    score=score,
+                    price=price,
+                    block_reason=skip_reason,
+                    advisory_state=advisory_state,
+                    block_new_buy=block_new_buy,
+                    live_bot_cycle_id=live_bot_cycle_id,
+                    warn_fn=log,
                 )
 
         else:
@@ -557,6 +627,7 @@ def generate_signals():
     from research_core.governance.live_advisory_runtime import load_live_advisory
 
     advisory_state = load_live_advisory()
+    live_bot_cycle_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
     results = []
     tickers = load_watchlist()
@@ -636,7 +707,11 @@ def generate_signals():
         df.to_csv(LIVE_SIGNALS_FILE, index=False)
 
         log("live_signals.csv actualizat.")
-        manage_portfolio(df, advisory_state=advisory_state)
+        manage_portfolio(
+            df,
+            advisory_state=advisory_state,
+            live_bot_cycle_id=live_bot_cycle_id,
+        )
         update_portfolio_prices()
 
         try:
