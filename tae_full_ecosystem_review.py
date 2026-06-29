@@ -16,6 +16,7 @@ import logging
 import statistics
 import subprocess
 import sys
+import time
 from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -36,8 +37,19 @@ LIVE_TRADING_IMPACT = "NONE"
 STARTING_CAPITAL = 30000.0
 MIN_BUY_SCORE = 80
 
+# Bot cycle is 60s; treat logs/signals as fresh within 5 minutes.
+BOT_LOG_FRESH_SECONDS = 300
+ARTIFACT_FRESH_SECONDS = 600
+
 DEFAULT_JSON_OUT = Path("tae_full_ecosystem_review.json")
 DEFAULT_MD_OUT = Path("tae_full_ecosystem_review.md")
+
+LIVE_BOT_SCRIPT = "live_bot.py"
+DASHBOARD_SCRIPT = "dashboard_v2.py"
+BOT_LOG_FILE = "bot_output.log"
+BOT_STATUS_FILE = "bot_status.txt"
+SHADOW_LEDGER_MODULE = Path("research_core/governance/shadow_validation_ledger.py")
+SHADOW_REPORT_SCRIPT = Path("tae_shadow_validation_report.py")
 
 ARTIFACT_GLOBS = (
     "tae_*strategy*.json",
@@ -70,6 +82,223 @@ CORE_ARTIFACTS = (
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _file_age_seconds(path: Path) -> float | None:
+    if not path.is_file():
+        return None
+    try:
+        return round(time.time() - path.stat().st_mtime, 1)
+    except OSError:
+        return None
+
+
+def _process_running(pattern: str) -> bool:
+    """Return True if a process matching pattern is running (read-only probe)."""
+    for cmd in (
+        ["pgrep", "-f", pattern],
+        ["/usr/bin/pgrep", "-f", pattern],
+    ):
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
+def _process_status_label(running: bool) -> str:
+    return "RUNNING" if running else "STOPPED"
+
+
+def _derive_bot_status_effective(
+    *,
+    bot_process_running: bool,
+    last_bot_log_age_seconds: float | None,
+    live_signals_age_seconds: float | None,
+    bot_status_file_value: str,
+) -> tuple[str, bool]:
+    """
+    Effective bot status: process + fresh logs override stale bot_status.txt.
+    Returns (effective_status, file_stale).
+    """
+    logs_recent = (
+        last_bot_log_age_seconds is not None
+        and last_bot_log_age_seconds <= BOT_LOG_FRESH_SECONDS
+    )
+    signals_recent = (
+        live_signals_age_seconds is not None
+        and live_signals_age_seconds <= ARTIFACT_FRESH_SECONDS
+    )
+
+    file_upper = str(bot_status_file_value or "UNKNOWN").upper()
+
+    if bot_process_running and logs_recent:
+        effective = "RUNNING"
+    elif bot_process_running and signals_recent:
+        effective = "RUNNING"
+    elif bot_process_running:
+        effective = "RUNNING"
+    elif logs_recent or signals_recent:
+        effective = "RUNNING"
+    elif file_upper == "RUNNING":
+        effective = "UNKNOWN"
+    elif file_upper == "STOPPED":
+        effective = "STOPPED"
+    else:
+        effective = "UNKNOWN"
+
+    file_stale = file_upper != effective and effective in {"RUNNING", "STOPPED", "UNKNOWN"}
+    if file_upper == "STOPPED" and effective == "RUNNING":
+        file_stale = True
+
+    return effective, file_stale
+
+
+def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, Any]) -> dict[str, Any]:
+    local_now = datetime.now().astimezone()
+    market_statuses: dict[str, Any] = {}
+    any_open = False
+
+    try:
+        from markets.market_hours import get_market_statuses, get_open_markets
+
+        market_statuses = get_market_statuses()
+        open_markets = get_open_markets()
+        any_open = bool(open_markets)
+    except Exception as exc:
+        market_statuses = {"error": str(exc)}
+
+    bot_effective = runtime.get("bot_status_effective", "UNKNOWN")
+    dashboard_running = runtime.get("dashboard_process_status") == "RUNNING"
+    advisory_valid = advisory.get("present") and advisory.get("action")
+    x8_active = bool(runtime.get("advisory_status", {}).get("block_new_buy") is not None)
+    x8_blocks = bool(runtime.get("advisory_status", {}).get("block_new_buy"))
+
+    x9 = runtime.get("x9_readiness") or {}
+    shadow_csv_exists = (root / "tae_shadow_validation_events.csv").is_file()
+    ledger_wired = x9.get("live_bot_wired") is True
+    buy_can_log = (
+        ledger_wired
+        and x9.get("ledger_module_present")
+        and bot_effective == "RUNNING"
+    )
+
+    warnings: list[str] = []
+    if bot_effective == "RUNNING" and not any_open:
+        pre_open = [
+            name
+            for name, cfg_open in market_statuses.items()
+            if isinstance(cfg_open, bool) and not cfg_open and name in {"US", "EU", "UK"}
+        ]
+        if pre_open:
+            warnings.append(
+                f"Bot RUNNING before/at market edge — waiting for session: {', '.join(pre_open)}"
+            )
+
+    if runtime.get("bot_status_file_stale"):
+        warnings.append(
+            f"bot_status.txt stale ({runtime.get('bot_status_file_value')}) — "
+            f"using effective status {bot_effective}"
+        )
+
+    if not dashboard_running:
+        warnings.append("Dashboard not detected running.")
+
+    if not advisory_valid:
+        warnings.append("tae_live_advisory.json missing or invalid.")
+
+    verdict = "READY"
+    if bot_effective != "RUNNING" or not advisory_valid:
+        verdict = "WARNING"
+    if warnings and verdict == "READY":
+        verdict = "WARNING"
+
+    next_action = "MONITOR_MARKET_OPEN"
+    if bot_effective != "RUNNING":
+        next_action = "START_BOT_BEFORE_MARKET_OPEN"
+    elif x8_blocks:
+        next_action = "MARKET_OPEN_WATCH_ONLY_NO_NEW_BUY"
+    elif not shadow_csv_exists and ledger_wired:
+        next_action = "MARKET_OPEN_COLLECT_X9_SHADOW_EVENTS"
+    elif any_open:
+        next_action = "MARKET_OPEN_MONITOR_SIGNALS_AND_LEDGER"
+
+    return {
+        "local_time": local_now.isoformat(),
+        "local_timezone": str(local_now.tzinfo),
+        "market_statuses": market_statuses,
+        "any_market_open": any_open,
+        "bot_running_before_open": bot_effective == "RUNNING" and not any_open,
+        "dashboard_running": dashboard_running,
+        "advisory_valid": bool(advisory_valid),
+        "x8_risk_gate_active": x8_active,
+        "x8_blocks_new_buy": x8_blocks,
+        "x9_ledger_present": x9.get("ledger_module_present"),
+        "x9_report_present": x9.get("report_script_present"),
+        "shadow_events_csv_exists": shadow_csv_exists,
+        "buy_path_will_log_on_open": buy_can_log,
+        "x9_readiness_label": x9.get("readiness_label"),
+        "warnings": warnings,
+        "verdict": verdict,
+        "next_action_for_market_open": next_action,
+    }
+
+
+def _x9_readiness(root: Path) -> dict[str, Any]:
+    ledger_path = root / SHADOW_LEDGER_MODULE
+    report_path = root / SHADOW_REPORT_SCRIPT
+    live_bot_path = root / LIVE_BOT_SCRIPT
+    events_path = root / "tae_shadow_validation_events.csv"
+
+    wired = False
+    if live_bot_path.is_file():
+        try:
+            source = live_bot_path.read_text(encoding="utf-8")
+            wired = all(
+                fn in source
+                for fn in (
+                    "log_buy_allowed",
+                    "log_buy_blocked_by_tae",
+                    "log_buy_skipped_other_reason",
+                )
+            )
+        except OSError:
+            wired = False
+
+    events_count = 0
+    if events_path.is_file():
+        events_count = len(load_shadow_events(events_path))
+
+    if not ledger_path.is_file() or not report_path.is_file():
+        label = "MISSING"
+        message = "X.9 ledger modules missing."
+    elif not wired:
+        label = "MISSING"
+        message = "live_bot.py missing shadow ledger hooks."
+    elif events_count == 0:
+        label = "NO_EVENTS_YET"
+        message = "X.9 ledger ready; no runtime BUY events yet."
+    else:
+        label = "READY"
+        message = f"X.9 ledger active with {events_count} event(s)."
+
+    return {
+        "ledger_module_present": ledger_path.is_file(),
+        "report_script_present": report_path.is_file(),
+        "live_bot_wired": wired,
+        "shadow_events_csv_exists": events_path.is_file(),
+        "shadow_events_count": events_count,
+        "readiness_label": label,
+        "message": message,
+    }
 
 
 def _load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -373,8 +602,28 @@ def _live_signals_today(root: Path) -> dict[str, Any]:
 
 
 def _runtime_status(root: Path) -> dict[str, Any]:
-    bot_path = root / "bot_status.txt"
-    bot_status = bot_path.read_text(encoding="utf-8").strip() if bot_path.is_file() else "UNKNOWN"
+    bot_path = root / BOT_STATUS_FILE
+    bot_status_file_value = (
+        bot_path.read_text(encoding="utf-8").strip() if bot_path.is_file() else "UNKNOWN"
+    )
+
+    bot_process_running = _process_running(LIVE_BOT_SCRIPT)
+    dashboard_process_running = _process_running(DASHBOARD_SCRIPT) or _process_running(
+        f"streamlit run {DASHBOARD_SCRIPT}"
+    ) or _process_running("streamlit")
+
+    last_bot_log_age_seconds = _file_age_seconds(root / BOT_LOG_FILE)
+    live_signals_age_seconds = _file_age_seconds(root / "live_signals.csv")
+    portfolio_age_seconds = _file_age_seconds(root / "portfolio.csv")
+
+    bot_status_effective, bot_status_file_stale = _derive_bot_status_effective(
+        bot_process_running=bot_process_running,
+        last_bot_log_age_seconds=last_bot_log_age_seconds,
+        live_signals_age_seconds=live_signals_age_seconds,
+        bot_status_file_value=bot_status_file_value,
+    )
+
+    x9_readiness = _x9_readiness(root)
 
     health, health_err = _load_json(root / "tae_quick_health_check.json")
     advisory_payload, advisory_err = _load_json(root / "tae_live_advisory.json")
@@ -382,9 +631,19 @@ def _runtime_status(root: Path) -> dict[str, Any]:
     block_new_buy, block_reason = should_block_new_buy(advisory_state)
 
     return {
-        "bot_status": bot_status,
-        "dashboard_status": "not_probed",
+        "bot_status": bot_status_effective,
+        "bot_process_status": _process_status_label(bot_process_running),
+        "dashboard_process_status": _process_status_label(dashboard_process_running),
+        "bot_status_file_value": bot_status_file_value,
+        "bot_status_file_stale": bot_status_file_stale,
+        "bot_status_effective": bot_status_effective,
+        "last_bot_log_age_seconds": last_bot_log_age_seconds,
+        "live_signals_age_seconds": live_signals_age_seconds,
+        "portfolio_age_seconds": portfolio_age_seconds,
+        "bot_log_fresh_threshold_seconds": BOT_LOG_FRESH_SECONDS,
+        "dashboard_status": _process_status_label(dashboard_process_running),
         "git_status": _read_git_status(root),
+        "x9_readiness": x9_readiness,
         "advisory_status": {
             "load_status": advisory_state.load_status,
             "action": advisory_state.action,
@@ -718,10 +977,12 @@ def _profit_advisory(
     missing_data: list[str] = []
     risks: list[str] = []
 
-    bot = str(runtime.get("bot_status", "")).upper()
+    bot = str(runtime.get("bot_status_effective") or runtime.get("bot_status", "")).upper()
     if bot == "STOPPED":
         recs.append("COLLECT_MORE_DATA")
         watch.append("Bot STOPPED — live results limited until next market cycle run.")
+    elif bot == "UNKNOWN":
+        watch.append("Bot status UNKNOWN — verify process and bot_output.log freshness.")
     else:
         watch.append("Bot running — monitor live_signals.csv and shadow ledger after cycle.")
 
@@ -792,8 +1053,13 @@ def _cannot_conclude(
         gaps.append("Counterfactual top_100/top_200: not enough robust strategies in artifacts.")
     if financial.get("daily_pnl") is None:
         gaps.append("Daily PnL: no portfolio activity dated today.")
-    if str(runtime.get("bot_status", "")).upper() == "STOPPED":
+    if str(runtime.get("bot_status_effective") or runtime.get("bot_status", "")).upper() == "STOPPED":
         gaps.append("Live intraday behavior: bot STOPPED limits same-day observations.")
+    if runtime.get("bot_status_file_stale"):
+        gaps.append(
+            f"bot_status.txt stale ({runtime.get('bot_status_file_value')}) — "
+            f"effective status is {runtime.get('bot_status_effective')}."
+        )
     gaps.append("Forward PnL on blocked BUYs: outcome_tracking_status PENDING_NEXT_PHASE.")
     return gaps
 
@@ -804,6 +1070,7 @@ def _final_verdict(
     shadow: dict[str, Any],
     learning: dict[str, Any],
     artifacts: dict[str, Any],
+    market_readiness: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     health = runtime.get("health_status") or {}
     verdict = "ECOSYSTEM_HEALTHY"
@@ -825,8 +1092,17 @@ def _final_verdict(
         verdict = "WARNING" if verdict == "ECOSYSTEM_HEALTHY" else verdict
         warnings.append("RISK_ADVISORY blocks new BUY")
 
-    if str(runtime.get("bot_status", "")).upper() == "STOPPED":
+    bot_effective = str(runtime.get("bot_status_effective") or runtime.get("bot_status", "")).upper()
+    if bot_effective == "STOPPED":
         warnings.append("bot STOPPED — live observations limited")
+    elif bot_effective == "UNKNOWN":
+        warnings.append("bot status UNKNOWN — verify process vs bot_status.txt")
+
+    if runtime.get("bot_status_file_stale"):
+        warnings.append(
+            f"bot_status.txt stale ({runtime.get('bot_status_file_value')}) "
+            f"vs effective {bot_effective}"
+        )
 
     daily = financial.get("daily_pnl")
     fin_today = "UNKNOWN"
@@ -840,6 +1116,8 @@ def _final_verdict(
         learning_progress = "SHADOW_EVENTS_ACCUMULATING"
 
     next_action = "WATCH_AND_COLLECT_DATA"
+    if market_readiness:
+        next_action = market_readiness.get("next_action_for_market_open", next_action)
     if adv.get("block_new_buy"):
         next_action = "DO_NOT_OPEN_NEW_BUY_REVIEW_EXISTING"
     if learning_progress == "ACTIVE_TODAY":
@@ -861,13 +1139,14 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
     financial = _portfolio_financials(root)
     signals = _live_signals_today(root)
     advisory = _tae_advisory_section(root)
+    market_readiness = _market_readiness(root, runtime, advisory)
     shadow = _shadow_validation_section(root)
     strategy = _collect_strategy_records(root)
     counterfactual = _counterfactual_section(strategy, financial)
     learning = _learning_section(root)
     profit_adv = _profit_advisory(runtime, financial, signals, advisory, shadow, strategy, learning)
     cannot = _cannot_conclude(artifacts, shadow, strategy, financial, runtime)
-    final = _final_verdict(runtime, financial, shadow, learning, artifacts)
+    final = _final_verdict(runtime, financial, shadow, learning, artifacts, market_readiness)
 
     return {
         "schema": SCHEMA,
@@ -876,6 +1155,7 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
         "generated_at": _utc_now_iso(),
         "artifacts_read": artifacts,
         "A_runtime_status": runtime,
+        "Market_Readiness": market_readiness,
         "B_financial_status": financial,
         "C_live_signals_today": signals,
         "D_tae_advisory": advisory,
@@ -897,6 +1177,7 @@ def _md_list(items: list[str]) -> str:
 
 def render_markdown(review: dict[str, Any]) -> str:
     rt = review["A_runtime_status"]
+    market = review.get("Market_Readiness") or {}
     fin = review["B_financial_status"]
     sig = review["C_live_signals_today"]
     adv = review["D_tae_advisory"]
@@ -915,11 +1196,27 @@ def render_markdown(review: dict[str, Any]) -> str:
         f"**Live trading impact:** {review['live_trading_impact']}",
         "",
         "## A. Runtime Status",
-        f"- Bot: **{rt.get('bot_status')}**",
+        f"- Bot effective: **{rt.get('bot_status_effective')}**",
+        f"- Bot process: {rt.get('bot_process_status')}",
+        f"- Dashboard process: {rt.get('dashboard_process_status')}",
+        f"- Status file: {rt.get('bot_status_file_value')}"
+        + (" (stale)" if rt.get("bot_status_file_stale") else ""),
+        f"- Bot log age (s): {rt.get('last_bot_log_age_seconds')}",
+        f"- Live signals age (s): {rt.get('live_signals_age_seconds')}",
         f"- Health: {rt.get('health_status', {}).get('verdict')}",
         f"- Advisory: {rt.get('advisory_status', {}).get('action')} "
         f"(blocks new BUY: {rt.get('advisory_status', {}).get('block_new_buy')})",
         f"- Git clean: {rt.get('git_status', {}).get('working_tree_clean')}",
+        "",
+        "## Market Readiness",
+        f"- Local time: {market.get('local_time')}",
+        f"- Verdict: **{market.get('verdict')}**",
+        f"- Markets: {market.get('market_statuses')}",
+        f"- Dashboard running: {market.get('dashboard_running')}",
+        f"- X.8 blocks new BUY: {market.get('x8_blocks_new_buy')}",
+        f"- X.9 ledger: {market.get('x9_readiness_label')}",
+        f"- BUY path will log on open: {market.get('buy_path_will_log_on_open')}",
+        f"- Next action: {market.get('next_action_for_market_open')}",
         "",
         "## B. Financial Status (estimated)",
         f"- Cash: {fin.get('cash_available')} USD",
@@ -1018,18 +1315,31 @@ def persist_review(review: dict[str, Any], root: Path | str = ".") -> tuple[Path
 
 def print_terminal_summary(review: dict[str, Any]) -> None:
     final = review["J_final_verdict"]
+    rt = review["A_runtime_status"]
+    market = review.get("Market_Readiness") or {}
     fin = review["B_financial_status"]
     sig = review["C_live_signals_today"]
     adv = review["D_tae_advisory"]
     sh = review["E_shadow_validation"]
     st = review["F_strategy_universe"]
     counts = st.get("counts") or {}
+    x9 = rt.get("x9_readiness") or {}
+
+    status_file_note = rt.get("bot_status_file_value", "UNKNOWN")
+    if rt.get("bot_status_file_stale"):
+        status_file_note = f"{status_file_note} stale"
 
     print("")
     print("===== TAE FULL ECOSYSTEM REVIEW =====")
     print(f"Verdict: {final.get('ecosystem_verdict')}")
-    print(f"Bot: {review['A_runtime_status'].get('bot_status')}")
+    print(f"Bot: {rt.get('bot_status_effective', 'UNKNOWN')}")
+    print(f"Dashboard: {rt.get('dashboard_process_status', 'UNKNOWN')}")
+    print(f"Status file: {status_file_note}")
     print(f"Advisory: {adv.get('action')} | blocks new BUY: {adv.get('blocks_new_buy')}")
+    print(f"Market readiness: {market.get('verdict', 'UNKNOWN')}")
+    print(f"X.9 ledger: {x9.get('readiness_label', 'UNKNOWN')}")
+    if x9.get("message"):
+        print(f"  {x9.get('message')}")
     print(
         f"Financial (est.): cash={fin.get('cash_available')} | "
         f"total_pnl={fin.get('total_pnl')} | daily_pnl={fin.get('daily_pnl')}"
@@ -1047,7 +1357,7 @@ def print_terminal_summary(review: dict[str, Any]) -> None:
         f"weak={counts.get('weak_shortlist_count')} | "
         f"registry={counts.get('registry_candidates_count')}"
     )
-    print(f"Next action: {final.get('next_action')}")
+    print(f"Next action for market open: {market.get('next_action_for_market_open')}")
     print(f"Output: {DEFAULT_JSON_OUT}, {DEFAULT_MD_OUT}")
     print("")
 
