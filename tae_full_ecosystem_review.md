@@ -1,6 +1,6 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-29T23:54:28.463513+00:00  
+**Generated:** 2026-06-30T00:02:21.062779+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
@@ -9,14 +9,14 @@
 - Bot process: STOPPED
 - Dashboard process: RUNNING
 - Status file: STOPPED
-- Bot log age (s): 11722.5
-- Live signals age (s): 11723.0
+- Bot log age (s): 12195.1
+- Live signals age (s): 12195.6
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T02:54:28.420948+03:00
+- Local time: 2026-06-30T03:02:21.027089+03:00
 - Verdict: **READY**
 - Session guard reason: all_markets_closed
 - Bot stopped expected: True
