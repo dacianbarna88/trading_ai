@@ -64,6 +64,9 @@ ARTIFACT_PATHS = {
     "event_memory_runtime": "tae_event_memory_runtime.json",
     "counterfactual_runtime": "tae_counterfactual_runtime.json",
     "ecosystem_runtime": "tae_ecosystem_runtime.json",
+    "macro_runtime": "tae_macro_runtime.json",
+    "sector_runtime": "tae_sector_runtime.json",
+    "confidence_runtime": "tae_confidence_runtime.json",
 }
 
 SCANNER_CSV_ARTIFACTS = (
@@ -304,6 +307,12 @@ class TAECommandCenterContext:
     counterfactual_runtime_status: str = "MISSING"
     ecosystem_runtime: dict[str, Any] = field(default_factory=dict)
     ecosystem_runtime_status: str = "MISSING"
+    macro_runtime: dict[str, Any] = field(default_factory=dict)
+    macro_runtime_status: str = "MISSING"
+    sector_runtime: dict[str, Any] = field(default_factory=dict)
+    sector_runtime_status: str = "MISSING"
+    confidence_runtime: dict[str, Any] = field(default_factory=dict)
+    confidence_runtime_status: str = "MISSING"
     scanner_refresh_cron: str = "UNKNOWN"
     watchlist_count: int | None = None
     x9_event_count: int | None = None
@@ -585,6 +594,24 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.ecosystem_runtime_status = eco_st
     status["tae_ecosystem_runtime.json"] = eco_st
 
+    macro_path = root / ARTIFACT_PATHS["macro_runtime"]
+    macro_runtime, macro_st = _safe_read_json(macro_path)
+    ctx.macro_runtime = macro_runtime or {}
+    ctx.macro_runtime_status = macro_st
+    status["tae_macro_runtime.json"] = macro_st
+
+    sector_path = root / ARTIFACT_PATHS["sector_runtime"]
+    sector_runtime, sector_st = _safe_read_json(sector_path)
+    ctx.sector_runtime = sector_runtime or {}
+    ctx.sector_runtime_status = sector_st
+    status["tae_sector_runtime.json"] = sector_st
+
+    conf_path = root / ARTIFACT_PATHS["confidence_runtime"]
+    conf_runtime, conf_st = _safe_read_json(conf_path)
+    ctx.confidence_runtime = conf_runtime or {}
+    ctx.confidence_runtime_status = conf_st
+    status["tae_confidence_runtime.json"] = conf_st
+
     ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
     ctx.watchlist_count = _count_watchlist_tickers(root)
     ctx.x9_event_count = _shadow_event_count(root)
@@ -617,6 +644,9 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "event_memory_runtime",
             "counterfactual_runtime",
             "ecosystem_runtime",
+            "macro_runtime",
+            "sector_runtime",
+            "confidence_runtime",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -1800,6 +1830,46 @@ def render_ecosystem_evidence_daily_panel(ctx: TAECommandCenterContext) -> None:
             st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
+def render_macro_runtime_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🌍 Macro Runtime")
+    st.caption(f"Artifact: tae_macro_runtime.json ({ctx.macro_runtime_status})")
+    macro = ctx.macro_runtime.get("advisory_summary") or ctx.unified_runtime.get("macro_global") or {}
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Macro Verdict", _fmt(macro.get("macro_verdict")))
+    c2.metric("Regime", _fmt(macro.get("macro_regime")))
+    c3.metric("Macro Score", _fmt(macro.get("macro_score")))
+    c4.metric("Confidence", _fmt(macro.get("macro_confidence")))
+
+
+def render_sector_runtime_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("📊 Sector Runtime")
+    st.caption(f"Artifact: tae_sector_runtime.json ({ctx.sector_runtime_status})")
+    sector = ctx.sector_runtime.get("advisory_summary") or ctx.unified_runtime.get("sector_global") or {}
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Top Sector", _fmt(sector.get("top_sector")))
+    c2.metric("Sector Score", _fmt(sector.get("sector_score")))
+    c3.metric("History Rows", _fmt(sector.get("history_rows")))
+    top = sector.get("top_sectors") or []
+    if top:
+        st.dataframe(pd.DataFrame(top), width="stretch", hide_index=True)
+
+
+def render_confidence_runtime_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("✅ Confidence Runtime")
+    st.caption(f"Artifact: tae_confidence_runtime.json ({ctx.confidence_runtime_status})")
+    conf = ctx.confidence_runtime.get("advisory_summary") or ctx.unified_runtime.get(
+        "confidence_global"
+    ) or {}
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Validation", _fmt(conf.get("validation_status")))
+    c2.metric("Confidence Score", _fmt(conf.get("confidence_score")))
+    c3.metric("Vote Accuracy", _fmt(conf.get("vote_accuracy_avg")))
+    c4.metric("Rules", _fmt(conf.get("validation_rules_count")))
+    top = conf.get("top_vote_accuracy") or []
+    if top:
+        st.dataframe(pd.DataFrame(top), width="stretch", hide_index=True)
+
+
 def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🕐 Market Open Monitor")
     st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
@@ -1907,6 +1977,12 @@ def render_tae_command_center() -> None:
     render_event_memory_counterfactual_panel(ctx)
     st.divider()
     render_ecosystem_evidence_daily_panel(ctx)
+    st.divider()
+    render_macro_runtime_panel(ctx)
+    st.divider()
+    render_sector_runtime_panel(ctx)
+    st.divider()
+    render_confidence_runtime_panel(ctx)
     st.divider()
     render_unified_runtime_panel(ctx)
     st.divider()

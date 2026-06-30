@@ -1767,6 +1767,30 @@ with tabs[10]:
                         f"Gate: {eco_global.get('evidence_gate')} · "
                         f"Daily score: {eco_global.get('daily_intelligence_score')}"
                     )
+                macro_global = unified_ssot.get("macro_global") or {}
+                if macro_global:
+                    st.subheader("🌍 MACRO RUNTIME")
+                    st.caption(
+                        f"Verdict: {macro_global.get('macro_verdict')} · "
+                        f"Regime: {macro_global.get('macro_regime')} · "
+                        f"Score: {macro_global.get('macro_score')}"
+                    )
+                sector_global = unified_ssot.get("sector_global") or {}
+                if sector_global:
+                    st.subheader("📊 SECTOR RUNTIME")
+                    st.caption(
+                        f"Top: {sector_global.get('top_sector')} · "
+                        f"Score: {sector_global.get('sector_score')} · "
+                        f"History: {sector_global.get('history_rows')}"
+                    )
+                conf_global = unified_ssot.get("confidence_global") or {}
+                if conf_global:
+                    st.subheader("✅ CONFIDENCE RUNTIME")
+                    st.caption(
+                        f"Validation: {conf_global.get('validation_status')} · "
+                        f"Score: {conf_global.get('confidence_score')} · "
+                        f"Vote accuracy: {conf_global.get('vote_accuracy_avg')}"
+                    )
                 summary = unified_ssot.get("advisory_summary") or {}
                 top_unified = summary.get("top_unified_candidates") or []
                 if top_unified:

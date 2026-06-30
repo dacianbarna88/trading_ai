@@ -780,6 +780,39 @@ class LiveAdvisoryBridge:
         except Exception:
             return {}
 
+    def _load_macro_summary(self) -> dict[str, Any]:
+        payload, _ = _load_json(self._path("tae_macro_runtime.json"))
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        try:
+            from research_core.macro_runtime.macro_context import MacroContext
+
+            return MacroContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
+    def _load_sector_summary(self) -> dict[str, Any]:
+        payload, _ = _load_json(self._path("tae_sector_runtime.json"))
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        try:
+            from research_core.sector_runtime.sector_context import SectorContext
+
+            return SectorContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
+    def _load_confidence_summary(self) -> dict[str, Any]:
+        payload, _ = _load_json(self._path("tae_confidence_runtime.json"))
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        try:
+            from research_core.confidence_runtime.confidence_context import ConfidenceContext
+
+            return ConfidenceContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
     @staticmethod
     def _dominant_verdict(index: dict[str, Any] | None) -> str | None:
         if not index:
@@ -1325,6 +1358,47 @@ class LiveAdvisoryBridge:
                 reasons.append(
                     f"[DAILY_INTELLIGENCE_CONTEXT] Priority: {item.get('title')} "
                     f"score={item.get('priority_score')}"
+                )
+
+        macro_summary = self._load_macro_summary()
+        if macro_summary:
+            reasons.append(
+                f"[MACRO_CONTEXT] Verdict: {macro_summary.get('macro_verdict')} "
+                f"Regime: {macro_summary.get('macro_regime')} "
+                f"score={macro_summary.get('macro_score')}"
+            )
+            reasons.append(
+                f"[MACRO_CONTEXT] Rates: {macro_summary.get('interest_rate_context')} "
+                f"Inflation: {macro_summary.get('inflation_context')}"
+            )
+
+        sector_summary = self._load_sector_summary()
+        if sector_summary:
+            reasons.append(
+                f"[SECTOR_CONTEXT] Top: {sector_summary.get('top_sector')} "
+                f"score={sector_summary.get('sector_score')} "
+                f"history={sector_summary.get('history_rows')}"
+            )
+            for item in sector_summary.get("top_sectors") or []:
+                reasons.append(
+                    f"[SECTOR_CONTEXT] Sector: {item.get('sector')} score={item.get('score')}"
+                )
+
+        conf_summary = self._load_confidence_summary()
+        if conf_summary:
+            reasons.append(
+                f"[CONFIDENCE_CONTEXT] Validation: {conf_summary.get('validation_status')} "
+                f"score={conf_summary.get('confidence_score')} "
+                f"vote_accuracy={conf_summary.get('vote_accuracy_avg')}"
+            )
+            reasons.append(
+                f"[CONFIDENCE_CONTEXT] Rules: {conf_summary.get('validation_rules_count')} "
+                f"adaptive_weight={conf_summary.get('adaptive_weight_avg')}"
+            )
+            for item in conf_summary.get("top_vote_accuracy") or []:
+                reasons.append(
+                    f"[CONFIDENCE_CONTEXT] Vote: {item.get('vote')} "
+                    f"accuracy={item.get('accuracy')} weight={item.get('weight')}"
                 )
 
         confidence = max(0, min(100, confidence))

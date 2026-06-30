@@ -29,6 +29,18 @@ from research_core.ecosystem_runtime.ecosystem_context import (
     ECOSYSTEM_COLUMNS,
     EcosystemContext,
 )
+from research_core.macro_runtime.macro_context import (
+    MACRO_COLUMNS,
+    MacroContext,
+)
+from research_core.sector_runtime.sector_context import (
+    SECTOR_COLUMNS,
+    SectorContext,
+)
+from research_core.confidence_runtime.confidence_context import (
+    CONFIDENCE_COLUMNS,
+    ConfidenceContext,
+)
 
 OUTPUT_JSON = "tae_unified_runtime.json"
 
@@ -101,6 +113,9 @@ def _compute_confidence(record: dict[str, Any]) -> float | None:
         ("Counterfactual_Confidence", 0.03),
         ("Evidence_Confidence", 0.03),
         ("Daily_Intelligence_Confidence", 0.03),
+        ("Macro_Runtime_Confidence", 0.02),
+        ("Sector_Runtime_Confidence", 0.02),
+        ("Confidence_Runtime_Confidence", 0.02),
     )
     for key, weight in weights:
         val = _parse_float(record.get(key))
@@ -166,6 +181,12 @@ def _compute_context(record: dict[str, Any]) -> str:
         "Evidence_Score",
         "Evidence_Gate",
         "Daily_Intelligence_Score",
+        "Macro_Regime",
+        "Macro_Runtime_Score",
+        "Sector_Momentum",
+        "Sector_Runtime_Score",
+        "Validation_Status",
+        "Confidence_Runtime_Score",
     ):
         val = record.get(key)
         if val not in (None, ""):
@@ -323,6 +344,48 @@ def _compute_bonuses(record: dict[str, Any], *, learning_score: float | None) ->
         if "READY" in orch.upper():
             ecosystem_bonus += 0.5
 
+    macro_score = _parse_float(record.get("Macro_Runtime_Score"))
+    macro_conf = _parse_float(record.get("Macro_Runtime_Confidence"))
+    macro_bonus = _parse_float(record.get("macro_bonus"))
+    if macro_bonus is None:
+        macro_bonus = 0.0
+        if macro_score is not None and macro_score >= 60:
+            macro_bonus += (macro_score - 50) * 0.015
+        if macro_conf is not None and macro_conf >= 65:
+            macro_bonus += (macro_conf - 50) * 0.01
+
+    sector_score = _parse_float(record.get("Sector_Runtime_Score"))
+    sector_conf = _parse_float(record.get("Sector_Runtime_Confidence"))
+    sector_bonus = _parse_float(record.get("sector_bonus"))
+    if sector_bonus is None:
+        sector_bonus = 0.0
+        if sector_score is not None and sector_score >= 55:
+            sector_bonus += (sector_score - 50) * 0.012
+        if sector_conf is not None and sector_conf >= 65:
+            sector_bonus += (sector_conf - 50) * 0.01
+
+    conf_score = _parse_float(record.get("Confidence_Runtime_Score"))
+    conf_conf = _parse_float(record.get("Confidence_Runtime_Confidence"))
+    vote_acc = _parse_float(record.get("Vote_Accuracy"))
+    confidence_bonus = _parse_float(record.get("confidence_bonus"))
+    if confidence_bonus is None:
+        confidence_bonus = 0.0
+        if conf_score is not None and conf_score >= 60:
+            confidence_bonus += (conf_score - 50) * 0.012
+        if conf_conf is not None and conf_conf >= 65:
+            confidence_bonus += (conf_conf - 50) * 0.01
+        if vote_acc is not None and vote_acc >= 65:
+            confidence_bonus += (vote_acc - 50) * 0.015
+
+    validation = str(record.get("Validation_Status") or "")
+    validation_bonus = _parse_float(record.get("validation_bonus"))
+    if validation_bonus is None:
+        validation_bonus = 0.0
+        if validation == "READY_FOR_VALIDATION":
+            validation_bonus += 0.4
+        elif validation == "RULES_DEFINED":
+            validation_bonus += 0.2
+
     return {
         "historical_bonus": round(historical_bonus, 4),
         "research_bonus": round(research_bonus, 4),
@@ -340,6 +403,10 @@ def _compute_bonuses(record: dict[str, Any], *, learning_score: float | None) ->
         "ecosystem_bonus": round(ecosystem_bonus, 4),
         "evidence_bonus": round(evidence_bonus, 4),
         "daily_intelligence_bonus": round(daily_intelligence_bonus, 4),
+        "macro_bonus": round(macro_bonus, 4),
+        "sector_bonus": round(sector_bonus, 4),
+        "confidence_bonus": round(confidence_bonus, 4),
+        "validation_bonus": round(validation_bonus, 4),
     }
 
 
@@ -360,6 +427,8 @@ def _compute_unified_score_extended(
     extended += bonuses.get("entry_bonus", 0.0) + bonuses.get("exit_bonus", 0.0) + bonuses.get("shadow_bonus", 0.0)
     extended += bonuses.get("ecosystem_bonus", 0.0) + bonuses.get("evidence_bonus", 0.0)
     extended += bonuses.get("daily_intelligence_bonus", 0.0)
+    extended += bonuses.get("macro_bonus", 0.0) + bonuses.get("sector_bonus", 0.0)
+    extended += bonuses.get("confidence_bonus", 0.0) + bonuses.get("validation_bonus", 0.0)
     return round(min(100.0, extended), 2)
 
 
@@ -371,6 +440,9 @@ def _build_record_from_row(
     strategy_ctx: StrategyContext | None = None,
     counterfactual_ctx: CounterfactualContext | None = None,
     ecosystem_ctx: EcosystemContext | None = None,
+    macro_ctx: MacroContext | None = None,
+    sector_ctx: SectorContext | None = None,
+    confidence_ctx: ConfidenceContext | None = None,
 ) -> dict[str, Any]:
     ticker = str(row.get("Ticker") or row.get("ticker") or "").upper()
     record: dict[str, Any] = {"Ticker": ticker}
@@ -387,6 +459,9 @@ def _build_record_from_row(
     record.update(_pick_columns(row, STRATEGY_COLUMNS))
     record.update(_pick_columns(row, COUNTERFACTUAL_COLUMNS))
     record.update(_pick_columns(row, ECOSYSTEM_COLUMNS))
+    record.update(_pick_columns(row, MACRO_COLUMNS))
+    record.update(_pick_columns(row, SECTOR_COLUMNS))
+    record.update(_pick_columns(row, CONFIDENCE_COLUMNS))
 
     if strategy_ctx is not None:
         record.update(strategy_ctx.enrich_ticker(ticker))
@@ -399,6 +474,15 @@ def _build_record_from_row(
             ecosystem_ctx.enrich_ticker(ticker, signal=str(record.get("Signal") or ""))
         )
 
+    if macro_ctx is not None:
+        record.update(macro_ctx.enrich_ticker(ticker, signal=str(record.get("Signal") or "")))
+
+    if sector_ctx is not None:
+        record.update(sector_ctx.enrich_ticker(ticker, signal=str(record.get("Signal") or "")))
+
+    if confidence_ctx is not None:
+        record.update(confidence_ctx.enrich_ticker(ticker, signal=str(record.get("Signal") or "")))
+
     record.update({k: v for k, v in learning_global.items() if v not in (None, "")})
 
     learning_score = _parse_float(learning_global.get("Learning_Health_Score"))
@@ -406,7 +490,15 @@ def _build_record_from_row(
     record.update(bonuses)
 
     unified = _parse_float(record.get("Unified_Runtime_Score"))
-    if unified is None or strategy_ctx is not None or counterfactual_ctx is not None or ecosystem_ctx is not None:
+    if (
+        unified is None
+        or strategy_ctx is not None
+        or counterfactual_ctx is not None
+        or ecosystem_ctx is not None
+        or macro_ctx is not None
+        or sector_ctx is not None
+        or confidence_ctx is not None
+    ):
         unified = _compute_unified_score_extended(record, meta_ctx=meta_ctx, bonuses=bonuses)
         record["Unified_Runtime_Score"] = unified
 
@@ -424,6 +516,9 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
     strategy_ctx = StrategyContext.load(root)
     counterfactual_ctx = CounterfactualContext.load(root)
     ecosystem_ctx = EcosystemContext.load(root)
+    macro_ctx = MacroContext.load(root)
+    sector_ctx = SectorContext.load(root)
+    confidence_ctx = ConfidenceContext.load(root)
 
     records: dict[str, dict[str, Any]] = {}
 
@@ -440,6 +535,9 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
                     strategy_ctx=strategy_ctx,
                     counterfactual_ctx=counterfactual_ctx,
                     ecosystem_ctx=ecosystem_ctx,
+                    macro_ctx=macro_ctx,
+                    sector_ctx=sector_ctx,
+                    confidence_ctx=confidence_ctx,
                 )
 
     for artifact_name, _source_kind in TICKER_SOURCES:
@@ -456,6 +554,9 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
                 strategy_ctx=strategy_ctx,
                 counterfactual_ctx=counterfactual_ctx,
                 ecosystem_ctx=ecosystem_ctx,
+                macro_ctx=macro_ctx,
+                sector_ctx=sector_ctx,
+                confidence_ctx=confidence_ctx,
             )
             records[ticker]["source_artifact"] = artifact_name
 
@@ -508,6 +609,9 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
         "strategy_summary": strategy_ctx.advisory_summary(),
         "counterfactual_summary": counterfactual_ctx.advisory_summary(),
         "ecosystem_summary": ecosystem_ctx.advisory_summary(),
+        "macro_summary": macro_ctx.advisory_summary(),
+        "sector_summary": sector_ctx.advisory_summary(),
+        "confidence_summary": confidence_ctx.advisory_summary(),
     }
     for r in records_list:
         rec = str(r.get("Unified_Runtime_Recommendation") or "NEUTRAL")
@@ -526,6 +630,9 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
         "strategy_global": strategy_ctx.advisory_summary(),
         "counterfactual_global": counterfactual_ctx.advisory_summary(),
         "ecosystem_global": ecosystem_ctx.advisory_summary(),
+        "macro_global": macro_ctx.advisory_summary(),
+        "sector_global": sector_ctx.advisory_summary(),
+        "confidence_global": confidence_ctx.advisory_summary(),
     }
 
 

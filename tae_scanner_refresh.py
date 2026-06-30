@@ -257,6 +257,25 @@ def _build_steps(root: Path) -> list[StepSpec]:
             needs_pythonpath=True,
         ),
         StepSpec(
+            name="macro_runtime",
+            command=[PYTHON, str(root / "tae_macro_runtime.py")],
+            artifact="tae_macro_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="sector_runtime",
+            command=[PYTHON, str(root / "tae_sector_runtime.py")],
+            artifact="tae_sector_runtime.json",
+            requires_artifacts=("sector_rotation.csv",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="confidence_runtime",
+            command=[PYTHON, str(root / "tae_confidence_runtime.py")],
+            artifact="tae_confidence_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
             name="unified_runtime",
             command=[PYTHON, str(root / "tae_unified_runtime.py")],
             artifact="tae_unified_runtime.json",
