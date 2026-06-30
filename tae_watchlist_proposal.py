@@ -24,6 +24,7 @@ SAFETY_BANNER = (
 DEFAULT_ROOT = Path(".")
 WATCHLIST_FILE = "watchlist.txt"
 PORTFOLIO_FILE = "portfolio.csv"
+CANDIDATE_QUEUE_FILE = "tae_candidate_queue.json"
 OUTPUT_JSON = "tae_watchlist_proposal.json"
 OUTPUT_MD = "tae_watchlist_proposal.md"
 OUTPUT_CSV = "tae_watchlist_proposal.csv"
@@ -469,7 +470,148 @@ class WatchlistProposalBuilder:
                 record.classification = "new_candidate"
                 record.exclusion_reason = None
 
+    def _build_from_candidate_queue(self, queue: dict[str, Any]) -> dict[str, Any]:
+        """Prefer governed candidate queue when tae_candidate_queue.json is present."""
+        watchlist = queue.get("current_watchlist") or _read_watchlist(self.root / WATCHLIST_FILE)
+        watchlist_set = set(watchlist)
+        open_positions = set(queue.get("current_open_positions") or [])
+        if not open_positions:
+            open_positions = _read_open_positions(self.root / PORTFOLIO_FILE)
+
+        self._load_context_sources()
+
+        queue_sources = queue.get("sources") or {}
+        for name, meta in queue_sources.items():
+            if name not in self.sources_meta:
+                self.sources_meta[name] = meta
+
+        candidates = queue.get("candidates") or []
+        ranked_dicts = []
+        for item in candidates:
+            mapped = dict(item)
+            mapped["primary_source"] = item.get("source") or item.get("primary_source")
+            mapped["classification"] = str(item.get("classification", "")).lower()
+            mapped["exclusion_reason"] = item.get("reason")
+            mapped["monitor_only"] = item.get("classification") in {"MONITOR_ONLY", "ALREADY_HELD"}
+            ranked_dicts.append(mapped)
+
+        pq = queue.get("promotion_queue") or {}
+        recommended_raw = list(pq.get("top_10_promotion_eligible") or [])[:MAX_RECOMMENDED_ADDITIONS]
+        recommended = []
+        for item in recommended_raw:
+            rec = dict(item)
+            rec["primary_source"] = item.get("source") or item.get("primary_source")
+            recommended.append(rec)
+
+        def _bucket(classification: str) -> list[dict[str, Any]]:
+            target = classification.lower()
+            return [c for c in ranked_dicts if c.get("classification") == target]
+
+        already_in_watchlist = _bucket("ALREADY_IN_WATCHLIST")
+        already_held = _bucket("ALREADY_HELD")
+        new_candidates = [
+            c
+            for c in ranked_dicts
+            if str(c.get("classification", "")).upper()
+            in {"NEW_CANDIDATE", "PROMOTION_ELIGIBLE", "MARKET_CLOSED", "MONITOR_ONLY"}
+        ]
+        excluded = [
+            c
+            for c in ranked_dicts
+            if str(c.get("classification", "")).upper() in {"STALE_SOURCE", "LOW_RANK"}
+        ]
+
+        by_market: dict[str, list[dict[str, Any]]] = {"US": [], "EU": [], "UK": [], "ASIA": []}
+        for item in ranked_dicts:
+            market = item.get("market") if item.get("market") in by_market else "US"
+            mapped = {
+                "ticker": item.get("ticker"),
+                "market": item.get("market"),
+                "rank_score": item.get("rank_score"),
+                "scanner_score": item.get("scanner_score"),
+                "global_rank_score": item.get("global_rank_score"),
+                "signal": item.get("signal"),
+                "price": item.get("price"),
+                "market_open": item.get("market_open"),
+                "primary_source": item.get("source"),
+                "source_priority": item.get("source_priority"),
+                "sources_all": item.get("sources_all") or [],
+                "source_status": item.get("source_status"),
+                "classification": str(item.get("classification", "")).lower(),
+                "exclusion_reason": item.get("reason"),
+                "monitor_only": item.get("classification") in {"MONITOR_ONLY", "ALREADY_HELD"},
+                "promotion_eligible": item.get("promotion_eligible"),
+            }
+            by_market[market].append(mapped)
+
+        queue_summary = queue.get("summary") or {}
+        global_data_sufficient = bool(queue_summary.get("global_data_sufficient"))
+        sources_found = [name for name, meta in self.sources_meta.items() if meta.get("present")]
+        sources_missing = [name for name, meta in self.sources_meta.items() if not meta.get("present")]
+
+        self.risk_notes.append(
+            f"Proposal sourced from {CANDIDATE_QUEUE_FILE} "
+            f"(recommended_action={pq.get('recommended_action')})."
+        )
+        if pq.get("recommended_action") == "WAIT_FOR_MARKET_OPEN":
+            self.risk_notes.append(
+                "Candidate queue recommends WAIT_FOR_MARKET_OPEN — promotion candidates may exist but sessions are closed."
+            )
+        elif pq.get("recommended_action") == "REFRESH_SCANNER":
+            self.risk_notes.append("Candidate queue recommends REFRESH_SCANNER before promotion.")
+        self.risk_notes.append(
+            "This proposal does NOT modify watchlist.txt — operator review required."
+        )
+
+        summary = {
+            "current_watchlist_count": len(watchlist),
+            "current_open_positions": len(open_positions),
+            "candidate_count": len(ranked_dicts),
+            "new_candidate_count": len(new_candidates),
+            "recommended_additions_count": len(recommended),
+            "sources_found": sources_found,
+            "sources_missing": sources_missing,
+            "global_data_sufficient": global_data_sufficient,
+            "candidate_queue_source": CANDIDATE_QUEUE_FILE,
+            "candidate_queue_recommended_action": pq.get("recommended_action"),
+            "promotion_eligible_count": queue_summary.get("promotion_eligible_count"),
+        }
+
+        return {
+            "schema": "tae.watchlist_proposal.v1",
+            "mode": "PAPER_ONLY_ADVISORY",
+            "live_trading_impact": "NONE",
+            "generated_at": _utc_now_iso(),
+            "safety_mode": SAFETY_BANNER,
+            "summary": summary,
+            "sources": self.sources_meta,
+            "candidate_queue": {
+                "schema": queue.get("schema"),
+                "generated_at": queue.get("generated_at"),
+                "recommended_action": pq.get("recommended_action"),
+                "promotion_eligible_count": queue_summary.get("promotion_eligible_count"),
+            },
+            "current_watchlist": watchlist,
+            "current_open_positions": sorted(open_positions),
+            "top_10": ranked_dicts[:10],
+            "top_25": ranked_dicts[:25],
+            "top_50": ranked_dicts[:50],
+            "by_market": by_market,
+            "already_in_watchlist": already_in_watchlist,
+            "already_held": already_held,
+            "new_candidates": new_candidates,
+            "excluded_candidates": excluded,
+            "recommended_additions_max_10": recommended,
+            "risk_notes": self.risk_notes,
+            "strategy_context": self.strategy_context,
+        }
+
     def build(self) -> dict[str, Any]:
+        queue_path = self.root / CANDIDATE_QUEUE_FILE
+        queue = _load_json(queue_path)
+        if queue and queue.get("schema") == "tae.candidate_queue.v1":
+            return self._build_from_candidate_queue(queue)
+
         watchlist = _read_watchlist(self.root / WATCHLIST_FILE)
         watchlist_set = set(watchlist)
         open_positions = _read_open_positions(self.root / PORTFOLIO_FILE)
@@ -596,18 +738,20 @@ def _render_markdown(report: dict[str, Any]) -> str:
     recs = report.get("recommended_additions_max_10") or []
     if recs:
         for item in recs:
+            src = item.get("primary_source") or item.get("source") or "NO_DATA"
             lines.append(
                 f"- **{item['ticker']}** ({item['market']}) rank={item['rank_score']} "
-                f"source=`{item['primary_source']}` signal={item.get('signal')}"
+                f"source=`{src}` signal={item.get('signal')}"
             )
     else:
         lines.append("- *(none)*")
 
     lines.extend(["", "## Top 10 (all sources)", ""])
     for item in report.get("top_10") or []:
+        src = item.get("primary_source") or item.get("source") or "NO_DATA"
         lines.append(
             f"- {item['ticker']} ({item['market']}) rank={item['rank_score']} "
-            f"[{item['classification']}] source={item['primary_source']}"
+            f"[{item.get('classification', 'NO_DATA')}] source={src}"
         )
 
     lines.extend(["", "## Risk Notes", ""])
@@ -700,6 +844,10 @@ def main() -> int:
     summary = report["summary"]
     print("===== TAE WATCHLIST PROPOSAL ADAPTER =====")
     print(f"Safety: {SAFETY_BANNER}")
+    if summary.get("candidate_queue_source"):
+        print(f"Source: {summary['candidate_queue_source']}")
+        print(f"Queue action: {summary.get('candidate_queue_recommended_action')}")
+        print(f"Promotion eligible (queue): {summary.get('promotion_eligible_count')}")
     print(f"Watchlist count: {summary['current_watchlist_count']}")
     print(f"Open positions: {summary['current_open_positions']}")
     print(f"Candidates consumed: {summary['candidate_count']}")
@@ -711,9 +859,10 @@ def main() -> int:
         print("  missing:", ", ".join(summary["sources_missing"]))
     print("Recommended:")
     for item in report.get("recommended_additions_max_10") or []:
+        src = item.get("primary_source") or item.get("source") or "NO_DATA"
         print(
             f"  - {item['ticker']} ({item['market']}) rank={item['rank_score']} "
-            f"source={item['primary_source']}"
+            f"source={src}"
         )
     if not report.get("recommended_additions_max_10"):
         print("  - (none)")

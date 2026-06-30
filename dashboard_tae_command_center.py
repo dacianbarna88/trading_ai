@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,8 @@ ARTIFACT_PATHS = {
     "session_start": "SESSION_START.md",
     "bot_status": "bot_status.txt",
     "session_guard_log": "market_session_guard.log",
+    "candidate_queue": "tae_candidate_queue.json",
+    "watchlist_proposal": "tae_watchlist_proposal.json",
 }
 
 
@@ -136,6 +139,10 @@ class TAECommandCenterContext:
     project_book_text: str = ""
     session_start_text: str = ""
     artifact_status: dict[str, str] = field(default_factory=dict)
+    candidate_queue: dict[str, Any] = field(default_factory=dict)
+    candidate_queue_status: str = "MISSING"
+    watchlist_proposal: dict[str, Any] = field(default_factory=dict)
+    watchlist_proposal_status: str = "MISSING"
 
     @property
     def runtime(self) -> dict[str, Any]:
@@ -288,6 +295,18 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.project_book = _parse_project_book_summary(book_text)
     status["PROJECT_BOOK.md"] = book_st
 
+    queue_path = root / ARTIFACT_PATHS["candidate_queue"]
+    candidate_queue, queue_st = _safe_read_json(queue_path)
+    ctx.candidate_queue = candidate_queue or {}
+    ctx.candidate_queue_status = queue_st
+    status["tae_candidate_queue.json"] = queue_st
+
+    proposal_path = root / ARTIFACT_PATHS["watchlist_proposal"]
+    proposal, proposal_st = _safe_read_json(proposal_path)
+    ctx.watchlist_proposal = proposal or {}
+    ctx.watchlist_proposal_status = proposal_st
+    status["tae_watchlist_proposal.json"] = proposal_st
+
     for name, rel in ARTIFACT_PATHS.items():
         if name in {
             "ecosystem_review_json",
@@ -295,6 +314,8 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "shadow_summary",
             "portfolio_reconciliation",
             "execution_integrity",
+            "candidate_queue",
+            "watchlist_proposal",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -751,6 +772,88 @@ def render_project_book_panel(ctx: TAECommandCenterContext) -> None:
             st.caption("MISSING")
 
 
+def render_global_candidate_queue_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🌍 Global Candidate Queue")
+    st.caption(
+        "CONTROLLED INTEGRATION · Reads tae_candidate_queue.json · "
+        "Does not write watchlist.txt or execute trades"
+    )
+
+    queue = ctx.candidate_queue
+    if ctx.candidate_queue_status != "OK" or not queue:
+        st.warning(f"Candidate queue artifact: {ctx.candidate_queue_status}")
+        if st.button("Build candidate queue", key="tae_build_candidate_queue"):
+            with st.spinner("Running tae_candidate_queue_builder.py …"):
+                try:
+                    result = subprocess.run(
+                        [sys.executable, "tae_candidate_queue_builder.py"],
+                        cwd=str(PROJECT_ROOT),
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    st.error("Candidate queue builder timed out")
+                except OSError as exc:
+                    st.error(f"Failed to run builder: {exc}")
+                else:
+                    if result.returncode == 0:
+                        st.success("Candidate queue built.")
+                        st.rerun()
+                    else:
+                        st.error((result.stderr or result.stdout or "Builder failed")[-2000:])
+        return
+
+    summary = queue.get("summary") or {}
+    pq = queue.get("promotion_queue") or {}
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Total candidates", _fmt(summary.get("total_candidates")))
+    c2.metric("Promotion eligible", _fmt(summary.get("promotion_eligible_count")))
+    c3.metric("Already held", _fmt(summary.get("already_held_count")))
+    c4.metric("In watchlist", _fmt(summary.get("already_in_watchlist_count")))
+    c5.metric("Market closed", _fmt(summary.get("market_closed_count")))
+    c6.metric("Recommended action", summary.get("recommended_action") or "NO_DATA")
+
+    st.caption(
+        f"Generated: {queue.get('generated_at') or 'NO_DATA'} · "
+        f"Global data sufficient: {summary.get('global_data_sufficient')}"
+    )
+
+    top10 = pq.get("top_10_promotion_eligible") or []
+    if top10:
+        st.markdown("**Top 10 promotion eligible**")
+        df = pd.DataFrame(top10)[
+            ["ticker", "market", "rank_score", "source", "market_open", "classification", "reason"]
+        ]
+        st.dataframe(df, width="stretch", hide_index=True)
+    else:
+        st.info("No promotion-eligible candidates at this time.")
+
+    proposal = ctx.watchlist_proposal
+    if ctx.watchlist_proposal_status == "OK" and proposal:
+        recs = proposal.get("recommended_additions_max_10") or []
+        st.markdown("**Proposal bridge (tae_watchlist_proposal.json)**")
+        st.caption(
+            f"Recommended additions: {len(recs)} · "
+            f"Queue source: {(proposal.get('summary') or {}).get('candidate_queue_source') or 'direct CSV'}"
+        )
+        if recs:
+            st.write(", ".join(str(r.get("ticker", r)) for r in recs))
+        else:
+            st.write("—")
+
+    with st.expander("Market statuses & sources", expanded=False):
+        st.json(
+            {
+                "market_statuses": queue.get("market_statuses"),
+                "sources": queue.get("sources"),
+                "advisory_snapshot": queue.get("advisory_snapshot"),
+            }
+        )
+
+
 def render_artifact_status(ctx: TAECommandCenterContext) -> None:
     with st.expander("Artifact read status", expanded=False):
         rows = [{"artifact": k, "status": v} for k, v in sorted(ctx.artifact_status.items())]
@@ -774,6 +877,8 @@ def render_tae_command_center() -> None:
     render_financial_panel(ctx)
     st.divider()
     render_advisory_panel(ctx)
+    st.divider()
+    render_global_candidate_queue_panel(ctx)
     st.divider()
     render_shadow_panel(ctx)
     st.divider()
