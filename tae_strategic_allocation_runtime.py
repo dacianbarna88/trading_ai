@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Strategic Allocation Runtime — invokes existing allocation modules."""
+"""TAE Strategic Allocation Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Event Memory Runtime — connects existing event memory modules."""
+"""TAE Event Memory Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

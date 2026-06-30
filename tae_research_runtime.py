@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-TAE Research Runtime — invokes existing research modules (read-only artifacts).
+TAE Research Runtime — LEGACY_RUNTIME_SOURCE pipeline step artifact.
+Consumers must read tae_unified_runtime.json (SSOT).
+Invokes existing research modules (read-only artifacts).
 """
 
 from __future__ import annotations

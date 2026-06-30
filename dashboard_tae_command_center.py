@@ -21,6 +21,11 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from research_core.meta_intelligence_runtime.unified_runtime_ssot import (
+    LEGACY_RUNTIME_SOURCE,
+    UnifiedRuntimeSSOT,
+)
+
 PROJECT_ROOT = Path(".").resolve()
 REVIEW_SCRIPT = "tae_full_ecosystem_review.sh"
 SCANNER_REFRESH_SCRIPT = "tae_scanner_refresh.sh"
@@ -692,6 +697,20 @@ def run_full_ecosystem_review(root: Path | str = PROJECT_ROOT) -> tuple[bool, st
 
 def _metric_card(label: str, value: Any, *, help_text: str | None = None) -> None:
     st.metric(label, _fmt(value) if not isinstance(value, str) else (value or "NO_DATA"), help=help_text)
+
+
+def _ssot_from_ctx(ctx: TAECommandCenterContext) -> UnifiedRuntimeSSOT:
+    if ctx.unified_runtime_status == "OK" and ctx.unified_runtime:
+        return UnifiedRuntimeSSOT(ctx.unified_runtime)
+    return UnifiedRuntimeSSOT({})
+
+
+def _ssot_section(ctx: TAECommandCenterContext, name: str) -> dict[str, Any]:
+    return _ssot_from_ctx(ctx).section(name)
+
+
+def _ssot_records(ctx: TAECommandCenterContext) -> list[dict[str, Any]]:
+    return _ssot_from_ctx(ctx).records_list
 
 
 def render_refresh_bar(ctx: TAECommandCenterContext) -> None:
@@ -1369,9 +1388,10 @@ def render_promotion_queue_panel(ctx: TAECommandCenterContext) -> None:
 
 def render_research_runtime_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🔬 Research Runtime")
+    ssot = _ssot_from_ctx(ctx)
     st.caption(
-        f"Artifacts: tae_research_runtime.json ({ctx.research_runtime_status}) · "
-        f"tae_live_signals_research_enrich.json ({ctx.research_enrich_status})"
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_research_runtime.json ({ctx.research_runtime_status})"
     )
 
     runtime = ctx.research_runtime
@@ -1381,8 +1401,26 @@ def render_research_runtime_panel(ctx: TAECommandCenterContext) -> None:
         c1.metric("Research OK", _fmt(counts.get("ok")))
         c2.metric("Skipped", _fmt(counts.get("skipped")))
         c3.metric("Failed", _fmt(counts.get("fail")))
-    else:
-        st.warning(f"Research runtime: {ctx.research_runtime_status}")
+
+    if ssot.ok:
+        strong = ssot.records_with_signal("STRONG BUY")
+        if strong:
+            rows = [
+                {
+                    "Ticker": r.get("Ticker"),
+                    "Research_Confidence": r.get("Research_Confidence"),
+                    "Research_Momentum": r.get("Research_Momentum"),
+                    "Research_Sector": r.get("Research_Sector"),
+                    "Research_Regional": r.get("Research_Regional"),
+                    "Research_Macro": r.get("Research_Macro"),
+                }
+                for r in strong
+                if r.get("Research_Confidence") is not None
+            ]
+            if rows:
+                st.markdown("**STRONG BUY — Research context (SSOT)**")
+                st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+                return
 
     enrich = ctx.research_enrich
     advisory = enrich.get("advisory_summary") or {}
@@ -1431,9 +1469,10 @@ def render_research_runtime_panel(ctx: TAECommandCenterContext) -> None:
 
 def render_committee_runtime_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🏛 Committee Runtime")
+    ssot = _ssot_from_ctx(ctx)
     st.caption(
-        f"Artifacts: tae_committee_runtime.json ({ctx.committee_runtime_status}) · "
-        f"tae_live_signals_committee_enrich.json ({ctx.committee_enrich_status})"
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_committee_runtime.json ({ctx.committee_runtime_status})"
     )
 
     runtime = ctx.committee_runtime
@@ -1443,8 +1482,31 @@ def render_committee_runtime_panel(ctx: TAECommandCenterContext) -> None:
         c1.metric("Committee OK", _fmt(counts.get("ok")))
         c2.metric("Skipped", _fmt(counts.get("skipped")))
         c3.metric("Failed", _fmt(counts.get("fail")))
-    else:
-        st.warning(f"Committee runtime: {ctx.committee_runtime_status}")
+
+    if ssot.ok:
+        top = sorted(
+            ssot.records_with_signal("STRONG BUY"),
+            key=lambda r: float(r.get("Committee_Confidence") or 0),
+            reverse=True,
+        )[:10]
+        if top:
+            st.markdown("**Top Committee Candidates (SSOT)**")
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Ticker": r.get("Ticker"),
+                            "Committee_Decision": r.get("Committee_Decision"),
+                            "Committee_Confidence": r.get("Committee_Confidence"),
+                            "Committee_Weighted_Score": r.get("Committee_Weighted_Score"),
+                        }
+                        for r in top
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+            return
 
     enrich = ctx.committee_enrich
     advisory = enrich.get("advisory_summary") or runtime.get("advisory_summary") or {}
@@ -1495,9 +1557,10 @@ def render_committee_runtime_panel(ctx: TAECommandCenterContext) -> None:
 
 def render_allocation_runtime_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("📊 Strategic Allocation Runtime")
+    ssot = _ssot_from_ctx(ctx)
     st.caption(
-        f"Artifacts: tae_strategic_allocation_runtime.json ({ctx.allocation_runtime_status}) · "
-        f"tae_live_signals_allocation_enrich.json ({ctx.allocation_enrich_status}) · "
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_strategic_allocation_runtime.json ({ctx.allocation_runtime_status}) · "
         f"tae_learning_runtime.json ({ctx.learning_runtime_status})"
     )
 
@@ -1508,12 +1571,38 @@ def render_allocation_runtime_panel(ctx: TAECommandCenterContext) -> None:
         c1.metric("Allocation OK", _fmt(counts.get("ok")))
         c2.metric("Skipped", _fmt(counts.get("skipped")))
         c3.metric("Failed", _fmt(counts.get("fail")))
-    else:
+    elif not ssot.ok:
         st.warning(f"Allocation runtime: {ctx.allocation_runtime_status}")
 
-    learning = ctx.learning_runtime.get("advisory_summary") or {}
+    learning = ssot.learning_global or ctx.learning_runtime.get("advisory_summary") or {}
     if learning:
         st.caption(f"Learning health score: {learning.get('learning_health_score', 'NO_DATA')}")
+
+    if ssot.ok:
+        top = sorted(
+            ssot.records_with_signal("STRONG BUY"),
+            key=lambda r: float(r.get("Allocation_Score") or 0),
+            reverse=True,
+        )[:10]
+        if top:
+            st.markdown("**Top Allocation Candidates (SSOT)**")
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Ticker": r.get("Ticker"),
+                            "Allocation_Score": r.get("Allocation_Score"),
+                            "Allocation_Confidence": r.get("Allocation_Confidence"),
+                            "Regional_Strength": r.get("Regional_Strength"),
+                            "Capital_Flow": r.get("Capital_Flow"),
+                        }
+                        for r in top
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+            return
 
     enrich = ctx.allocation_enrich
     advisory = enrich.get("advisory_summary") or runtime.get("advisory_summary") or {}
@@ -1568,9 +1657,10 @@ def render_allocation_runtime_panel(ctx: TAECommandCenterContext) -> None:
 
 def render_meta_intelligence_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🧠 Meta Intelligence")
+    ssot = _ssot_from_ctx(ctx)
     st.caption(
-        f"Artifacts: tae_meta_intelligence_runtime.json ({ctx.meta_runtime_status}) · "
-        f"tae_live_signals_meta_enrich.json ({ctx.meta_enrich_status})"
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_meta_intelligence_runtime.json ({ctx.meta_runtime_status})"
     )
 
     runtime = ctx.meta_runtime
@@ -1580,8 +1670,35 @@ def render_meta_intelligence_panel(ctx: TAECommandCenterContext) -> None:
         c1.metric("Meta OK", _fmt(counts.get("ok")))
         c2.metric("Skipped", _fmt(counts.get("skipped")))
         c3.metric("Failed", _fmt(counts.get("fail")))
-    else:
+    elif not ssot.ok:
         st.warning(f"Meta runtime: {ctx.meta_runtime_status}")
+
+    if ssot.ok:
+        top = sorted(
+            ssot.records_list,
+            key=lambda r: float(r.get("Unified_Runtime_Score") or 0),
+            reverse=True,
+        )[:10]
+        if top:
+            st.markdown("**Top Unified Candidates (SSOT)**")
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Ticker": r.get("Ticker"),
+                            "Signal": r.get("Signal"),
+                            "Meta_Score": r.get("Meta_Score"),
+                            "Meta_Confidence": r.get("Meta_Confidence"),
+                            "Meta_Health": r.get("Meta_Health"),
+                            "Unified_Runtime_Score": r.get("Unified_Runtime_Score"),
+                        }
+                        for r in top
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+            return
 
     enrich = ctx.meta_enrich
     advisory = enrich.get("advisory_summary") or runtime.get("advisory_summary") or {}
@@ -1674,16 +1791,15 @@ def render_unified_runtime_panel(ctx: TAECommandCenterContext) -> None:
 def render_strategy_discovery_simulation_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🧬 Strategy Discovery & Simulation")
     st.caption(
-        f"Artifacts: tae_strategy_discovery_runtime.json ({ctx.strategy_discovery_runtime_status}) · "
-        f"tae_strategy_simulation_runtime.json ({ctx.strategy_simulation_runtime_status})"
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_strategy_*_runtime.json"
     )
 
     disc = ctx.strategy_discovery_runtime
     sim = ctx.strategy_simulation_runtime
-    summary = (sim.get("advisory_summary") or disc.get("advisory_summary") or {})
-    unified = ctx.unified_runtime.get("strategy_global") or ctx.unified_runtime.get("advisory_summary", {}).get(
-        "strategy_summary"
-    ) or summary
+    unified = _ssot_section(ctx, "strategy") or (
+        sim.get("advisory_summary") or disc.get("advisory_summary") or {}
+    )
 
     if ctx.strategy_discovery_runtime_status != "OK" and ctx.strategy_simulation_runtime_status != "OK":
         st.warning("Strategy runtime artifacts missing — run scanner refresh strategy steps.")
@@ -1740,14 +1856,17 @@ def render_strategy_discovery_simulation_panel(ctx: TAECommandCenterContext) -> 
 def render_event_memory_counterfactual_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🧠 Event Memory & Counterfactual")
     st.caption(
-        f"Artifacts: tae_event_memory_runtime.json ({ctx.event_memory_runtime_status}) · "
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_event_memory_runtime.json ({ctx.event_memory_runtime_status}) · "
         f"tae_counterfactual_runtime.json ({ctx.counterfactual_runtime_status})"
     )
 
-    cf = ctx.counterfactual_runtime.get("advisory_summary") or ctx.unified_runtime.get(
-        "counterfactual_global"
+    cf = _ssot_section(ctx, "counterfactual") or ctx.counterfactual_runtime.get(
+        "advisory_summary"
+    ) or ctx.unified_runtime.get("counterfactual_global") or {}
+    em = _ssot_from_ctx(ctx).event_memory_summary() or ctx.event_memory_runtime.get(
+        "advisory_summary"
     ) or {}
-    em = ctx.event_memory_runtime.get("advisory_summary") or {}
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Event Memory", _fmt(em.get("event_count") or em.get("event_memory_verdict")))
@@ -1785,11 +1904,12 @@ def render_event_memory_counterfactual_panel(ctx: TAECommandCenterContext) -> No
 def render_ecosystem_evidence_daily_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🌐 Ecosystem / Evidence / Daily Intelligence")
     st.caption(
-        f"Artifact: tae_ecosystem_runtime.json ({ctx.ecosystem_runtime_status})"
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_ecosystem_runtime.json ({ctx.ecosystem_runtime_status})"
     )
 
-    eco = ctx.ecosystem_runtime.get("advisory_summary") or ctx.unified_runtime.get(
-        "ecosystem_global"
+    eco = _ssot_section(ctx, "ecosystem") or ctx.ecosystem_runtime.get(
+        "advisory_summary"
     ) or {}
 
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -1832,8 +1952,11 @@ def render_ecosystem_evidence_daily_panel(ctx: TAECommandCenterContext) -> None:
 
 def render_macro_runtime_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🌍 Macro Runtime")
-    st.caption(f"Artifact: tae_macro_runtime.json ({ctx.macro_runtime_status})")
-    macro = ctx.macro_runtime.get("advisory_summary") or ctx.unified_runtime.get("macro_global") or {}
+    st.caption(
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_macro_runtime.json ({ctx.macro_runtime_status})"
+    )
+    macro = _ssot_section(ctx, "macro") or ctx.macro_runtime.get("advisory_summary") or {}
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Macro Verdict", _fmt(macro.get("macro_verdict")))
     c2.metric("Regime", _fmt(macro.get("macro_regime")))
@@ -1843,8 +1966,11 @@ def render_macro_runtime_panel(ctx: TAECommandCenterContext) -> None:
 
 def render_sector_runtime_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("📊 Sector Runtime")
-    st.caption(f"Artifact: tae_sector_runtime.json ({ctx.sector_runtime_status})")
-    sector = ctx.sector_runtime.get("advisory_summary") or ctx.unified_runtime.get("sector_global") or {}
+    st.caption(
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_sector_runtime.json ({ctx.sector_runtime_status})"
+    )
+    sector = _ssot_section(ctx, "sector") or ctx.sector_runtime.get("advisory_summary") or {}
     c1, c2, c3 = st.columns(3)
     c1.metric("Top Sector", _fmt(sector.get("top_sector")))
     c2.metric("Sector Score", _fmt(sector.get("sector_score")))
@@ -1856,10 +1982,11 @@ def render_sector_runtime_panel(ctx: TAECommandCenterContext) -> None:
 
 def render_confidence_runtime_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("✅ Confidence Runtime")
-    st.caption(f"Artifact: tae_confidence_runtime.json ({ctx.confidence_runtime_status})")
-    conf = ctx.confidence_runtime.get("advisory_summary") or ctx.unified_runtime.get(
-        "confidence_global"
-    ) or {}
+    st.caption(
+        f"SSOT: tae_unified_runtime.json ({ctx.unified_runtime_status}) · "
+        f"{LEGACY_RUNTIME_SOURCE}: tae_confidence_runtime.json ({ctx.confidence_runtime_status})"
+    )
+    conf = _ssot_section(ctx, "confidence") or ctx.confidence_runtime.get("advisory_summary") or {}
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Validation", _fmt(conf.get("validation_status")))
     c2.metric("Confidence Score", _fmt(conf.get("confidence_score")))

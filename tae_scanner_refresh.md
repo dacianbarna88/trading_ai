@@ -1,51 +1,51 @@
 # TAE Scanner Refresh
 
-**Generated:** 2026-06-30T13:21:22.039895+00:00
+**Generated:** 2026-06-30T13:32:10.219662+00:00
 **Verdict:** OK
-**Total runtime:** 126.055s
+**Total runtime:** 139.736s
 
 ## Steps
 
 | Step | Status | Runtime (s) | Artifact | Rows | Freshness (h) |
 |------|--------|-------------|----------|------|---------------|
-| global_market_scanner | OK | 2.617 | global_market_scanner.csv | 10 | 0.0001 |
-| regional_strength_aggregator | OK | 1.338 | regional_strength.csv | 4 | 0.0 |
-| sector_rotation_scanner | OK | 2.635 | sector_rotation.csv | 11 | 0.0001 |
-| us_market_scanner | OK | 2.923 | watchlist_candidates.csv | 53 | 0.9728 |
-| multi_market_scanner | OK | 2.28 | multi_market_candidates.csv | 15 | 0.9718 |
-| global_candidates | OK | 1.3 | global_candidates.csv | 15 | 0.0 |
-| global_opportunity_ranking | OK | 1.278 | global_opportunity_ranking.csv | 15 | 0.0 |
-| historical_results_analysis | OK | 2.175 | tae_historical_results_analysis.json | None | 0.0001 |
-| strategy_evolution_daily_runner | OK | 2.043 | tae_continuous_strategy_ranking.json | None | 0.0001 |
-| live_signals_historical_enrich | OK | 1.985 | tae_live_signals_historical_enrich.json | None | 0.0001 |
-| research_runtime | OK | 6.616 | tae_research_runtime.json | None | 0.0001 |
-| live_signals_research_enrich | OK | 1.927 | tae_live_signals_research_enrich.json | None | 0.0001 |
-| committee_runtime | OK | 6.269 | tae_committee_runtime.json | None | 0.0001 |
-| live_signals_committee_enrich | OK | 1.934 | tae_live_signals_committee_enrich.json | None | 0.0001 |
-| learning_runtime | OK | 5.859 | tae_learning_runtime.json | None | 0.0001 |
-| strategic_allocation_runtime | OK | 4.967 | tae_strategic_allocation_runtime.json | None | 0.0001 |
-| live_signals_allocation_enrich | OK | 1.971 | tae_live_signals_allocation_enrich.json | None | 0.0001 |
-| meta_intelligence_runtime | OK | 6.337 | tae_meta_intelligence_runtime.json | None | 0.0001 |
-| live_signals_meta_enrich | OK | 1.975 | tae_live_signals_meta_enrich.json | None | 0.0001 |
-| strategy_discovery_runtime | OK | 4.008 | tae_strategy_discovery_runtime.json | None | 0.0001 |
-| strategy_simulation_runtime | OK | 10.397 | tae_strategy_simulation_runtime.json | None | 0.0001 |
-| event_memory_runtime | OK | 3.866 | tae_event_memory_runtime.json | None | 0.0001 |
-| counterfactual_runtime | OK | 8.582 | tae_counterfactual_runtime.json | None | 0.0001 |
-| ecosystem_runtime | OK | 17.47 | tae_ecosystem_runtime.json | None | 0.0001 |
-| macro_runtime | OK | 2.262 | tae_macro_runtime.json | None | 0.0001 |
-| sector_runtime | OK | 5.73 | tae_sector_runtime.json | None | 0.0001 |
-| confidence_runtime | OK | 10.632 | tae_confidence_runtime.json | None | 0.0001 |
-| unified_runtime | OK | 1.96 | tae_unified_runtime.json | None | 0.0001 |
-| candidate_queue_builder | OK | 0.161 | tae_candidate_queue.json | None | 0.0 |
-| watchlist_proposal | OK | 0.132 | tae_watchlist_proposal.json | None | 0.0 |
-| actionable_signal_audit | OK | 2.363 | tae_actionable_signal_audit.json | None | 0.0001 |
+| global_market_scanner | OK | 2.847 | global_market_scanner.csv | 10 | 0.0001 |
+| regional_strength_aggregator | OK | 1.321 | regional_strength.csv | 4 | 0.0001 |
+| sector_rotation_scanner | OK | 2.875 | sector_rotation.csv | 11 | 0.0001 |
+| us_market_scanner | OK | 2.985 | watchlist_candidates.csv | 53 | 1.1492 |
+| multi_market_scanner | OK | 2.3 | multi_market_candidates.csv | 15 | 1.1482 |
+| global_candidates | OK | 1.399 | global_candidates.csv | 15 | 0.0 |
+| global_opportunity_ranking | OK | 1.476 | global_opportunity_ranking.csv | 15 | 0.0001 |
+| historical_results_analysis | OK | 2.518 | tae_historical_results_analysis.json | None | 0.0001 |
+| strategy_evolution_daily_runner | OK | 2.176 | tae_continuous_strategy_ranking.json | None | 0.0001 |
+| live_signals_historical_enrich | OK | 2.114 | tae_live_signals_historical_enrich.json | None | 0.0001 |
+| research_runtime | OK | 7.061 | tae_research_runtime.json | None | 0.0001 |
+| live_signals_research_enrich | OK | 2.035 | tae_live_signals_research_enrich.json | None | 0.0001 |
+| committee_runtime | OK | 6.753 | tae_committee_runtime.json | None | 0.0001 |
+| live_signals_committee_enrich | OK | 2.045 | tae_live_signals_committee_enrich.json | None | 0.0001 |
+| learning_runtime | OK | 6.314 | tae_learning_runtime.json | None | 0.0001 |
+| strategic_allocation_runtime | OK | 5.237 | tae_strategic_allocation_runtime.json | None | 0.0001 |
+| live_signals_allocation_enrich | OK | 2.045 | tae_live_signals_allocation_enrich.json | None | 0.0001 |
+| meta_intelligence_runtime | OK | 6.894 | tae_meta_intelligence_runtime.json | None | 0.0001 |
+| live_signals_meta_enrich | OK | 2.416 | tae_live_signals_meta_enrich.json | None | 0.0001 |
+| strategy_discovery_runtime | OK | 4.275 | tae_strategy_discovery_runtime.json | None | 0.0001 |
+| strategy_simulation_runtime | OK | 11.357 | tae_strategy_simulation_runtime.json | None | 0.0001 |
+| event_memory_runtime | OK | 4.096 | tae_event_memory_runtime.json | None | 0.0001 |
+| counterfactual_runtime | OK | 9.432 | tae_counterfactual_runtime.json | None | 0.0001 |
+| ecosystem_runtime | OK | 19.955 | tae_ecosystem_runtime.json | None | 0.0001 |
+| macro_runtime | OK | 2.449 | tae_macro_runtime.json | None | 0.0001 |
+| sector_runtime | OK | 6.265 | tae_sector_runtime.json | None | 0.0001 |
+| confidence_runtime | OK | 11.87 | tae_confidence_runtime.json | None | 0.0001 |
+| unified_runtime | OK | 2.149 | tae_unified_runtime.json | None | 0.0001 |
+| candidate_queue_builder | OK | 2.128 | tae_candidate_queue.json | None | 0.0001 |
+| watchlist_proposal | OK | 0.153 | tae_watchlist_proposal.json | None | 0.0 |
+| actionable_signal_audit | OK | 2.721 | tae_actionable_signal_audit.json | None | 0.0001 |
 
 ## Downstream
 
-- Candidate queue action: **WAIT_FOR_MARKET_OPEN**
-- Promotion eligible: **0**
-- Watchlist proposal recommended additions: **0**
-- Watchlist proposal queue action: **WAIT_FOR_MARKET_OPEN**
+- Candidate queue action: **PROMOTE_MAX_10**
+- Promotion eligible: **38**
+- Watchlist proposal recommended additions: **10**
+- Watchlist proposal queue action: **PROMOTE_MAX_10**
 
 ## Governance
 

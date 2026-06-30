@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-TAE Committee Runtime — invokes existing committee modules (read-only artifacts).
+TAE Committee Runtime — LEGACY_RUNTIME_SOURCE pipeline step artifact.
+Consumers must read tae_unified_runtime.json (SSOT).
 """
 
 from __future__ import annotations

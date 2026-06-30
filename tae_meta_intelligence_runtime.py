@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Meta Intelligence Runtime — connects existing meta/ecosystem artifacts."""
+"""TAE Meta Intelligence Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

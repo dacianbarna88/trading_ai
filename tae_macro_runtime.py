@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Macro Runtime — connects macro intelligence upstream modules."""
+"""TAE Macro Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

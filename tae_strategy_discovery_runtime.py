@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Strategy Discovery Runtime — connects existing strategy discovery modules."""
+"""TAE Strategy Discovery Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

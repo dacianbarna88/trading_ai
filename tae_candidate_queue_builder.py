@@ -367,20 +367,13 @@ class CandidateQueueBuilder:
             merged[ticker].sources_all.append(artifact_name)
 
     def _load_unified_runtime(self) -> tuple[dict[str, dict[str, Any]], dict[str, Any], dict[str, Any]]:
-        payload = _load_json(self.root / "tae_unified_runtime.json") or {}
-        records = payload.get("records") or {}
-        if not isinstance(records, dict):
-            records = {}
-        by_ticker = {
-            str(k).upper(): v for k, v in records.items() if isinstance(v, dict)
-        }
-        if not by_ticker and payload.get("records_list"):
-            by_ticker = {
-                str(r.get("Ticker") or "").upper(): r
-                for r in payload["records_list"]
-                if isinstance(r, dict) and r.get("Ticker")
-            }
-        return by_ticker, payload.get("advisory_summary") or {}, payload
+        from research_core.meta_intelligence_runtime.unified_runtime_ssot import (
+            UnifiedRuntimeSSOT,
+        )
+
+        ssot = UnifiedRuntimeSSOT.load(self.root)
+        payload = ssot.payload
+        return ssot.records_by_ticker, ssot.advisory_summary, payload
 
     def _apply_runtime_bonuses(
         self,

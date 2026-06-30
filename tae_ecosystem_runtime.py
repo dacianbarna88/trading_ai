@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Ecosystem Runtime — connects full ecosystem, orchestrator, evidence, daily intelligence."""
+"""TAE Ecosystem Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

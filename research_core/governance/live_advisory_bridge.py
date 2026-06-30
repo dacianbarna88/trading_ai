@@ -654,7 +654,37 @@ class LiveAdvisoryBridge:
                         break
         return loaded
 
+    def _ssot(self) -> Any:
+        if not hasattr(self, "_ssot_cache"):
+            from research_core.meta_intelligence_runtime.unified_runtime_ssot import (
+                UnifiedRuntimeSSOT,
+            )
+
+            self._ssot_cache = UnifiedRuntimeSSOT.load(self._root)
+        return self._ssot_cache
+
     def _load_research_advisory_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        if ssot.ok:
+            rows = ssot.records_with_signal("STRONG BUY")
+            if rows:
+                return {
+                    "strong_buy_count": len(rows),
+                    "avg_research_confidence": round(
+                        sum(
+                            float(r.get("Research_Confidence") or 0)
+                            for r in rows
+                            if r.get("Research_Confidence") is not None
+                        )
+                        / max(
+                            1,
+                            sum(1 for r in rows if r.get("Research_Confidence") is not None),
+                        ),
+                        2,
+                    ),
+                    "source": "tae_unified_runtime.json",
+                }
+        # LEGACY_RUNTIME_SOURCE
         enrich_path = self._path("tae_live_signals_research_enrich.json")
         payload, _ = _load_json(enrich_path)
         if payload and payload.get("advisory_summary"):
@@ -667,10 +697,34 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_committee_advisory_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        if ssot.ok:
+            rows = ssot.records_with_signal("STRONG BUY")
+            top = sorted(
+                rows,
+                key=lambda r: float(r.get("Committee_Confidence") or 0),
+                reverse=True,
+            )[:10]
+            if top:
+                return {
+                    "committee_summary": top[0].get("Committee_Decision"),
+                    "committee_confidence": top[0].get("Committee_Confidence"),
+                    "highest_confidence_candidates": [
+                        {
+                            "ticker": r.get("Ticker"),
+                            "committee_decision": r.get("Committee_Decision"),
+                            "committee_confidence": r.get("Committee_Confidence"),
+                        }
+                        for r in top
+                    ],
+                    "source": "tae_unified_runtime.json",
+                }
+        # LEGACY_RUNTIME_SOURCE
         enrich_path = self._path("tae_live_signals_committee_enrich.json")
         payload, _ = _load_json(enrich_path)
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
+        # LEGACY_RUNTIME_SOURCE — tae_committee_runtime.json
         runtime_path = self._path("tae_committee_runtime.json")
         runtime_payload, _ = _load_json(runtime_path)
         if runtime_payload and runtime_payload.get("advisory_summary"):
@@ -683,10 +737,28 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_allocation_advisory_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        if ssot.ok:
+            rows = ssot.records_with_signal("STRONG BUY")
+            if rows:
+                return {
+                    "allocation_score_avg": round(
+                        sum(float(r.get("Allocation_Score") or 0) for r in rows) / len(rows),
+                        2,
+                    ),
+                    "allocation_confidence_avg": round(
+                        sum(float(r.get("Allocation_Confidence") or 0) for r in rows)
+                        / len(rows),
+                        2,
+                    ),
+                    "source": "tae_unified_runtime.json",
+                }
+        # LEGACY_RUNTIME_SOURCE
         enrich_path = self._path("tae_live_signals_allocation_enrich.json")
         payload, _ = _load_json(enrich_path)
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
+        # LEGACY_RUNTIME_SOURCE — tae_strategic_allocation_runtime.json
         runtime_path = self._path("tae_strategic_allocation_runtime.json")
         runtime_payload, _ = _load_json(runtime_path)
         if runtime_payload and runtime_payload.get("advisory_summary"):
@@ -701,10 +773,25 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_meta_advisory_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        if ssot.ok:
+            rows = ssot.records_with_signal("STRONG BUY")
+            if rows:
+                return {
+                    "meta_health": rows[0].get("Meta_Health"),
+                    "meta_ecosystem_status": rows[0].get("Meta_Ecosystem_Status"),
+                    "meta_score_avg": round(
+                        sum(float(r.get("Meta_Score") or 0) for r in rows) / len(rows),
+                        2,
+                    ),
+                    "source": "tae_unified_runtime.json",
+                }
+        # LEGACY_RUNTIME_SOURCE
         enrich_path = self._path("tae_live_signals_meta_enrich.json")
         payload, _ = _load_json(enrich_path)
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
+        # LEGACY_RUNTIME_SOURCE — tae_meta_intelligence_runtime.json
         runtime_path = self._path("tae_meta_intelligence_runtime.json")
         runtime_payload, _ = _load_json(runtime_path)
         if runtime_payload and runtime_payload.get("advisory_summary"):
@@ -730,6 +817,11 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_strategy_advisory_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        block = ssot.section("strategy")
+        if block:
+            return block
+        # LEGACY_RUNTIME_SOURCE
         sim_path = self._path("tae_strategy_simulation_runtime.json")
         payload, _ = _load_json(sim_path)
         if payload and payload.get("advisory_summary"):
@@ -748,6 +840,11 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_event_memory_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        block = ssot.event_memory_summary()
+        if block:
+            return block
+        # LEGACY_RUNTIME_SOURCE
         payload, _ = _load_json(self._path("tae_event_memory_runtime.json"))
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
@@ -759,6 +856,11 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_counterfactual_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        block = ssot.section("counterfactual")
+        if block:
+            return block
+        # LEGACY_RUNTIME_SOURCE
         payload, _ = _load_json(self._path("tae_counterfactual_runtime.json"))
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
@@ -770,6 +872,11 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_ecosystem_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        block = ssot.section("ecosystem")
+        if block:
+            return block
+        # LEGACY_RUNTIME_SOURCE
         payload, _ = _load_json(self._path("tae_ecosystem_runtime.json"))
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
@@ -781,6 +888,11 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_macro_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        block = ssot.section("macro")
+        if block:
+            return block
+        # LEGACY_RUNTIME_SOURCE
         payload, _ = _load_json(self._path("tae_macro_runtime.json"))
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
@@ -792,6 +904,11 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_sector_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        block = ssot.section("sector")
+        if block:
+            return block
+        # LEGACY_RUNTIME_SOURCE
         payload, _ = _load_json(self._path("tae_sector_runtime.json"))
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
@@ -803,6 +920,11 @@ class LiveAdvisoryBridge:
             return {}
 
     def _load_confidence_summary(self) -> dict[str, Any]:
+        ssot = self._ssot()
+        block = ssot.section("confidence")
+        if block:
+            return block
+        # LEGACY_RUNTIME_SOURCE
         payload, _ = _load_json(self._path("tae_confidence_runtime.json"))
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]

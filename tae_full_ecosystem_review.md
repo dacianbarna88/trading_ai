@@ -1,6 +1,6 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-30T13:21:33.705841+00:00  
+**Generated:** 2026-06-30T13:32:34.485852+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
@@ -9,21 +9,21 @@
 - Bot process: STOPPED
 - Dashboard process: RUNNING
 - Status file: RUNNING
-- Bot log age (s): 2.4
-- Live signals age (s): 10.8
+- Bot log age (s): 0.3
+- Live signals age (s): 67.1
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T16:21:33.661939+03:00
+- Local time: 2026-06-30T16:32:34.439990+03:00
 - Verdict: **READY**
 - Session guard reason: market_session_open
 - Bot stopped expected: False
-- Markets: {'US': False, 'EU': True, 'UK': True, 'ASIA': False}
+- Markets: {'US': True, 'EU': True, 'UK': True, 'ASIA': False}
 - Dashboard running: True
 - X.8 blocks new BUY: False
-- Advisory blocking warnings: 0 | informational: 5
+- Advisory blocking warnings: 0 | informational: 8
 - RISK from real blockers only: False
 - SELL accounting protection: ACTIVE
 - X.9 ledger: READY
@@ -31,17 +31,17 @@
 - Next action: MARKET_OPEN_MONITOR_SIGNALS_AND_LEDGER
 
 ## B. Financial Status (estimated, trading-only PnL)
-- Cash: 22662.33 USD
+- Cash: 12662.3 USD
 - Capital deposits (flows): 0.0 USD
-- Open positions: 4
-- Portfolio value (est.): 30444.64 USD
+- Open positions: 8
+- Portfolio value (est.): 30385.16 USD
 - Trading realized PnL: -534.3556
-- Trading unrealized PnL: -30.5546
-- **Corrected trading total PnL:** 444.6373
-- Raw total PnL (incl. CASH rows): -10669.8508
+- Trading unrealized PnL: -90.0368
+- **Corrected trading total PnL:** 385.1551
+- Raw total PnL (incl. CASH rows): -10720.9584
 - Accounting adjustments excluded: -9913.58
 - Daily trading PnL: None
-- Profit % (on 30000.0 baseline): 1.4821%
+- Profit % (on 30000.0 baseline): 1.2839%
 - Execution integrity: MISMATCH_DETECTED (SELL mismatches: 27)
 - Corrected realized PnL: 475.1919
 
@@ -56,14 +56,14 @@
 - CASH distortion: CASH/DEPOSIT row reported PnL -9913.58 distorts raw portfolio sums; excluded from corrected trading PnL.
 
 ## C. Live Signals Today
-- Total: 25 | STRONG BUY: 8 | TAKE PROFIT: 8 | WAIT: 9
+- Total: 25 | STRONG BUY: 8 | TAKE PROFIT: 7 | WAIT: 10
 
 ## D. TAE Advisory
 - Action: **SELL_ADVISORY** | Confidence: 78
 - SELL_ADVISORY: review exits only; no auto-sell.
 
 ## E. X.9 Shadow Validation
-- Events: 625 | Allowed: 1 | Blocked: 0 | Skipped: 624
+- Events: 657 | Allowed: 5 | Blocked: 0 | Skipped: 652
 - Block rate: 0.0
 
 ## F. Strategy Universe
@@ -83,7 +83,7 @@
 
 ## H. Learning / Evidence / Meta
 - Evidence verdict: EVIDENCE_ENGINE_SOURCE_OF_TRUTH_ALIGNED
-- Meta confidence: {'composite_score': 0.9886, 'confidence_label': 'HIGH', 'factors': {'runtime_health': 1.0, 'orchestrator': 1.0, 'strategy_evolution': 1.0, 'governance': 1.0, 'top_strategy_score': 0.9315, 'input_coverage': 1.0}}
+- Meta confidence: {'composite_score': 0.9902, 'confidence_label': 'HIGH', 'factors': {'runtime_health': 1.0, 'orchestrator': 1.0, 'strategy_evolution': 1.0, 'governance': 1.0, 'top_strategy_score': 0.9415, 'input_coverage': 1.0}}
 - Ranking count: 3
 - Artifacts generated today: ['tae_live_advisory.json', 'tae_shadow_validation_summary.json', 'tae_advisory_index.json', 'tae_historical_execution.json', 'tae_historical_results_analysis.json', 'tae_continuous_strategy_ranking.json', 'tae_candidate_strategy_registry.json', 'tae_meta_intelligence.json', 'tae_evidence_engine_report.json', 'tae_quick_health_check.json']
 

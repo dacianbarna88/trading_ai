@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Sector Runtime — connects sector intelligence upstream modules."""
+"""TAE Sector Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

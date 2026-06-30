@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Confidence Runtime — connects confidence validation modules."""
+"""TAE Confidence Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

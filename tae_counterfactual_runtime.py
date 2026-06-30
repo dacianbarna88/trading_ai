@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Counterfactual Runtime — connects entry/exit analysis and shadow validation."""
+"""TAE Counterfactual Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

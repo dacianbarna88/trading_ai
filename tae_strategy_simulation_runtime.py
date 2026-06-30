@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Strategy Simulation Runtime — connects existing simulation modules."""
+"""TAE Strategy Simulation Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 

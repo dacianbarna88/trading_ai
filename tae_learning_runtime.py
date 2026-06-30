@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAE Learning Runtime — invokes existing learning modules."""
+"""TAE Learning Runtime — LEGACY_RUNTIME_SOURCE; SSOT: tae_unified_runtime.json."""
 
 from __future__ import annotations
 
