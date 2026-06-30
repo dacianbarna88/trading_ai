@@ -302,26 +302,43 @@ def get_open_positions(portfolio):
     if portfolio.empty:
         return positions
 
-    portfolio["Price"] = pd.to_numeric(portfolio["Price"], errors="coerce")
-    portfolio["Shares"] = pd.to_numeric(portfolio["Shares"], errors="coerce")
+    work = portfolio.copy()
+    work["Price"] = pd.to_numeric(work["Price"], errors="coerce")
+    work["Shares"] = pd.to_numeric(work["Shares"], errors="coerce")
 
-    for ticker in portfolio["Ticker"].dropna().unique():
-        rows = portfolio[portfolio["Ticker"] == ticker]
+    for ticker in work["Ticker"].dropna().unique():
+        rows = work[work["Ticker"] == ticker].copy()
+        if "Date" in rows.columns:
+            rows = rows.sort_values("Date")
 
-        buys = rows[rows["Action"].astype(str).str.upper() == "BUY"]
-        sells = rows[rows["Action"].astype(str).str.upper() == "SELL"]
+        lots: list[list[float]] = []
 
-        buy_shares = buys["Shares"].sum()
-        sell_shares = sells["Shares"].sum()
-        open_shares = buy_shares - sell_shares
+        for _, row in rows.iterrows():
+            action = str(row.get("Action", "")).upper()
+            shares = float(row["Shares"]) if pd.notna(row["Shares"]) else 0.0
+            price = float(row["Price"]) if pd.notna(row["Price"]) else 0.0
+            if shares <= 0:
+                continue
 
-        if open_shares > 0:
-            buy_value = (buys["Price"] * buys["Shares"]).sum()
-            avg_price = buy_value / buy_shares if buy_shares else 0
+            if action == "BUY":
+                lots.append([price, shares])
+            elif action == "SELL":
+                remaining = shares
+                while remaining > 1e-9 and lots:
+                    lot_shares = lots[0][1]
+                    if lot_shares <= remaining + 1e-9:
+                        remaining -= lot_shares
+                        lots.pop(0)
+                    else:
+                        lots[0][1] = lot_shares - remaining
+                        remaining = 0.0
 
+        open_shares = sum(lot[1] for lot in lots)
+        if open_shares > 1e-9:
+            cost_basis = sum(lot[0] * lot[1] for lot in lots)
             positions[ticker] = {
-                "shares": open_shares,
-                "avg_price": avg_price,
+                "shares": round(open_shares, 4),
+                "avg_price": cost_basis / open_shares,
             }
 
     return positions
@@ -475,6 +492,39 @@ def sell_position(row, portfolio, reason):
         f"PnL %: {pnl_pct:.2f}%\n"
         f"Reason: {reason}"
     )
+
+    return portfolio
+
+
+def manage_position_risk_independent(portfolio, signals_df=None):
+    """Evaluate stop/take-profit for open positions without relying on signals_df."""
+    for ticker in list(get_open_positions(portfolio).keys()):
+        positions = get_open_positions(portfolio)
+        if ticker not in positions:
+            continue
+
+        current_price = get_latest_price(ticker)
+        if current_price is None:
+            log(f"RISK DATA STALE pentru {ticker}: stop-loss not evaluated")
+            continue
+
+        avg_price = float(positions[ticker]["avg_price"])
+        pnl_pct = ((current_price - avg_price) / avg_price) * 100
+
+        if pnl_pct <= STOP_LOSS_PCT:
+            reason = f"INDEPENDENT RISK STOP LOSS {pnl_pct:.2f}%"
+        elif pnl_pct >= TAKE_PROFIT_PCT:
+            reason = f"INDEPENDENT RISK TAKE PROFIT {pnl_pct:.2f}%"
+        else:
+            continue
+
+        row = {
+            "Ticker": ticker,
+            "Price": round(current_price, 2),
+            "Score": 0,
+            "Signal": "WAIT",
+        }
+        portfolio = sell_position(row, portfolio, reason)
 
     return portfolio
 
@@ -643,6 +693,7 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
                 portfolio = sell_position(row, portfolio, f"STOP LOSS {pnl_pct:.2f}%")
                 positions = get_open_positions(portfolio)
 
+    portfolio = manage_position_risk_independent(portfolio, signals_df)
     save_portfolio(portfolio)
 
 def generate_signals():
