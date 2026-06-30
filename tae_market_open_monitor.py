@@ -308,20 +308,32 @@ def _sleep_wake_readiness() -> dict[str, Any]:
         exec_status["market_guard_executable"],
         PLIST_REPO.is_file(),
     ]
-    installed = PLIST_INSTALLED.is_file()
+    installed_startup = PLIST_INSTALLED.is_file()
+    installed_guard = (Path.home() / "Library/LaunchAgents/com.tradingai.market-session-guard.plist").is_file()
     run_at_load = _plist_run_at_load(PLIST_INSTALLED) or _plist_run_at_load(PLIST_REPO)
+    guard_plist = Path.home() / "Library/LaunchAgents/com.tradingai.market-session-guard.plist"
+    guard_interval = None
+    if guard_plist.is_file():
+        try:
+            with guard_plist.open("rb") as handle:
+                pdata = plistlib.load(handle)
+            guard_interval = pdata.get("StartInterval")
+        except Exception:
+            guard_interval = None
 
-    if all(readiness_checks) and installed and run_at_load:
+    if all(readiness_checks) and installed_startup and installed_guard and run_at_load:
         verdict = "READY"
-    elif all(readiness_checks):
+    elif all(readiness_checks) and installed_startup:
         verdict = "WARNING"
     else:
         verdict = "NOT_READY"
 
     return {
         "launchagent_repo_present": PLIST_REPO.is_file(),
-        "launchagent_installed": installed,
-        "launchagent_installed_path": str(PLIST_INSTALLED) if installed else None,
+        "launchagent_startup_installed": installed_startup,
+        "launchagent_guard_installed": installed_guard,
+        "launchagent_guard_start_interval_seconds": guard_interval,
+        "launchagent_installed_path": str(PLIST_INSTALLED) if installed_startup else None,
         "run_at_load": run_at_load,
         "cron_has_market_guard": _cron_has_guard(),
         **exec_status,

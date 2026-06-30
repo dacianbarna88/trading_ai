@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingai.market-session-guard</string>
+    <key>Comment</key>
+    <string>TAE periodic market session guard — wake-safe bot/dashboard autostart</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_BIN__</string>
+        <string>__PROJECT_DIR__/market_session_guard.py</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TAE_SCHEDULER_SOURCE</key>
+        <string>launchd</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__PROJECT_DIR__/market_session_guard_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_DIR__/market_session_guard_launchd.log</string>
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_DIR__</string>
+</dict>
+</plist>

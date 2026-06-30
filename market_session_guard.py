@@ -126,6 +126,12 @@ def main(argv: list[str] | None = None) -> int:
     start_reason = "NONE"
 
     log(
+        "INVOKED scheduler={scheduler} pid={pid}".format(
+            scheduler=os.getenv("TAE_SCHEDULER_SOURCE", "manual"),
+            pid=os.getpid(),
+        )
+    )
+    log(
         "CONFIG DRY_RUN={dry_run} DRY_RUN_SOURCE={source} ENV={env}".format(
             dry_run=dry_run,
             source=dry_run_source,
@@ -166,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         "OPEN=[{open}] CLOSED=[{closed}] BOT={bot} DASHBOARD={dashboard} "
         "BOT_ACTION={bot_action} DASHBOARD_ACTION={dashboard_action} "
         "START_REASON={start_reason} AWAKE={awake} BOT_RESULT={bot_result} "
-        "DASHBOARD_RESULT={dashboard_result} DRY_RUN={dry_run} DRY_RUN_SOURCE={source}".format(
+        "DASHBOARD_RESULT={dashboard_result} DRY_RUN={dry_run} DRY_RUN_SOURCE={source} SCHEDULER={scheduler}".format(
             open=",".join(open_markets) if open_markets else "NONE",
             closed=",".join(closed_markets) if closed_markets else "NONE",
             bot=bot_status,
@@ -179,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
             dashboard_result=dashboard_result or "NONE",
             dry_run=dry_run,
             source=dry_run_source,
+            scheduler=os.getenv("TAE_SCHEDULER_SOURCE", "manual"),
         )
     )
 

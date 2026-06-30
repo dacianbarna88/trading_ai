@@ -14,9 +14,18 @@ done
 
 # Live runtime default — ignore inherited DRY_RUN unless --dry-run passed to this script.
 unset DRY_RUN TAE_DRY_RUN MARKET_GUARD_DRY_RUN
+export TAE_SCHEDULER_SOURCE="${TAE_SCHEDULER_SOURCE:-manual}"
 
 if [ -x "$PYTHON_BIN" ]; then
-  exec "$PYTHON_BIN" "$PROJECT_DIR/market_session_guard.py" "${GUARD_ARGS[@]}"
+  if ((${#GUARD_ARGS[@]})); then
+    exec "$PYTHON_BIN" "$PROJECT_DIR/market_session_guard.py" "${GUARD_ARGS[@]}"
+  else
+    exec "$PYTHON_BIN" "$PROJECT_DIR/market_session_guard.py"
+  fi
 else
-  exec python3 "$PROJECT_DIR/market_session_guard.py" "${GUARD_ARGS[@]}"
+  if ((${#GUARD_ARGS[@]})); then
+    exec python3 "$PROJECT_DIR/market_session_guard.py" "${GUARD_ARGS[@]}"
+  else
+    exec python3 "$PROJECT_DIR/market_session_guard.py"
+  fi
 fi
