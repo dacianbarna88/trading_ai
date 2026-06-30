@@ -251,6 +251,70 @@ def _derive_bot_status_effective(
     return effective, file_stale
 
 
+def _coerce_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _parse_live_advisory_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read tae_live_advisory.json — root fields preferred, legacy advisory.* fallback."""
+    adv = payload.get("advisory") or {}
+    tae_snapshot = payload.get("tae_snapshot") or {}
+
+    def _first_int(*candidates: Any) -> int:
+        for value in candidates:
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    action = str(payload.get("action") or adv.get("action") or "NO_ACTION").strip().upper()
+    block_new_buy = _coerce_bool(payload.get("block_new_buy"))
+    if block_new_buy is None:
+        block_new_buy = _coerce_bool(adv.get("block_new_buy"))
+
+    blocking_count = _first_int(
+        payload.get("blocking_warnings_count"),
+        tae_snapshot.get("blocking_warnings_count"),
+        adv.get("blocking_warnings_count"),
+    )
+    informational_count = _first_int(
+        payload.get("informational_warnings_count"),
+        tae_snapshot.get("informational_warnings_count"),
+        adv.get("informational_warnings_count"),
+    )
+    stale_fp_count = _first_int(
+        payload.get("stale_false_positive_warnings_count"),
+        tae_snapshot.get("stale_false_positive_warnings_count"),
+        adv.get("stale_false_positive_warnings_count"),
+    )
+
+    return {
+        "action": action,
+        "confidence": adv.get("confidence"),
+        "block_new_buy": block_new_buy,
+        "blocking_warnings_count": blocking_count,
+        "informational_warnings_count": informational_count,
+        "stale_false_positive_warnings_count": stale_fp_count,
+        "blocking_warnings": list(adv.get("blocking_warnings") or []),
+        "informational_warnings": list(adv.get("informational_warnings") or []),
+        "stale_false_positive_warnings": list(
+            adv.get("stale_false_positive_warnings") or []
+        ),
+        "reasons": list(adv.get("reasons") or []),
+        "blockers": list(adv.get("blockers") or []),
+        "warning_audit": list(adv.get("warning_audit") or []),
+    }
+
+
 def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, Any]) -> dict[str, Any]:
     local_now = datetime.now().astimezone()
     market_statuses: dict[str, Any] = {}
@@ -327,7 +391,7 @@ def _market_readiness(root: Path, runtime: dict[str, Any], advisory: dict[str, A
 
     if bot_stopped_expected and not any_open:
         verdict = "READY" if advisory_valid else "WARNING"
-    elif bot_effective == "RUNNING" and advisory_valid and not adv.get("blocks_new_buy"):
+    elif bot_effective == "RUNNING" and advisory_valid and not advisory.get("blocks_new_buy"):
         verdict = "READY"
     elif bot_effective == "RUNNING" and advisory_valid:
         verdict = "READY"
@@ -1002,14 +1066,16 @@ def _tae_advisory_section(root: Path) -> dict[str, Any]:
     if not payload:
         return {"present": False, "error": err, "warnings": ["tae_live_advisory.json unavailable"]}
 
-    adv = payload.get("advisory") or {}
+    parsed = _parse_live_advisory_payload(payload)
     runtime = payload.get("runtime_snapshot") or {}
     block_new_buy, block_reason = should_block_new_buy(
         load_live_advisory(root / "tae_live_advisory.json")
     )
+    if parsed.get("block_new_buy") is not None:
+        block_new_buy = bool(parsed["block_new_buy"])
 
     practical = []
-    action = str(adv.get("action") or "NO_ACTION")
+    action = parsed["action"]
     strong_buys = int(runtime.get("strong_buy_signal_count") or 0)
 
     if action == "RISK_ADVISORY" and block_new_buy:
@@ -1027,28 +1093,26 @@ def _tae_advisory_section(root: Path) -> dict[str, Any]:
     else:
         practical.append("NO_ACTION / neutral advisory — live bot uses inline rules only.")
 
-    tae_snapshot = payload.get("tae_snapshot") or {}
-    blocking_count = int(
-        adv.get("blocking_warnings_count") or tae_snapshot.get("blocking_warnings_count") or 0
-    )
-    informational_count = int(
-        adv.get("informational_warnings_count")
-        or tae_snapshot.get("informational_warnings_count")
-        or 0
-    )
+    blocking_count = parsed["blocking_warnings_count"]
+    informational_count = parsed["informational_warnings_count"]
+    stale_fp_count = parsed["stale_false_positive_warnings_count"]
     risk_from_real_blockers = action == "RISK_ADVISORY" and blocking_count > 0
 
     return {
         "present": True,
         "action": action,
-        "confidence": adv.get("confidence"),
-        "reasons": list(adv.get("reasons") or [])[:15],
-        "blockers": list(adv.get("blockers") or [])[:15],
-        "blocking_warnings": list(adv.get("blocking_warnings") or [])[:20],
-        "informational_warnings": list(adv.get("informational_warnings") or [])[:20],
+        "confidence": parsed.get("confidence"),
+        "reasons": list(parsed.get("reasons") or [])[:15],
+        "blockers": list(parsed.get("blockers") or [])[:15],
+        "blocking_warnings": list(parsed.get("blocking_warnings") or [])[:20],
+        "informational_warnings": list(parsed.get("informational_warnings") or [])[:20],
+        "stale_false_positive_warnings": list(
+            parsed.get("stale_false_positive_warnings") or []
+        )[:20],
         "blocking_warnings_count": blocking_count,
         "informational_warnings_count": informational_count,
-        "warning_audit": list(adv.get("warning_audit") or [])[:30],
+        "stale_false_positive_warnings_count": stale_fp_count,
+        "warning_audit": list(parsed.get("warning_audit") or [])[:30],
         "risk_advisory_from_real_blocking_warnings": risk_from_real_blockers,
         "blocks_new_buy": block_new_buy,
         "block_reason": block_reason,
@@ -1549,6 +1613,9 @@ def build_review(root: Path | str = ".") -> dict[str, Any]:
         "advisory_blocks_new_buy": advisory.get("blocks_new_buy"),
         "blocking_warnings_count": advisory.get("blocking_warnings_count", 0),
         "informational_warnings_count": advisory.get("informational_warnings_count", 0),
+        "stale_false_positive_warnings_count": advisory.get(
+            "stale_false_positive_warnings_count", 0
+        ),
         "risk_advisory_from_real_blocking_warnings": advisory.get(
             "risk_advisory_from_real_blocking_warnings"
         ),

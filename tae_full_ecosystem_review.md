@@ -1,49 +1,49 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-30T00:02:21.062779+00:00  
+**Generated:** 2026-06-30T08:25:13.819998+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
 ## A. Runtime Status
-- Bot effective: **STOPPED**
+- Bot effective: **RUNNING**
 - Bot process: STOPPED
 - Dashboard process: RUNNING
-- Status file: STOPPED
-- Bot log age (s): 12195.1
-- Live signals age (s): 12195.6
+- Status file: RUNNING
+- Bot log age (s): 54.4
+- Live signals age (s): 58.0
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T03:02:21.027089+03:00
+- Local time: 2026-06-30T11:25:13.776163+03:00
 - Verdict: **READY**
-- Session guard reason: all_markets_closed
-- Bot stopped expected: True
-- Markets: {'US': False, 'EU': False, 'UK': False, 'ASIA': False}
+- Session guard reason: market_session_open
+- Bot stopped expected: False
+- Markets: {'US': False, 'EU': True, 'UK': True, 'ASIA': False}
 - Dashboard running: True
 - X.8 blocks new BUY: False
-- Advisory blocking warnings: 0 | informational: 5
+- Advisory blocking warnings: 0 | informational: 3
 - RISK from real blockers only: False
 - SELL accounting protection: ACTIVE
 - X.9 ledger: READY
 - BUY path will log on open: True
-- Next action: WAIT_FOR_MARKET_OPEN_THEN_SESSION_GUARD_START
+- Next action: MARKET_OPEN_COLLECT_X9_SHADOW_EVENTS
 
 ## B. Financial Status (estimated, trading-only PnL)
-- Cash: 19954.03 USD
+- Cash: 22574.18 USD
 - Capital deposits (flows): 0.0 USD
-- Open positions: 5
-- Portfolio value (est.): 30395.47 USD
-- Trading realized PnL: -700.3663
-- Trading unrealized PnL: 127.7219
-- **Corrected trading total PnL:** 395.4641
-- Raw total PnL (incl. CASH rows): -10918.8484
+- Open positions: 4
+- Portfolio value (est.): 30444.72 USD
+- Trading realized PnL: -580.8403
+- Trading unrealized PnL: 57.4604
+- **Corrected trading total PnL:** 444.7286
+- Raw total PnL (incl. CASH rows): -10705.7287
 - Accounting adjustments excluded: -9913.58
 - Daily trading PnL: None
-- Profit % (on 30000.0 baseline): 1.3182%
+- Profit % (on 30000.0 baseline): 1.4824%
 - Execution integrity: MISMATCH_DETECTED (SELL mismatches: 26)
-- Corrected realized PnL: 267.7422
+- Corrected realized PnL: 387.2682
 
 ## Performance Drag Analysis
 - Stop-loss total: None (None trades)
@@ -56,7 +56,7 @@
 - CASH distortion: CASH/DEPOSIT row reported PnL -9913.58 distorts raw portfolio sums; excluded from corrected trading PnL.
 
 ## C. Live Signals Today
-- Total: 15 | STRONG BUY: 5 | TAKE PROFIT: 4 | WAIT: 6
+- Total: 15 | STRONG BUY: 3 | TAKE PROFIT: 4 | WAIT: 8
 
 ## D. TAE Advisory
 - Action: **SELL_ADVISORY** | Confidence: 78
@@ -86,23 +86,22 @@
 - Evidence verdict: EVIDENCE_ENGINE_SOURCE_OF_TRUTH_ALIGNED
 - Meta confidence: {'composite_score': 0.9889, 'confidence_label': 'HIGH', 'factors': {'runtime_health': 1.0, 'orchestrator': 1.0, 'strategy_evolution': 1.0, 'governance': 1.0, 'top_strategy_score': 0.9336, 'input_coverage': 1.0}}
 - Ranking count: 3
-- Artifacts generated today: []
+- Artifacts generated today: ['tae_live_advisory.json', 'tae_quick_health_check.json']
 
 ## I. Profit Maximization Advisory (no auto execution)
-- COLLECT_MORE_DATA
 - TAKE_PROFIT_REVIEW
+- COLLECT_MORE_DATA
 - CONSIDER_TOP_STRATEGY_ALIGNMENT
 
 ## J. Final Verdict
 - **ECOSYSTEM_HEALTHY**
 - Financial today: UNKNOWN
-- Learning progress: STATIC
-- Next action: WAIT_FOR_MARKET_OPEN_THEN_SESSION_GUARD_START
+- Learning progress: ACTIVE_TODAY
+- Next action: REVIEW_TAE_ARTIFACTS
 
 ## Cannot Conclude Yet
 - Gate performance: no shadow validation events yet.
 - Counterfactual top_100/top_200: not enough robust strategies in artifacts.
 - Daily PnL: no portfolio activity dated today.
-- Live intraday behavior: bot STOPPED limits same-day observations.
 - Forward PnL on blocked BUYs: outcome_tracking_status PENDING_NEXT_PHASE.
 

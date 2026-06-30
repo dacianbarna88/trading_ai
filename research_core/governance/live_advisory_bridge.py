@@ -12,7 +12,9 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import socket
 import statistics
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +38,14 @@ ADVISORY_INDEX_PATH = Path("tae_advisory_index.json")
 PORTFOLIO_PATH = Path("portfolio.csv")
 LIVE_SIGNALS_PATH = Path("live_signals.csv")
 BOT_STATUS_PATH = Path("bot_status.txt")
+DASHBOARD_STATUS_PATH = Path("dashboard_status.txt")
+BOT_PID_PATH = Path("bot_pid.txt")
+DASHBOARD_PID_PATH = Path("dashboard_pid.txt")
+MARKET_MONITOR_PATH = Path("tae_market_open_monitor.json")
 LIVE_BOT_PATH = Path("live_bot.py")
+BOT_PGREP_PATTERN = "live_bot.py"
+DASHBOARD_PGREP_PATTERN = "streamlit run dashboard_v2.py"
+DASHBOARD_PORT = 8501
 
 # Align with live_bot.py inline constants (does not import live_bot).
 LIVE_STARTING_CAPITAL = 30000.0
@@ -81,6 +90,7 @@ WARNING_CLASS_WARNING = "WARNING"
 WARNING_CLASS_INFO = "INFO"
 WARNING_CLASS_NORMAL_MARKET_CLOSED = "NORMAL_MARKET_CLOSED"
 WARNING_CLASS_STALE_BUT_EXPECTED = "STALE_BUT_EXPECTED"
+WARNING_CLASS_STALE_FALSE_POSITIVE = "STALE_FALSE_POSITIVE"
 
 BLOCKING_WARNING_CLASSES = frozenset({WARNING_CLASS_CRITICAL, WARNING_CLASS_WARNING})
 INFORMATIONAL_WARNING_CLASSES = frozenset(
@@ -88,20 +98,176 @@ INFORMATIONAL_WARNING_CLASSES = frozenset(
         WARNING_CLASS_INFO,
         WARNING_CLASS_NORMAL_MARKET_CLOSED,
         WARNING_CLASS_STALE_BUT_EXPECTED,
+        WARNING_CLASS_STALE_FALSE_POSITIVE,
     }
 )
 
 
-def _classify_warning(text: str, *, markets_open: bool | None = None) -> str:
+def _pgrep(pattern: str) -> list[int]:
+    for cmd in (["pgrep", "-f", pattern], ["/usr/bin/pgrep", "-f", pattern]):
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if proc.returncode == 0 and proc.stdout.strip():
+            return [
+                int(x)
+                for x in proc.stdout.strip().splitlines()
+                if x.strip().isdigit()
+            ]
+    return []
+
+
+def _port_open(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            return sock.connect_ex(("127.0.0.1", port)) == 0
+    except OSError:
+        return False
+
+
+def _read_status_file(path: Path) -> str:
+    if not path.is_file():
+        return "UNKNOWN"
+    return path.read_text(encoding="utf-8", errors="replace").strip() or "UNKNOWN"
+
+
+def _pid_alive(path: Path) -> tuple[int | None, bool]:
+    if not path.is_file():
+        return None, False
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if not text.isdigit():
+        return None, False
+    pid = int(text)
+    try:
+        import os
+
+        os.kill(pid, 0)
+        return pid, True
+    except OSError:
+        return pid, False
+
+
+def _probe_runtime_processes(root: Path) -> tuple[dict[str, Any], list[str]]:
+    """
+    Live process evidence for advisory warning reclassification.
+
+    Direct pgrep/port checks take priority; monitor JSON supplements when present.
+    """
+    evidence_used: list[str] = []
+
+    bot_pgrep = _pgrep(BOT_PGREP_PATTERN)
+    dash_pgrep = _pgrep(DASHBOARD_PGREP_PATTERN)
+    dash_port = _port_open(DASHBOARD_PORT)
+    if bot_pgrep:
+        evidence_used.append(f"pgrep:{BOT_PGREP_PATTERN}={bot_pgrep}")
+    if dash_pgrep:
+        evidence_used.append(f"pgrep:{DASHBOARD_PGREP_PATTERN}={dash_pgrep}")
+    if dash_port:
+        evidence_used.append(f"port:{DASHBOARD_PORT}=open")
+
+    bot_status_file = _read_status_file(root / BOT_STATUS_PATH)
+    dash_status_file = _read_status_file(root / DASHBOARD_STATUS_PATH)
+    bot_pid, bot_pid_alive = _pid_alive(root / BOT_PID_PATH)
+    dash_pid, dash_pid_alive = _pid_alive(root / DASHBOARD_PID_PATH)
+
+    if bot_status_file != "UNKNOWN":
+        evidence_used.append(f"bot_status.txt={bot_status_file}")
+    if dash_status_file != "UNKNOWN":
+        evidence_used.append(f"dashboard_status.txt={dash_status_file}")
+    if bot_pid_alive:
+        evidence_used.append(f"bot_pid.txt={bot_pid}:alive")
+    if dash_pid_alive:
+        evidence_used.append(f"dashboard_pid.txt={dash_pid}:alive")
+
+    monitor_path = root / MARKET_MONITOR_PATH
+    monitor_process: dict[str, Any] | None = None
+    if monitor_path.is_file():
+        monitor_payload, _err = _load_json(monitor_path)
+        if monitor_process := (monitor_payload or {}).get("process"):
+            if isinstance(monitor_process, dict):
+                evidence_used.append("tae_market_open_monitor.json:process")
+
+    if bot_pgrep or bot_pid_alive or str(bot_status_file).upper() == "RUNNING":
+        bot_effective = "RUNNING"
+    elif str(bot_status_file).upper() == "STOPPED":
+        bot_effective = "STOPPED"
+    elif monitor_process and monitor_process.get("bot_effective"):
+        bot_effective = str(monitor_process["bot_effective"]).upper()
+        evidence_used.append("monitor:bot_effective")
+    else:
+        bot_effective = str(bot_status_file).upper() or "UNKNOWN"
+
+    if dash_port or dash_pgrep or dash_pid_alive or str(dash_status_file).upper() == "RUNNING":
+        dash_effective = "RUNNING"
+    elif str(dash_status_file).upper() == "STOPPED":
+        dash_effective = "STOPPED"
+    elif monitor_process and monitor_process.get("dashboard_effective"):
+        dash_effective = str(monitor_process["dashboard_effective"]).upper()
+        evidence_used.append("monitor:dashboard_effective")
+    else:
+        dash_effective = str(dash_status_file).upper() or "UNKNOWN"
+
+    return (
+        {
+            "bot_status_file": bot_status_file,
+            "bot_status_effective": bot_effective,
+            "bot_process_pgrep_pids": bot_pgrep,
+            "bot_pid": bot_pid,
+            "bot_pid_alive": bot_pid_alive,
+            "dashboard_status_file": dash_status_file,
+            "dashboard_status_effective": dash_effective,
+            "dashboard_pgrep_pids": dash_pgrep,
+            "dashboard_port_8501_open": dash_port,
+            "dashboard_pid": dash_pid,
+            "dashboard_pid_alive": dash_pid_alive,
+        },
+        evidence_used,
+    )
+
+
+def _classify_warning(
+    text: str,
+    *,
+    markets_open: bool | None = None,
+    runtime: dict[str, Any] | None = None,
+) -> str:
     """Classify advisory warning for BUY-block weighting."""
     lowered = str(text).lower()
+    runtime = runtime or {}
 
-    if "bot process not detected" in lowered or "dashboard/streamlit not detected" in lowered:
+    bot_effective = str(
+        runtime.get("bot_status_effective") or runtime.get("bot_status") or ""
+    ).upper()
+    dash_effective = str(runtime.get("dashboard_status_effective") or "").upper()
+    bot_pgrep = runtime.get("bot_process_pgrep_pids") or []
+    dash_port = bool(runtime.get("dashboard_port_8501_open"))
+    dash_pgrep = runtime.get("dashboard_pgrep_pids") or []
+
+    if "bot process not detected" in lowered:
+        if bot_effective == "RUNNING" or bot_pgrep:
+            return WARNING_CLASS_STALE_FALSE_POSITIVE
+        if markets_open is False:
+            return WARNING_CLASS_NORMAL_MARKET_CLOSED
+        if markets_open is True and bot_effective == "STOPPED":
+            return WARNING_CLASS_WARNING
+        if markets_open is True:
+            return WARNING_CLASS_WARNING
+        return WARNING_CLASS_NORMAL_MARKET_CLOSED
+
+    if "dashboard/streamlit not detected" in lowered or (
+        "dashboard" in lowered and "not detected" in lowered
+    ):
+        if dash_effective == "RUNNING" or dash_port or dash_pgrep:
+            return WARNING_CLASS_STALE_FALSE_POSITIVE
         if markets_open is False:
             return WARNING_CLASS_NORMAL_MARKET_CLOSED
         if markets_open is True:
             return WARNING_CLASS_WARNING
-        return WARNING_CLASS_NORMAL_MARKET_CLOSED
+        return WARNING_CLASS_INFO
 
     if "market closed" in lowered or "all_markets_closed" in lowered:
         return WARNING_CLASS_NORMAL_MARKET_CLOSED
@@ -174,10 +340,16 @@ class LiveAdvisoryReport:
     blockers: list[str]
     blocking_warnings: list[str] = field(default_factory=list)
     informational_warnings: list[str] = field(default_factory=list)
+    stale_false_positive_warnings: list[str] = field(default_factory=list)
     warning_audit: list[dict[str, Any]] = field(default_factory=list)
+    runtime_evidence_used: list[str] = field(default_factory=list)
     relevant_reports: dict[str, Any] = field(default_factory=dict)
     live_bot_not_modified: bool = True
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def block_new_buy(self) -> bool:
+        return self.action == "RISK_ADVISORY"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -186,6 +358,8 @@ class LiveAdvisoryReport:
             "live_trading_impact": "NONE",
             "generated_at": self.generated_at.isoformat(),
             "safety_mode": LIVE_ADVISORY_SAFETY_BANNER,
+            "action": self.action,
+            "block_new_buy": self.block_new_buy,
             "runtime_snapshot": dict(self.runtime_snapshot),
             "tae_snapshot": dict(self.tae_snapshot),
             "advisory": {
@@ -195,10 +369,17 @@ class LiveAdvisoryReport:
                 "blockers": list(self.blockers),
                 "blocking_warnings": list(self.blocking_warnings),
                 "informational_warnings": list(self.informational_warnings),
+                "stale_false_positive_warnings": list(self.stale_false_positive_warnings),
                 "blocking_warnings_count": len(self.blocking_warnings),
                 "informational_warnings_count": len(self.informational_warnings),
+                "stale_false_positive_warnings_count": len(
+                    self.stale_false_positive_warnings
+                ),
                 "warning_audit": list(self.warning_audit),
+                "runtime_evidence_used": list(self.runtime_evidence_used),
+                "block_new_buy": self.block_new_buy,
             },
+            "runtime_evidence_used": list(self.runtime_evidence_used),
             "relevant_reports_summary": self.relevant_reports,
             "safety": {
                 "no_broker": True,
@@ -404,9 +585,11 @@ class LiveAdvisoryBridge:
         relevant: dict[str, Any],
         *,
         markets_open: bool | None,
+        runtime: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         seen: set[str] = set()
         audit: list[dict[str, Any]] = []
+        runtime = runtime or {}
 
         def _add(source: str, text: str) -> None:
             normalized = str(text).strip()
@@ -416,7 +599,9 @@ class LiveAdvisoryBridge:
             if key in seen:
                 return
             seen.add(key)
-            classification = _classify_warning(normalized, markets_open=markets_open)
+            classification = _classify_warning(
+                normalized, markets_open=markets_open, runtime=runtime
+            )
             audit.append(
                 {
                     "source": source,
@@ -443,14 +628,22 @@ class LiveAdvisoryBridge:
             item["text"]
             for item in audit
             if item["classification"] in INFORMATIONAL_WARNING_CLASSES
+            and item["classification"] != WARNING_CLASS_STALE_FALSE_POSITIVE
+        ]
+        stale_false_positive = [
+            item["text"]
+            for item in audit
+            if item["classification"] == WARNING_CLASS_STALE_FALSE_POSITIVE
         ]
 
         return {
             "warning_audit": audit,
             "blocking_warnings": blocking,
             "informational_warnings": informational,
+            "stale_false_positive_warnings": stale_false_positive,
             "blocking_warnings_count": len(blocking),
             "informational_warnings_count": len(informational),
+            "stale_false_positive_warnings_count": len(stale_false_positive),
             "warning_count_total": len(audit),
         }
 
@@ -525,6 +718,9 @@ class LiveAdvisoryBridge:
 
         blocking_warnings = list(warning_analysis.get("blocking_warnings") or [])
         informational_warnings = list(warning_analysis.get("informational_warnings") or [])
+        stale_false_positive_warnings = list(
+            warning_analysis.get("stale_false_positive_warnings") or []
+        )
         blocking_warning_count = int(warning_analysis.get("blocking_warnings_count") or 0)
         warning_count_total = int(warning_analysis.get("warning_count_total") or 0)
 
@@ -546,9 +742,13 @@ class LiveAdvisoryBridge:
         if warning_count_total:
             reasons.append(
                 f"Aggregated TAE/live warnings: total={warning_count_total}, "
-                f"blocking={blocking_warning_count}, informational={len(informational_warnings)}"
+                f"blocking={blocking_warning_count}, informational={len(informational_warnings)}, "
+                f"stale_false_positive={len(stale_false_positive_warnings)}"
             )
             confidence -= min(25, blocking_warning_count * 4)
+
+        for stale in stale_false_positive_warnings[:8]:
+            reasons.append(f"[STALE_FALSE_POSITIVE] {stale}")
 
         for info in informational_warnings[:8]:
             reasons.append(f"[INFO] {info}")
@@ -605,13 +805,20 @@ class LiveAdvisoryBridge:
                 blockers.append(f"Open positions at live max ({LIVE_MAX_POSITIONS})")
                 confidence -= 12
 
-        bot_status = runtime.get("bot_status", "UNKNOWN")
+        bot_status = str(
+            runtime.get("bot_status_effective") or runtime.get("bot_status") or "UNKNOWN"
+        ).upper()
         markets_open = runtime.get("any_market_open")
-        if markets_open is False and str(bot_status).upper() == "STOPPED":
+        if markets_open is False and bot_status == "STOPPED":
             reasons.append("Bot status: STOPPED (expected — all markets closed)")
         else:
             reasons.append(f"Bot status: {bot_status}")
-            if markets_open and str(bot_status).upper() != "RUNNING":
+            if runtime.get("bot_status_effective") and runtime.get("bot_status_effective") != runtime.get("bot_status"):
+                reasons.append(
+                    f"Bot runtime evidence: effective={runtime.get('bot_status_effective')} "
+                    f"(file={runtime.get('bot_status')}, pgrep={runtime.get('bot_process_pgrep_pids')})"
+                )
+            if markets_open and bot_status != "RUNNING":
                 blockers.append("Bot not RUNNING while market session open")
                 confidence -= 8
 
@@ -732,18 +939,24 @@ class LiveAdvisoryBridge:
         except Exception:
             market_statuses = {}
 
+        process_evidence, runtime_evidence_used = _probe_runtime_processes(self._root)
+
         runtime_snapshot = {
             **portfolio_part,
             **signals_part,
+            **process_evidence,
             "bot_status": self._bot_status(),
             "any_market_open": markets_open,
             "market_statuses": market_statuses,
         }
+        if process_evidence.get("bot_status_effective"):
+            runtime_snapshot["bot_status_effective"] = process_evidence["bot_status_effective"]
 
         warning_analysis = self._analyze_warnings(
             index,
             relevant_meta,
             markets_open=markets_open,
+            runtime=runtime_snapshot,
         )
         warning_count = int(warning_analysis.get("warning_count_total") or 0)
         tae_snapshot = {
@@ -754,6 +967,9 @@ class LiveAdvisoryBridge:
             "blocking_warnings_count": warning_analysis.get("blocking_warnings_count", 0),
             "informational_warnings_count": warning_analysis.get(
                 "informational_warnings_count", 0
+            ),
+            "stale_false_positive_warnings_count": warning_analysis.get(
+                "stale_false_positive_warnings_count", 0
             ),
             "dominant_status": self._dominant_verdict(index),
             "advisory_index_present": index is not None and index_error is None,
@@ -789,7 +1005,11 @@ class LiveAdvisoryBridge:
             blockers=blockers,
             blocking_warnings=list(warning_analysis.get("blocking_warnings") or []),
             informational_warnings=list(warning_analysis.get("informational_warnings") or []),
+            stale_false_positive_warnings=list(
+                warning_analysis.get("stale_false_positive_warnings") or []
+            ),
             warning_audit=list(warning_analysis.get("warning_audit") or []),
+            runtime_evidence_used=runtime_evidence_used,
             relevant_reports={
                 name: {
                     "state": meta.get("state"),
@@ -837,6 +1057,7 @@ class LiveAdvisoryBridge:
                 "",
                 "===== ADVISORY =====",
                 f"  action: {payload['advisory']['action']}",
+                f"  block_new_buy: {payload.get('block_new_buy')}",
                 f"  confidence: {payload['advisory']['confidence']}",
                 "",
                 "  reasons:",
@@ -849,6 +1070,20 @@ class LiveAdvisoryBridge:
         if payload["advisory"]["blockers"]:
             for blocker in payload["advisory"]["blockers"]:
                 lines.append(f"    • {blocker}")
+        else:
+            lines.append("    • (none)")
+        lines.extend(["", "  stale_false_positive_warnings:"])
+        stale = payload["advisory"].get("stale_false_positive_warnings") or []
+        if stale:
+            for item in stale:
+                lines.append(f"    • {item}")
+        else:
+            lines.append("    • (none)")
+        lines.extend(["", "  runtime_evidence_used:"])
+        evidence = payload.get("runtime_evidence_used") or []
+        if evidence:
+            for item in evidence:
+                lines.append(f"    • {item}")
         else:
             lines.append("    • (none)")
         lines.extend(["", "===== SAFETY ====="])

@@ -1,6 +1,6 @@
 # TAE Accounting Snapshot
 
-**Generated:** 2026-06-30T00:02:20.832249+00:00  
+**Generated:** 2026-06-30T08:25:13.624799+00:00  
 **Mode:** CANONICAL_ACCOUNTING_READ_ONLY  
 **Data quality:** **HISTORICAL_RECONCILIATION_REQUIRED**
 
@@ -9,18 +9,18 @@
 - Starting capital (config): 30000.0
 - Deposits detected / counted / excluded: 10000.0 / 0.0 / 10000.0
 - **Effective contributed capital:** 30000.0
-- Cash available: 19954.03
-- Open positions value: 10441.4351
-- **Corrected realized PnL:** 267.7422
-- **Corrected unrealized PnL:** 127.7219
-- **Corrected total trading PnL:** 395.4641
-- **Account value (corrected):** 30395.47
-- Account value cash-based: 30395.47
-- Account value capital-based: 30395.46
+- Cash available: 22574.18
+- Open positions value: 7870.5448
+- **Corrected realized PnL:** 387.2682
+- **Corrected unrealized PnL:** 57.4604
+- **Corrected total trading PnL:** 444.7286
+- **Account value (corrected):** 30444.72
+- Account value cash-based: 30444.72
+- Account value capital-based: 30444.73
 - Capital base status: **NEEDS_OPERATOR_CONFIRMATION**
-- Raw PnL (incl. CASH rows): -10918.8484
+- Raw PnL (incl. CASH rows): -10705.7287
 - Accounting adjustments excluded: -9913.58
-- Reported realized (stale): -700.3663
+- Reported realized (stale): -580.8403
 - SELL mismatches: 26
 
 Formula: account_value = effective_contributed_capital + corrected_total_trading_pnl = cash_available + open_positions_value
@@ -37,9 +37,9 @@ Formula: account_value = effective_contributed_capital + corrected_total_trading
 
 - GS | 547.9904 | PROFIT +5.48%
 - ULVR.L | 120.9427 | TAKE PROFIT SIGNAL
+- AZN.L | 119.526 | TAKE PROFIT SIGNAL
 - PANW | 90.6923 | PROFIT +10.01%
 - CRWD | 79.8126 | PROFIT +8.81%
-- AMD | 51.3536 | PROFIT +5.14%
 
 ## Top losers (corrected)
 

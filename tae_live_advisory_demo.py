@@ -39,7 +39,10 @@ def main() -> int:
 
     logger.info("Output: %s", json_path)
     logger.info("Action: %s", report.action)
+    logger.info("block_new_buy: %s", report.block_new_buy)
     logger.info("Confidence: %d", report.confidence)
+    logger.info("Blocking warnings: %d", len(report.blocking_warnings))
+    logger.info("Stale false positives: %d", len(report.stale_false_positive_warnings))
     logger.info("Blockers: %d", len(report.blockers))
     logger.info("live_bot_not_modified: %s", report.live_bot_not_modified)
 
