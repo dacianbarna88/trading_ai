@@ -239,6 +239,18 @@ def _build_steps(root: Path) -> list[StepSpec]:
             needs_pythonpath=True,
         ),
         StepSpec(
+            name="event_memory_runtime",
+            command=[PYTHON, str(root / "tae_event_memory_runtime.py")],
+            artifact="tae_event_memory_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="counterfactual_runtime",
+            command=[PYTHON, str(root / "tae_counterfactual_runtime.py")],
+            artifact="tae_counterfactual_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
             name="unified_runtime",
             command=[PYTHON, str(root / "tae_unified_runtime.py")],
             artifact="tae_unified_runtime.json",

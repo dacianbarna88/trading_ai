@@ -21,6 +21,10 @@ from research_core.strategy_simulation_runtime.strategy_context import (
     STRATEGY_COLUMNS,
     StrategyContext,
 )
+from research_core.counterfactual_runtime.counterfactual_context import (
+    COUNTERFACTUAL_COLUMNS,
+    CounterfactualContext,
+)
 
 OUTPUT_JSON = "tae_unified_runtime.json"
 
@@ -87,8 +91,10 @@ def _compute_confidence(record: dict[str, Any]) -> float | None:
         ("Allocation_Confidence", 0.15),
         ("Meta_Confidence", 0.20),
         ("Learning_Health_Score", 0.10),
-        ("Strategy_Discovery_Confidence", 0.05),
-        ("Strategy_Simulation_Confidence", 0.05),
+        ("Strategy_Discovery_Confidence", 0.04),
+        ("Strategy_Simulation_Confidence", 0.04),
+        ("Event_Memory_Confidence", 0.03),
+        ("Counterfactual_Confidence", 0.03),
     )
     for key, weight in weights:
         val = _parse_float(record.get(key))
@@ -145,6 +151,11 @@ def _compute_context(record: dict[str, Any]) -> str:
         "Simulation_Strategy",
         "Expected_Edge",
         "Expected_Return",
+        "Event_Memory_Score",
+        "Counterfactual_Score",
+        "Entry_Quality",
+        "Exit_Quality",
+        "Shadow_Validation",
     ):
         val = record.get(key)
         if val not in (None, ""):
@@ -226,6 +237,49 @@ def _compute_bonuses(record: dict[str, Any], *, learning_score: float | None) ->
         if simulation_conf is not None and simulation_conf >= 70:
             strategy_simulation_bonus += (simulation_conf - 50) * 0.015
 
+    event_score = _parse_float(record.get("Event_Memory_Score"))
+    event_conf = _parse_float(record.get("Event_Memory_Confidence"))
+    event_memory_bonus = _parse_float(record.get("event_memory_bonus"))
+    if event_memory_bonus is None:
+        event_memory_bonus = 0.0
+        if event_score is not None and event_score >= 65:
+            event_memory_bonus += (event_score - 50) * 0.015
+        if event_conf is not None and event_conf >= 75:
+            event_memory_bonus += (event_conf - 50) * 0.01
+
+    cf_score = _parse_float(record.get("Counterfactual_Score"))
+    cf_conf = _parse_float(record.get("Counterfactual_Confidence"))
+    counterfactual_bonus = _parse_float(record.get("counterfactual_bonus"))
+    if counterfactual_bonus is None:
+        counterfactual_bonus = 0.0
+        if cf_score is not None and cf_score >= 60:
+            counterfactual_bonus += (cf_score - 50) * 0.02
+        if cf_conf is not None and cf_conf >= 65:
+            counterfactual_bonus += (cf_conf - 50) * 0.015
+
+    entry_q = _parse_float(record.get("Entry_Quality"))
+    entry_bonus = _parse_float(record.get("entry_bonus"))
+    if entry_bonus is None:
+        entry_bonus = 0.0
+        if entry_q is not None and entry_q >= 70:
+            entry_bonus += (entry_q - 50) * 0.02
+
+    exit_q = _parse_float(record.get("Exit_Quality"))
+    exit_bonus = _parse_float(record.get("exit_bonus"))
+    if exit_bonus is None:
+        exit_bonus = 0.0
+        if exit_q is not None and exit_q >= 55:
+            exit_bonus += (exit_q - 50) * 0.015
+
+    shadow = str(record.get("Shadow_Validation") or "")
+    shadow_bonus = _parse_float(record.get("shadow_bonus"))
+    if shadow_bonus is None:
+        shadow_bonus = 0.0
+        if "ALLOWED" in shadow:
+            shadow_bonus += 0.5
+        elif "BLOCKED" in shadow:
+            shadow_bonus -= 0.5
+
     return {
         "historical_bonus": round(historical_bonus, 4),
         "research_bonus": round(research_bonus, 4),
@@ -235,6 +289,11 @@ def _compute_bonuses(record: dict[str, Any], *, learning_score: float | None) ->
         "meta_bonus": round(meta_bonus, 4),
         "strategy_discovery_bonus": round(strategy_discovery_bonus, 4),
         "strategy_simulation_bonus": round(strategy_simulation_bonus, 4),
+        "event_memory_bonus": round(event_memory_bonus, 4),
+        "counterfactual_bonus": round(counterfactual_bonus, 4),
+        "entry_bonus": round(entry_bonus, 4),
+        "exit_bonus": round(exit_bonus, 4),
+        "shadow_bonus": round(shadow_bonus, 4),
     }
 
 
@@ -251,6 +310,8 @@ def _compute_unified_score_extended(
     else:
         base = _parse_float(record.get("Unified_Runtime_Score")) or _parse_float(record.get("Score")) or 0.0
     extended = base + bonuses.get("strategy_discovery_bonus", 0.0) + bonuses.get("strategy_simulation_bonus", 0.0)
+    extended += bonuses.get("event_memory_bonus", 0.0) + bonuses.get("counterfactual_bonus", 0.0)
+    extended += bonuses.get("entry_bonus", 0.0) + bonuses.get("exit_bonus", 0.0) + bonuses.get("shadow_bonus", 0.0)
     return round(min(100.0, extended), 2)
 
 
@@ -260,6 +321,7 @@ def _build_record_from_row(
     learning_global: dict[str, Any],
     meta_ctx: MetaContext | None = None,
     strategy_ctx: StrategyContext | None = None,
+    counterfactual_ctx: CounterfactualContext | None = None,
 ) -> dict[str, Any]:
     ticker = str(row.get("Ticker") or row.get("ticker") or "").upper()
     record: dict[str, Any] = {"Ticker": ticker}
@@ -274,9 +336,13 @@ def _build_record_from_row(
     record.update(_pick_columns(row, ALLOCATION_COLUMNS))
     record.update(_pick_columns(row, META_COLUMNS))
     record.update(_pick_columns(row, STRATEGY_COLUMNS))
+    record.update(_pick_columns(row, COUNTERFACTUAL_COLUMNS))
 
     if strategy_ctx is not None:
         record.update(strategy_ctx.enrich_ticker(ticker))
+
+    if counterfactual_ctx is not None:
+        record.update(counterfactual_ctx.enrich_ticker(ticker))
 
     record.update({k: v for k, v in learning_global.items() if v not in (None, "")})
 
@@ -285,7 +351,7 @@ def _build_record_from_row(
     record.update(bonuses)
 
     unified = _parse_float(record.get("Unified_Runtime_Score"))
-    if unified is None or strategy_ctx is not None:
+    if unified is None or strategy_ctx is not None or counterfactual_ctx is not None:
         unified = _compute_unified_score_extended(record, meta_ctx=meta_ctx, bonuses=bonuses)
         record["Unified_Runtime_Score"] = unified
 
@@ -301,6 +367,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
     learning_global = _load_learning_global(root)
     meta_ctx = MetaContext.load(root)
     strategy_ctx = StrategyContext.load(root)
+    counterfactual_ctx = CounterfactualContext.load(root)
 
     records: dict[str, dict[str, Any]] = {}
 
@@ -315,6 +382,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
                     learning_global=learning_global,
                     meta_ctx=meta_ctx,
                     strategy_ctx=strategy_ctx,
+                    counterfactual_ctx=counterfactual_ctx,
                 )
 
     for artifact_name, _source_kind in TICKER_SOURCES:
@@ -329,6 +397,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
                 learning_global=learning_global,
                 meta_ctx=meta_ctx,
                 strategy_ctx=strategy_ctx,
+                counterfactual_ctx=counterfactual_ctx,
             )
             records[ticker]["source_artifact"] = artifact_name
 
@@ -379,6 +448,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
         },
         "recommendation_distribution": {},
         "strategy_summary": strategy_ctx.advisory_summary(),
+        "counterfactual_summary": counterfactual_ctx.advisory_summary(),
     }
     for r in records_list:
         rec = str(r.get("Unified_Runtime_Recommendation") or "NEUTRAL")
@@ -395,6 +465,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
         "advisory_summary": advisory_summary,
         "learning_global": learning_global,
         "strategy_global": strategy_ctx.advisory_summary(),
+        "counterfactual_global": counterfactual_ctx.advisory_summary(),
     }
 
 

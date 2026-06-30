@@ -223,6 +223,11 @@ class QueueCandidate:
     meta_confidence: float | None = None
     strategy_discovery_bonus: float = 0.0
     strategy_simulation_bonus: float = 0.0
+    event_memory_bonus: float = 0.0
+    counterfactual_bonus: float = 0.0
+    entry_bonus: float = 0.0
+    exit_bonus: float = 0.0
+    shadow_bonus: float = 0.0
     unified_runtime_score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -260,6 +265,11 @@ class QueueCandidate:
             "meta_confidence": self.meta_confidence,
             "strategy_discovery_bonus": round(self.strategy_discovery_bonus, 4),
             "strategy_simulation_bonus": round(self.strategy_simulation_bonus, 4),
+            "event_memory_bonus": round(self.event_memory_bonus, 4),
+            "counterfactual_bonus": round(self.counterfactual_bonus, 4),
+            "entry_bonus": round(self.entry_bonus, 4),
+            "exit_bonus": round(self.exit_bonus, 4),
+            "shadow_bonus": round(self.shadow_bonus, 4),
             "unified_runtime_score": self.unified_runtime_score,
         }
 
@@ -376,6 +386,11 @@ class CandidateQueueBuilder:
             record.unified_runtime_score = _parse_float(ctx.get("Unified_Runtime_Score"))
             record.strategy_discovery_bonus = round(_parse_float(ctx.get("strategy_discovery_bonus")) or 0.0, 4)
             record.strategy_simulation_bonus = round(_parse_float(ctx.get("strategy_simulation_bonus")) or 0.0, 4)
+            record.event_memory_bonus = round(_parse_float(ctx.get("event_memory_bonus")) or 0.0, 4)
+            record.counterfactual_bonus = round(_parse_float(ctx.get("counterfactual_bonus")) or 0.0, 4)
+            record.entry_bonus = round(_parse_float(ctx.get("entry_bonus")) or 0.0, 4)
+            record.exit_bonus = round(_parse_float(ctx.get("exit_bonus")) or 0.0, 4)
+            record.shadow_bonus = round(_parse_float(ctx.get("shadow_bonus")) or 0.0, 4)
 
             record.historical_bonus = round(_parse_float(ctx.get("historical_bonus")) or 0.0, 4)
             record.research_bonus = round(_parse_float(ctx.get("research_bonus")) or 0.0, 4)

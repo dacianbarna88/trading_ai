@@ -747,6 +747,28 @@ class LiveAdvisoryBridge:
         except Exception:
             return {}
 
+    def _load_event_memory_summary(self) -> dict[str, Any]:
+        payload, _ = _load_json(self._path("tae_event_memory_runtime.json"))
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        try:
+            from research_core.counterfactual_runtime.counterfactual_context import CounterfactualContext
+
+            return CounterfactualContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
+    def _load_counterfactual_summary(self) -> dict[str, Any]:
+        payload, _ = _load_json(self._path("tae_counterfactual_runtime.json"))
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        try:
+            from research_core.counterfactual_runtime.counterfactual_context import CounterfactualContext
+
+            return CounterfactualContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
     @staticmethod
     def _dominant_verdict(index: dict[str, Any] | None) -> str | None:
         if not index:
@@ -1235,6 +1257,36 @@ class LiveAdvisoryBridge:
                     f"edge={item.get('expectancy')} drawdown={item.get('max_drawdown')} "
                     f"confidence={strategy_summary.get('simulation_confidence')}"
                 )
+
+        event_summary = self._load_event_memory_summary()
+        if event_summary:
+            reasons.append(
+                f"[EVENT_MEMORY_CONTEXT] Verdict: {event_summary.get('event_memory_verdict') or event_summary.get('verdict')}"
+            )
+            reasons.append(
+                f"[EVENT_MEMORY_CONTEXT] Events: {event_summary.get('event_count')} "
+                f"schema={event_summary.get('schema_validation_passed')}"
+            )
+
+        cf_summary = self._load_counterfactual_summary()
+        if cf_summary:
+            reasons.append(
+                f"[COUNTERFACTUAL_CONTEXT] Entry: {cf_summary.get('entry_verdict')} "
+                f"Exit: {cf_summary.get('exit_verdict')}"
+            )
+            reasons.append(
+                f"[COUNTERFACTUAL_CONTEXT] Best scenario: {cf_summary.get('best_scenario_id')} "
+                f"alt_return={cf_summary.get('expected_alternative_return')}"
+            )
+            reasons.append(
+                f"[COUNTERFACTUAL_CONTEXT] Shadow events: {cf_summary.get('shadow_total_events')} "
+                f"block_rate={cf_summary.get('shadow_block_rate')} "
+                f"outcome={cf_summary.get('outcome_memory')}"
+            )
+            for ticker in cf_summary.get("top_entry_tickers") or []:
+                reasons.append(f"[COUNTERFACTUAL_CONTEXT] Entry ticker: {ticker}")
+            for ticker in cf_summary.get("top_exit_tickers") or []:
+                reasons.append(f"[COUNTERFACTUAL_CONTEXT] Exit ticker: {ticker}")
 
         confidence = max(0, min(100, confidence))
 

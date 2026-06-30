@@ -61,6 +61,8 @@ ARTIFACT_PATHS = {
     "unified_runtime": "tae_unified_runtime.json",
     "strategy_discovery_runtime": "tae_strategy_discovery_runtime.json",
     "strategy_simulation_runtime": "tae_strategy_simulation_runtime.json",
+    "event_memory_runtime": "tae_event_memory_runtime.json",
+    "counterfactual_runtime": "tae_counterfactual_runtime.json",
 }
 
 SCANNER_CSV_ARTIFACTS = (
@@ -295,6 +297,10 @@ class TAECommandCenterContext:
     strategy_discovery_runtime_status: str = "MISSING"
     strategy_simulation_runtime: dict[str, Any] = field(default_factory=dict)
     strategy_simulation_runtime_status: str = "MISSING"
+    event_memory_runtime: dict[str, Any] = field(default_factory=dict)
+    event_memory_runtime_status: str = "MISSING"
+    counterfactual_runtime: dict[str, Any] = field(default_factory=dict)
+    counterfactual_runtime_status: str = "MISSING"
     scanner_refresh_cron: str = "UNKNOWN"
     watchlist_count: int | None = None
     x9_event_count: int | None = None
@@ -558,6 +564,18 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.strategy_simulation_runtime_status = strategy_sim_st
     status["tae_strategy_simulation_runtime.json"] = strategy_sim_st
 
+    event_mem_path = root / ARTIFACT_PATHS["event_memory_runtime"]
+    event_mem, event_mem_st = _safe_read_json(event_mem_path)
+    ctx.event_memory_runtime = event_mem or {}
+    ctx.event_memory_runtime_status = event_mem_st
+    status["tae_event_memory_runtime.json"] = event_mem_st
+
+    cf_path = root / ARTIFACT_PATHS["counterfactual_runtime"]
+    cf_runtime, cf_st = _safe_read_json(cf_path)
+    ctx.counterfactual_runtime = cf_runtime or {}
+    ctx.counterfactual_runtime_status = cf_st
+    status["tae_counterfactual_runtime.json"] = cf_st
+
     ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
     ctx.watchlist_count = _count_watchlist_tickers(root)
     ctx.x9_event_count = _shadow_event_count(root)
@@ -587,6 +605,8 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "unified_runtime",
             "strategy_discovery_runtime",
             "strategy_simulation_runtime",
+            "event_memory_runtime",
+            "counterfactual_runtime",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -1677,6 +1697,51 @@ def render_strategy_discovery_simulation_panel(ctx: TAECommandCenterContext) -> 
                 st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
+def render_event_memory_counterfactual_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🧠 Event Memory & Counterfactual")
+    st.caption(
+        f"Artifacts: tae_event_memory_runtime.json ({ctx.event_memory_runtime_status}) · "
+        f"tae_counterfactual_runtime.json ({ctx.counterfactual_runtime_status})"
+    )
+
+    cf = ctx.counterfactual_runtime.get("advisory_summary") or ctx.unified_runtime.get(
+        "counterfactual_global"
+    ) or {}
+    em = ctx.event_memory_runtime.get("advisory_summary") or {}
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Event Memory", _fmt(em.get("event_count") or em.get("event_memory_verdict")))
+    c2.metric("Entry Verdict", _fmt(cf.get("entry_verdict")))
+    c3.metric("Exit Verdict", _fmt(cf.get("exit_verdict")))
+    c4.metric("Shadow Events", _fmt(cf.get("shadow_total_events")))
+
+    st.caption(
+        f"Expected alt return: {cf.get('expected_alternative_return')} · "
+        f"Outcome memory: {cf.get('outcome_memory')} · "
+        f"Block rate: {cf.get('shadow_block_rate')}"
+    )
+
+    ssot = ctx.unified_runtime.get("records_list") or []
+    if ssot:
+        rows = []
+        for rec in ssot[:15]:
+            rows.append(
+                {
+                    "Ticker": rec.get("Ticker"),
+                    "Event_Memory_Score": rec.get("Event_Memory_Score"),
+                    "Counterfactual_Score": rec.get("Counterfactual_Score"),
+                    "Entry_Quality": rec.get("Entry_Quality"),
+                    "Exit_Quality": rec.get("Exit_Quality"),
+                    "Shadow_Validation": rec.get("Shadow_Validation"),
+                    "Outcome_Memory": rec.get("Outcome_Memory"),
+                    "Expected_Alternative_Return": rec.get("Expected_Alternative_Return"),
+                }
+            )
+        if rows:
+            st.markdown("**Per-ticker counterfactual SSOT**")
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+
 def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🕐 Market Open Monitor")
     st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
@@ -1780,6 +1845,8 @@ def render_tae_command_center() -> None:
     render_meta_intelligence_panel(ctx)
     st.divider()
     render_strategy_discovery_simulation_panel(ctx)
+    st.divider()
+    render_event_memory_counterfactual_panel(ctx)
     st.divider()
     render_unified_runtime_panel(ctx)
     st.divider()

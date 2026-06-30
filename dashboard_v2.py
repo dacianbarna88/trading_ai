@@ -1750,6 +1750,14 @@ with tabs[10]:
                     if top_sim:
                         st.markdown("**Top Simulated Strategies**")
                         st.dataframe(pd.DataFrame(top_sim[:10]), width="stretch")
+                cf_global = unified_ssot.get("counterfactual_global") or {}
+                if cf_global:
+                    st.subheader("🧠 EVENT MEMORY & COUNTERFACTUAL")
+                    st.caption(
+                        f"Entry: {cf_global.get('entry_verdict')} · Exit: {cf_global.get('exit_verdict')} · "
+                        f"Shadow events: {cf_global.get('shadow_total_events')} · "
+                        f"Alt return: {cf_global.get('expected_alternative_return')}"
+                    )
                 summary = unified_ssot.get("advisory_summary") or {}
                 top_unified = summary.get("top_unified_candidates") or []
                 if top_unified:
