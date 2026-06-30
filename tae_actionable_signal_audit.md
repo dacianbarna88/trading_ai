@@ -1,6 +1,6 @@
 # TAE Actionable Signal Audit
 
-**Mode:** OBSERVABILITY_ONLY | **Generated:** 2026-06-30T11:27:18.174017+00:00
+**Mode:** OBSERVABILITY_ONLY | **Generated:** 2026-06-30T11:34:10.213090+00:00
 
 ## Summary
 
@@ -39,31 +39,31 @@
 
 | Time | Ticker | Signal | Score | Market | Open | Class | Reason | Shadow |
 |------|--------|--------|-------|--------|------|-------|--------|--------|
-| 2026-06-30 14:26:26 | SPY | STRONG BUY | 100.0 | US | False | STRONG_BUY_ALREADY_HELD | Ticker already in open portfolio positions | — |
-| 2026-06-30 14:26:26 | QQQ | STRONG BUY | 100.0 | US | False | STRONG_BUY_ALREADY_HELD | Ticker already in open portfolio positions | — |
-| 2026-06-30 14:26:32 | PG | STRONG BUY | 100.0 | US | False | STRONG_BUY_MARKET_CLOSED | US market session closed for PG | MARKET_SESSION_FILTER |
-| 2026-06-30 14:26:32 | PM | STRONG BUY | 100.0 | US | False | STRONG_BUY_MARKET_CLOSED | US market session closed for PM | MARKET_SESSION_FILTER |
-| 2026-06-30 14:26:27 | MC.PA | STRONG BUY | 80.0 | EU | True | STRONG_BUY_ALREADY_HELD | Ticker already in open portfolio positions | — |
-| 2026-06-30 14:26:32 | MU | STRONG BUY | 80.0 | US | False | STRONG_BUY_MARKET_CLOSED | US market session closed for MU | MARKET_SESSION_FILTER |
-| 2026-06-30 14:26:30 | DIA | STRONG BUY | 80.0 | US | False | STRONG_BUY_MARKET_CLOSED | US market session closed for DIA | MARKET_SESSION_FILTER |
-| 2026-06-30 14:26:24 | HSBA.L | TAKE PROFIT | 40.0 | UK | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:25 | ALV.DE | TAKE PROFIT | 40.0 | EU | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:33 | GE | TAKE PROFIT | 40.0 | US | False | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:28 | ULVR.L | WAIT | 40.0 | UK | True | WAIT | Signal is WAIT — no BUY intent | BUY_ALLOWED |
-| 2026-06-30 14:26:27 | SIE.DE | TAKE PROFIT | 40.0 | EU | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:25 | AIR.PA | TAKE PROFIT | 40.0 | EU | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:31 | ABBV | TAKE PROFIT | 40.0 | US | False | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:29 | AZN.L | TAKE PROFIT | 40.0 | UK | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:30 | LLY | WAIT | 40.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
-| 2026-06-30 14:26:31 | MRK | WAIT | 40.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
-| 2026-06-30 14:26:33 | HD | TAKE PROFIT | 40.0 | US | False | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:31 | AMAT | TAKE PROFIT | 40.0 | US | False | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
-| 2026-06-30 14:26:28 | NVDA | WAIT | 0.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
-| 2026-06-30 14:26:30 | SHEL.L | WAIT | 0.0 | UK | True | WAIT | Signal is WAIT — no BUY intent | — |
-| 2026-06-30 14:26:28 | AAPL | WAIT | 0.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
-| 2026-06-30 14:26:28 | MSFT | WAIT | 0.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
-| 2026-06-30 14:26:29 | SAP.DE | WAIT | 0.0 | EU | True | WAIT | Signal is WAIT — no BUY intent | — |
-| 2026-06-30 14:26:29 | BP.L | WAIT | 0.0 | UK | True | WAIT | Signal is WAIT — no BUY intent | — |
+| 2026-06-30 14:33:45 | SPY | STRONG BUY | 100.0 | US | False | STRONG_BUY_ALREADY_HELD | Ticker already in open portfolio positions | — |
+| 2026-06-30 14:33:44 | QQQ | STRONG BUY | 100.0 | US | False | STRONG_BUY_ALREADY_HELD | Ticker already in open portfolio positions | — |
+| 2026-06-30 14:33:50 | PG | STRONG BUY | 100.0 | US | False | STRONG_BUY_MARKET_CLOSED | US market session closed for PG | MARKET_SESSION_FILTER |
+| 2026-06-30 14:33:51 | PM | STRONG BUY | 100.0 | US | False | STRONG_BUY_MARKET_CLOSED | US market session closed for PM | MARKET_SESSION_FILTER |
+| 2026-06-30 14:33:45 | MC.PA | STRONG BUY | 80.0 | EU | True | STRONG_BUY_ALREADY_HELD | Ticker already in open portfolio positions | — |
+| 2026-06-30 14:33:50 | MU | STRONG BUY | 80.0 | US | False | STRONG_BUY_MARKET_CLOSED | US market session closed for MU | MARKET_SESSION_FILTER |
+| 2026-06-30 14:33:48 | DIA | STRONG BUY | 80.0 | US | False | STRONG_BUY_MARKET_CLOSED | US market session closed for DIA | MARKET_SESSION_FILTER |
+| 2026-06-30 14:33:43 | HSBA.L | TAKE PROFIT | 40.0 | UK | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:44 | ALV.DE | TAKE PROFIT | 40.0 | EU | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:51 | GE | TAKE PROFIT | 40.0 | US | False | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:46 | ULVR.L | WAIT | 40.0 | UK | True | WAIT | Signal is WAIT — no BUY intent | BUY_ALLOWED |
+| 2026-06-30 14:33:46 | SIE.DE | TAKE PROFIT | 40.0 | EU | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:43 | AIR.PA | TAKE PROFIT | 40.0 | EU | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:49 | ABBV | TAKE PROFIT | 40.0 | US | False | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:47 | AZN.L | TAKE PROFIT | 40.0 | UK | True | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:49 | LLY | WAIT | 40.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
+| 2026-06-30 14:33:50 | MRK | WAIT | 40.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
+| 2026-06-30 14:33:52 | HD | TAKE PROFIT | 40.0 | US | False | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:49 | AMAT | TAKE PROFIT | 40.0 | US | False | TAKE_PROFIT | Signal is TAKE PROFIT — exit review, not a new BUY | — |
+| 2026-06-30 14:33:46 | NVDA | WAIT | 0.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
+| 2026-06-30 14:33:48 | SHEL.L | WAIT | 0.0 | UK | True | WAIT | Signal is WAIT — no BUY intent | — |
+| 2026-06-30 14:33:46 | AAPL | WAIT | 0.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
+| 2026-06-30 14:33:47 | MSFT | WAIT | 0.0 | US | False | WAIT | Signal is WAIT — no BUY intent | — |
+| 2026-06-30 14:33:47 | SAP.DE | WAIT | 0.0 | EU | True | WAIT | Signal is WAIT — no BUY intent | — |
+| 2026-06-30 14:33:47 | BP.L | WAIT | 0.0 | UK | True | WAIT | Signal is WAIT — no BUY intent | — |
 
 ---
 *Canonical runtime constants from live_bot.py; config/settings.py noted in JSON.*

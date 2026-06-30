@@ -208,6 +208,10 @@ class QueueCandidate:
     classification: str = "NEW_CANDIDATE"
     reason: str = ""
     priority: int = 0
+    committee_decision: str | None = None
+    committee_confidence: float | None = None
+    committee_weighted_score: float | None = None
+    committee_bonus: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -229,6 +233,10 @@ class QueueCandidate:
             "classification": self.classification,
             "reason": self.reason,
             "priority": self.priority,
+            "committee_decision": self.committee_decision,
+            "committee_confidence": self.committee_confidence,
+            "committee_weighted_score": self.committee_weighted_score,
+            "committee_bonus": round(self.committee_bonus, 4),
         }
 
 
@@ -309,6 +317,69 @@ class CandidateQueueBuilder:
 
         if artifact_name not in merged[ticker].sources_all:
             merged[ticker].sources_all.append(artifact_name)
+
+    def _load_committee_context(self) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+        by_ticker: dict[str, dict[str, Any]] = {}
+        global_summary: dict[str, Any] = {}
+
+        enrich_path = self.root / "tae_live_signals_committee_enrich.json"
+        payload = _load_json(enrich_path)
+        if payload:
+            global_summary = payload.get("advisory_summary") or {}
+            for item in payload.get("strong_buy_committee_summary") or []:
+                ticker = str(item.get("ticker") or "").upper()
+                if ticker:
+                    by_ticker[ticker] = item
+
+        signals_path = self.root / "live_signals.csv"
+        for row in _read_csv_rows(signals_path):
+            ticker = str(row.get("Ticker") or "").upper()
+            if not ticker or ticker in by_ticker:
+                continue
+            if row.get("Committee_Confidence"):
+                by_ticker[ticker] = row
+
+        if not global_summary:
+            runtime = _load_json(self.root / "tae_committee_runtime.json") or {}
+            global_summary = runtime.get("advisory_summary") or {}
+
+        return by_ticker, global_summary
+
+    def _apply_committee_adjustments(
+        self,
+        merged: dict[str, QueueCandidate],
+        committee_by_ticker: dict[str, dict[str, Any]],
+        committee_global: dict[str, Any],
+    ) -> None:
+        weighted = committee_global.get("weighted_decisions") or {}
+        global_decision = str(weighted.get("final_decision") or "WAIT").upper()
+
+        for record in merged.values():
+            ctx = committee_by_ticker.get(record.ticker, {})
+            conf = _parse_float(ctx.get("Committee_Confidence"))
+            w_score = _parse_float(ctx.get("Committee_Weighted_Score"))
+            decision = str(ctx.get("Committee_Decision") or global_decision).upper()
+
+            record.committee_decision = decision or None
+            record.committee_confidence = conf
+            record.committee_weighted_score = w_score
+
+            bonus = 0.0
+            if global_decision in {"BUY", "BUY_ALIGNED", "ACCUMULATE_US_TECH", "AGGRESSIVE", "NORMAL"}:
+                bonus += 2.0
+            elif global_decision in {"SELL", "DEFENSIVE"}:
+                bonus -= 3.0
+            if conf is not None and conf >= 70:
+                bonus += (conf - 50) * 0.04
+            if record.signal and str(record.signal).upper() == "STRONG BUY":
+                if decision in {"BUY", "BUY_ALIGNED"}:
+                    bonus += 2.0
+                elif decision == "CONFLICT":
+                    bonus -= 1.0
+
+            record.committee_bonus = bonus
+            if bonus:
+                record.rank_score += bonus
 
     def _load_candidates(self) -> dict[str, QueueCandidate]:
         merged: dict[str, QueueCandidate] = {}
@@ -424,6 +495,9 @@ class CandidateQueueBuilder:
 
         merged = self._load_candidates()
 
+        committee_by_ticker, committee_global = self._load_committee_context()
+        self._apply_committee_adjustments(merged, committee_by_ticker, committee_global)
+
         exit_warnings: dict[str, bool] = {}
         ranking_path = self.root / "global_opportunity_ranking.csv"
         for row in _read_csv_rows(ranking_path):
@@ -502,6 +576,11 @@ class CandidateQueueBuilder:
                 "current_open_positions": len(open_positions),
                 "global_data_sufficient": global_data_sufficient,
                 "recommended_action": recommended_action,
+                "committee_consensus": committee_global.get("committee_consensus"),
+                "committee_decision": (committee_global.get("weighted_decisions") or {}).get(
+                    "final_decision"
+                ),
+                "committee_confidence": committee_global.get("committee_confidence"),
             },
             "classification_counts": counts,
             "sources": self.sources_meta,

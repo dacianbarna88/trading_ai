@@ -1,6 +1,6 @@
 # TAE Watchlist Proposal
 
-**Generated:** 2026-06-30T11:27:10.203754+00:00
+**Generated:** 2026-06-30T11:34:01.685317+00:00
 **Mode:** PAPER_ONLY_ADVISORY
 **Safety:** PAPER_ONLY | ADVISORY_ONLY | NO_BROKER | NO_EXECUTION | NO_PORTFOLIO_CHANGE | NO_WATCHLIST_WRITE
 
@@ -20,9 +20,9 @@
 - `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.01
 - `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.01
 - `regional_strength.csv`: present=True status=OK rows=4 age_h=0.02
-- `sector_rotation.csv`: present=True status=OK rows=11 age_h=0.01
-- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=0.0
-- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=0.0
+- `sector_rotation.csv`: present=True status=OK rows=11 age_h=0.02
+- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=0.01
+- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=0.01
 - `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.01
 
 ## Recommended Additions (max 10)
@@ -31,16 +31,16 @@
 
 ## Top 10 (all sources)
 
-- DIA (US) rank=105.0 [already_in_watchlist] source=watchlist_candidates.csv
-- LLY (US) rank=100.0 [already_in_watchlist] source=watchlist_candidates.csv
-- ABBV (US) rank=85.0 [already_in_watchlist] source=watchlist_candidates.csv
-- AMAT (US) rank=85.0 [already_in_watchlist] source=watchlist_candidates.csv
-- MRK (US) rank=85.0 [already_in_watchlist] source=watchlist_candidates.csv
-- MU (US) rank=85.0 [already_in_watchlist] source=watchlist_candidates.csv
-- PG (US) rank=85.0 [already_in_watchlist] source=watchlist_candidates.csv
-- PM (US) rank=85.0 [already_in_watchlist] source=watchlist_candidates.csv
-- GE (US) rank=80.0 [already_in_watchlist] source=watchlist_candidates.csv
-- HD (US) rank=80.0 [already_in_watchlist] source=watchlist_candidates.csv
+- DIA (US) rank=110.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- LLY (US) rank=105.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- ABBV (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- AMAT (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- MRK (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- MU (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- PG (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- PM (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- GE (US) rank=83.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- HD (US) rank=83.3092 [already_in_watchlist] source=watchlist_candidates.csv
 
 ## Risk Notes
 
@@ -55,7 +55,7 @@
 
 - Registry verdict: CANDIDATE_STRATEGY_REGISTRY_READY
 - Strategy `SCORE_90_PLUS_NO_CLOSED_FREEZE` score=0.9315 decision=STRONG_PAPER_CANDIDATE
-- Strategy `LIVE_BASELINE` score=0.2717 decision=BASELINE_REFERENCE
+- Strategy `LIVE_BASELINE` score=0.2693 decision=BASELINE_REFERENCE
 - Strategy `SCORE_100_CURRENT_ONLY` score=0.2529 decision=INSUFFICIENT_SAMPLE
 
 ## Governance

@@ -51,6 +51,8 @@ ARTIFACT_PATHS = {
     "watchlist": "watchlist.txt",
     "research_runtime": "tae_research_runtime.json",
     "research_enrich": "tae_live_signals_research_enrich.json",
+    "committee_runtime": "tae_committee_runtime.json",
+    "committee_enrich": "tae_live_signals_committee_enrich.json",
 }
 
 SCANNER_CSV_ARTIFACTS = (
@@ -265,6 +267,10 @@ class TAECommandCenterContext:
     research_runtime_status: str = "MISSING"
     research_enrich: dict[str, Any] = field(default_factory=dict)
     research_enrich_status: str = "MISSING"
+    committee_runtime: dict[str, Any] = field(default_factory=dict)
+    committee_runtime_status: str = "MISSING"
+    committee_enrich: dict[str, Any] = field(default_factory=dict)
+    committee_enrich_status: str = "MISSING"
     scanner_refresh_cron: str = "UNKNOWN"
     watchlist_count: int | None = None
     x9_event_count: int | None = None
@@ -468,6 +474,18 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.research_enrich_status = enrich_st
     status["tae_live_signals_research_enrich.json"] = enrich_st
 
+    committee_path = root / ARTIFACT_PATHS["committee_runtime"]
+    committee_runtime, committee_st = _safe_read_json(committee_path)
+    ctx.committee_runtime = committee_runtime or {}
+    ctx.committee_runtime_status = committee_st
+    status["tae_committee_runtime.json"] = committee_st
+
+    committee_enrich_path = root / ARTIFACT_PATHS["committee_enrich"]
+    committee_enrich, committee_enrich_st = _safe_read_json(committee_enrich_path)
+    ctx.committee_enrich = committee_enrich or {}
+    ctx.committee_enrich_status = committee_enrich_st
+    status["tae_live_signals_committee_enrich.json"] = committee_enrich_st
+
     ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
     ctx.watchlist_count = _count_watchlist_tickers(root)
     ctx.x9_event_count = _shadow_event_count(root)
@@ -487,6 +505,8 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "promotion_queue",
             "research_runtime",
             "research_enrich",
+            "committee_runtime",
+            "committee_enrich",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -1269,6 +1289,70 @@ def render_research_runtime_panel(ctx: TAECommandCenterContext) -> None:
             pass
 
 
+def render_committee_runtime_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🏛 Committee Runtime")
+    st.caption(
+        f"Artifacts: tae_committee_runtime.json ({ctx.committee_runtime_status}) · "
+        f"tae_live_signals_committee_enrich.json ({ctx.committee_enrich_status})"
+    )
+
+    runtime = ctx.committee_runtime
+    if ctx.committee_runtime_status == "OK" and runtime:
+        counts = runtime.get("step_counts") or {}
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Committee OK", _fmt(counts.get("ok")))
+        c2.metric("Skipped", _fmt(counts.get("skipped")))
+        c3.metric("Failed", _fmt(counts.get("fail")))
+    else:
+        st.warning(f"Committee runtime: {ctx.committee_runtime_status}")
+
+    enrich = ctx.committee_enrich
+    advisory = enrich.get("advisory_summary") or runtime.get("advisory_summary") or {}
+    if advisory:
+        st.markdown("**Committee summaries**")
+        st.caption(f"Summary: {advisory.get('committee_summary') or 'NO_DATA'}")
+        st.caption(f"Consensus: {advisory.get('committee_consensus') or 'NO_DATA'}")
+        st.caption(f"Confidence: {advisory.get('committee_confidence') or 'NO_DATA'}")
+        weighted = advisory.get("weighted_decisions") or {}
+        st.caption(
+            f"Weighted decision: {weighted.get('final_decision')} "
+            f"(score={weighted.get('weighted_score')})"
+        )
+        top = advisory.get("highest_confidence_candidates") or []
+        if top:
+            st.markdown("**Top Committee Candidates**")
+            st.dataframe(pd.DataFrame(top), width="stretch", hide_index=True)
+
+    signals_path = PROJECT_ROOT / ARTIFACT_PATHS["live_signals"]
+    if signals_path.is_file():
+        try:
+            df = pd.read_csv(signals_path)
+            if "Signal" in df.columns and "Committee_Confidence" in df.columns:
+                strong = df[
+                    (df["Signal"].astype(str) == "STRONG BUY")
+                    & df["Committee_Confidence"].notna()
+                ].sort_values("Committee_Confidence", ascending=False)
+                if not strong.empty:
+                    cols = [
+                        c
+                        for c in [
+                            "Ticker",
+                            "Score",
+                            "Committee_Decision",
+                            "Committee_Confidence",
+                            "Committee_Weighted_Score",
+                            "Committee_Adaptive_Weight",
+                            "Committee_Votes",
+                            "Committee_Accuracy",
+                        ]
+                        if c in strong.columns
+                    ]
+                    st.markdown("**STRONG BUY — Committee context**")
+                    st.dataframe(strong[cols].head(10), width="stretch", hide_index=True)
+        except (OSError, ValueError, pd.errors.ParserError):
+            pass
+
+
 def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🕐 Market Open Monitor")
     st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
@@ -1364,6 +1448,8 @@ def render_tae_command_center() -> None:
     render_actionable_signal_audit_panel(ctx)
     st.divider()
     render_research_runtime_panel(ctx)
+    st.divider()
+    render_committee_runtime_panel(ctx)
     st.divider()
     render_market_open_monitor_panel(ctx)
     st.divider()

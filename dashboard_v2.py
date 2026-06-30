@@ -1686,6 +1686,18 @@ with tabs[10]:
         elif len(strong) > 0:
             st.caption("Research enrichment columns not yet present — run scanner refresh research step.")
 
+        committee_cols = [
+            "Ticker", "Score", "Signal",
+            "Committee_Decision", "Committee_Confidence", "Committee_Weighted_Score",
+            "Committee_Adaptive_Weight", "Committee_Votes", "Committee_Accuracy",
+        ]
+        strong_committee_cols = [c for c in committee_cols if c in pro.columns]
+        if len(strong) > 0 and len(strong_committee_cols) >= 4:
+            st.subheader("🏛 STRONG BUY — Committee Runtime")
+            st.dataframe(strong[strong_committee_cols], width="stretch")
+        elif len(strong) > 0:
+            st.caption("Committee enrichment columns not yet present — run scanner refresh committee step.")
+
         preferred_cols = [
             "Time", "Ticker", "Price", "Score", "Signal", "RSI",
             "SMA20", "SMA50", "Volume", "Avg_Volume_20", "Breakout_20"

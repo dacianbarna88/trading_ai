@@ -515,6 +515,8 @@ class LiveAdvisoryBridge:
         strong_buy_historical: list[dict[str, Any]] = []
         research_enriched = 0
         strong_buy_research: list[dict[str, Any]] = []
+        committee_enriched = 0
+        strong_buy_committee: list[dict[str, Any]] = []
 
         for row in rows:
             signal = str(row.get("Signal", "")).upper()
@@ -553,6 +555,19 @@ class LiveAdvisoryBridge:
                             "confidence": row.get("Research_Confidence"),
                         }
                     )
+                if row.get("Committee_Confidence"):
+                    committee_enriched += 1
+                    strong_buy_committee.append(
+                        {
+                            "ticker": str(row.get("Ticker") or "").upper(),
+                            "decision": row.get("Committee_Decision"),
+                            "confidence": row.get("Committee_Confidence"),
+                            "weighted_score": row.get("Committee_Weighted_Score"),
+                            "adaptive_weight": row.get("Committee_Adaptive_Weight"),
+                            "accuracy": row.get("Committee_Accuracy"),
+                            "votes": row.get("Committee_Votes"),
+                        }
+                    )
             elif signal == "TAKE PROFIT":
                 take_profit += 1
             ts = row.get("Time")
@@ -572,6 +587,9 @@ class LiveAdvisoryBridge:
             "research_enrichment_present": research_enriched > 0,
             "research_enriched_strong_buy_count": research_enriched,
             "strong_buy_research_summary": strong_buy_research[:10],
+            "committee_enrichment_present": committee_enriched > 0,
+            "committee_enriched_strong_buy_count": committee_enriched,
+            "strong_buy_committee_summary": strong_buy_committee[:10],
         }, blockers
 
     def _bot_status(self) -> str:
@@ -604,14 +622,26 @@ class LiveAdvisoryBridge:
         payload, _ = _load_json(enrich_path)
         if payload and payload.get("advisory_summary"):
             return payload["advisory_summary"]
-        runtime_path = self._path("tae_research_runtime.json")
-        runtime_payload, _ = _load_json(runtime_path)
-        if not runtime_payload:
-            return {}
         try:
             from research_core.research_runtime.live_signals_enricher import ResearchContext
 
             return ResearchContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
+    def _load_committee_advisory_summary(self) -> dict[str, Any]:
+        enrich_path = self._path("tae_live_signals_committee_enrich.json")
+        payload, _ = _load_json(enrich_path)
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        runtime_path = self._path("tae_committee_runtime.json")
+        runtime_payload, _ = _load_json(runtime_path)
+        if runtime_payload and runtime_payload.get("advisory_summary"):
+            return runtime_payload["advisory_summary"]
+        try:
+            from research_core.committee_runtime.live_signals_enricher import CommitteeContext
+
+            return CommitteeContext.load(self._root).advisory_summary()
         except Exception:
             return {}
 
@@ -948,6 +978,38 @@ class LiveAdvisoryBridge:
             reasons.append(
                 f"Live signals research enrichment active "
                 f"({runtime.get('research_enriched_strong_buy_count', 0)} STRONG BUY rows)"
+            )
+
+        committee_summary = self._load_committee_advisory_summary()
+        if committee_summary:
+            reasons.append(f"[COMMITTEE_CONTEXT] Committee Summary: {committee_summary.get('committee_summary')}")
+            reasons.append(
+                f"[COMMITTEE_CONTEXT] Committee Consensus: {committee_summary.get('committee_consensus')}"
+            )
+            reasons.append(
+                f"[COMMITTEE_CONTEXT] Committee Confidence: {committee_summary.get('committee_confidence')}"
+            )
+            weighted = committee_summary.get("weighted_decisions") or {}
+            reasons.append(
+                f"[COMMITTEE_CONTEXT] Weighted Decisions: "
+                f"decision={weighted.get('final_decision')} score={weighted.get('weighted_score')}"
+            )
+            for cand in committee_summary.get("highest_confidence_candidates") or []:
+                reasons.append(
+                    f"[COMMITTEE_CONTEXT] Top candidate {cand.get('ticker')}: "
+                    f"confidence={cand.get('confidence')} decision={cand.get('decision')}"
+                )
+
+        for item in runtime.get("strong_buy_committee_summary") or []:
+            reasons.append(
+                f"[COMMITTEE_CONTEXT] {item.get('ticker')}: decision={item.get('decision')} "
+                f"confidence={item.get('confidence')} weighted={item.get('weighted_score')}"
+            )
+
+        if runtime.get("committee_enrichment_present"):
+            reasons.append(
+                f"Live signals committee enrichment active "
+                f"({runtime.get('committee_enriched_strong_buy_count', 0)} STRONG BUY rows)"
             )
 
         confidence = max(0, min(100, confidence))
