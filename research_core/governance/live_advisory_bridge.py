@@ -517,6 +517,8 @@ class LiveAdvisoryBridge:
         strong_buy_research: list[dict[str, Any]] = []
         committee_enriched = 0
         strong_buy_committee: list[dict[str, Any]] = []
+        allocation_enriched = 0
+        strong_buy_allocation: list[dict[str, Any]] = []
 
         for row in rows:
             signal = str(row.get("Signal", "")).upper()
@@ -568,6 +570,20 @@ class LiveAdvisoryBridge:
                             "votes": row.get("Committee_Votes"),
                         }
                     )
+                if row.get("Allocation_Confidence"):
+                    allocation_enriched += 1
+                    strong_buy_allocation.append(
+                        {
+                            "ticker": str(row.get("Ticker") or "").upper(),
+                            "allocation_score": row.get("Allocation_Score"),
+                            "confidence": row.get("Allocation_Confidence"),
+                            "region": row.get("Allocation_Region"),
+                            "sector": row.get("Allocation_Sector"),
+                            "macro": row.get("Allocation_Macro"),
+                            "capital_flow": row.get("Capital_Flow"),
+                            "bias": row.get("Allocation_Bias"),
+                        }
+                    )
             elif signal == "TAKE PROFIT":
                 take_profit += 1
             ts = row.get("Time")
@@ -590,6 +606,9 @@ class LiveAdvisoryBridge:
             "committee_enrichment_present": committee_enriched > 0,
             "committee_enriched_strong_buy_count": committee_enriched,
             "strong_buy_committee_summary": strong_buy_committee[:10],
+            "allocation_enrichment_present": allocation_enriched > 0,
+            "allocation_enriched_strong_buy_count": allocation_enriched,
+            "strong_buy_allocation_summary": strong_buy_allocation[:10],
         }, blockers
 
     def _bot_status(self) -> str:
@@ -642,6 +661,24 @@ class LiveAdvisoryBridge:
             from research_core.committee_runtime.live_signals_enricher import CommitteeContext
 
             return CommitteeContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
+    def _load_allocation_advisory_summary(self) -> dict[str, Any]:
+        enrich_path = self._path("tae_live_signals_allocation_enrich.json")
+        payload, _ = _load_json(enrich_path)
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        runtime_path = self._path("tae_strategic_allocation_runtime.json")
+        runtime_payload, _ = _load_json(runtime_path)
+        if runtime_payload and runtime_payload.get("advisory_summary"):
+            return runtime_payload["advisory_summary"]
+        try:
+            from research_core.strategic_allocation_runtime.live_signals_enricher import (
+                AllocationContext,
+            )
+
+            return AllocationContext.load(self._root).advisory_summary()
         except Exception:
             return {}
 
@@ -1010,6 +1047,44 @@ class LiveAdvisoryBridge:
             reasons.append(
                 f"Live signals committee enrichment active "
                 f"({runtime.get('committee_enriched_strong_buy_count', 0)} STRONG BUY rows)"
+            )
+
+        allocation_summary = self._load_allocation_advisory_summary()
+        if allocation_summary:
+            reasons.append(
+                f"[ALLOCATION_CONTEXT] Regional Allocation: {allocation_summary.get('regional_allocation')}"
+            )
+            sector = allocation_summary.get("sector_allocation") or {}
+            reasons.append(
+                f"[ALLOCATION_CONTEXT] Sector Allocation: leader={sector.get('leader')} "
+                f"score={sector.get('score')}"
+            )
+            macro = allocation_summary.get("macro_allocation") or {}
+            reasons.append(
+                f"[ALLOCATION_CONTEXT] Macro Allocation: verdict={macro.get('verdict')} "
+                f"adaptive={macro.get('adaptive')}"
+            )
+            reasons.append(
+                f"[ALLOCATION_CONTEXT] Capital Flow: {allocation_summary.get('capital_flow')}"
+            )
+            reasons.append(
+                f"[ALLOCATION_CONTEXT] Strategic Bias: {allocation_summary.get('strategic_bias')}"
+            )
+            reasons.append(
+                f"[ALLOCATION_CONTEXT] Allocation Confidence: "
+                f"{allocation_summary.get('allocation_confidence')}"
+            )
+
+        for item in runtime.get("strong_buy_allocation_summary") or []:
+            reasons.append(
+                f"[ALLOCATION_CONTEXT] {item.get('ticker')}: score={item.get('allocation_score')} "
+                f"region={item.get('region')} capital_flow={item.get('capital_flow')}"
+            )
+
+        if runtime.get("allocation_enrichment_present"):
+            reasons.append(
+                f"Live signals allocation enrichment active "
+                f"({runtime.get('allocation_enriched_strong_buy_count', 0)} STRONG BUY rows)"
             )
 
         confidence = max(0, min(100, confidence))

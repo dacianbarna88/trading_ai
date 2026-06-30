@@ -194,6 +194,25 @@ def _build_steps(root: Path) -> list[StepSpec]:
             needs_pythonpath=True,
         ),
         StepSpec(
+            name="learning_runtime",
+            command=[PYTHON, str(root / "tae_learning_runtime.py")],
+            artifact="tae_learning_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="strategic_allocation_runtime",
+            command=[PYTHON, str(root / "tae_strategic_allocation_runtime.py")],
+            artifact="tae_strategic_allocation_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="live_signals_allocation_enrich",
+            command=[PYTHON, str(root / "tae_live_signals_allocation_enrich.py")],
+            artifact="tae_live_signals_allocation_enrich.json",
+            requires_artifacts=("live_signals.csv",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
             name="candidate_queue_builder",
             command=[PYTHON, str(root / "tae_candidate_queue_builder.py")],
             artifact="tae_candidate_queue.json",

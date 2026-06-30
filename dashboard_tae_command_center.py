@@ -53,6 +53,9 @@ ARTIFACT_PATHS = {
     "research_enrich": "tae_live_signals_research_enrich.json",
     "committee_runtime": "tae_committee_runtime.json",
     "committee_enrich": "tae_live_signals_committee_enrich.json",
+    "learning_runtime": "tae_learning_runtime.json",
+    "allocation_runtime": "tae_strategic_allocation_runtime.json",
+    "allocation_enrich": "tae_live_signals_allocation_enrich.json",
 }
 
 SCANNER_CSV_ARTIFACTS = (
@@ -271,6 +274,12 @@ class TAECommandCenterContext:
     committee_runtime_status: str = "MISSING"
     committee_enrich: dict[str, Any] = field(default_factory=dict)
     committee_enrich_status: str = "MISSING"
+    learning_runtime: dict[str, Any] = field(default_factory=dict)
+    learning_runtime_status: str = "MISSING"
+    allocation_runtime: dict[str, Any] = field(default_factory=dict)
+    allocation_runtime_status: str = "MISSING"
+    allocation_enrich: dict[str, Any] = field(default_factory=dict)
+    allocation_enrich_status: str = "MISSING"
     scanner_refresh_cron: str = "UNKNOWN"
     watchlist_count: int | None = None
     x9_event_count: int | None = None
@@ -486,6 +495,24 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.committee_enrich_status = committee_enrich_st
     status["tae_live_signals_committee_enrich.json"] = committee_enrich_st
 
+    learning_path = root / ARTIFACT_PATHS["learning_runtime"]
+    learning_runtime, learning_st = _safe_read_json(learning_path)
+    ctx.learning_runtime = learning_runtime or {}
+    ctx.learning_runtime_status = learning_st
+    status["tae_learning_runtime.json"] = learning_st
+
+    allocation_path = root / ARTIFACT_PATHS["allocation_runtime"]
+    allocation_runtime, allocation_st = _safe_read_json(allocation_path)
+    ctx.allocation_runtime = allocation_runtime or {}
+    ctx.allocation_runtime_status = allocation_st
+    status["tae_strategic_allocation_runtime.json"] = allocation_st
+
+    allocation_enrich_path = root / ARTIFACT_PATHS["allocation_enrich"]
+    allocation_enrich, allocation_enrich_st = _safe_read_json(allocation_enrich_path)
+    ctx.allocation_enrich = allocation_enrich or {}
+    ctx.allocation_enrich_status = allocation_enrich_st
+    status["tae_live_signals_allocation_enrich.json"] = allocation_enrich_st
+
     ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
     ctx.watchlist_count = _count_watchlist_tickers(root)
     ctx.x9_event_count = _shadow_event_count(root)
@@ -507,6 +534,9 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "research_enrich",
             "committee_runtime",
             "committee_enrich",
+            "learning_runtime",
+            "allocation_runtime",
+            "allocation_enrich",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -1353,6 +1383,79 @@ def render_committee_runtime_panel(ctx: TAECommandCenterContext) -> None:
             pass
 
 
+def render_allocation_runtime_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("📊 Strategic Allocation Runtime")
+    st.caption(
+        f"Artifacts: tae_strategic_allocation_runtime.json ({ctx.allocation_runtime_status}) · "
+        f"tae_live_signals_allocation_enrich.json ({ctx.allocation_enrich_status}) · "
+        f"tae_learning_runtime.json ({ctx.learning_runtime_status})"
+    )
+
+    runtime = ctx.allocation_runtime
+    if ctx.allocation_runtime_status == "OK" and runtime:
+        counts = runtime.get("step_counts") or {}
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Allocation OK", _fmt(counts.get("ok")))
+        c2.metric("Skipped", _fmt(counts.get("skipped")))
+        c3.metric("Failed", _fmt(counts.get("fail")))
+    else:
+        st.warning(f"Allocation runtime: {ctx.allocation_runtime_status}")
+
+    learning = ctx.learning_runtime.get("advisory_summary") or {}
+    if learning:
+        st.caption(f"Learning health score: {learning.get('learning_health_score', 'NO_DATA')}")
+
+    enrich = ctx.allocation_enrich
+    advisory = enrich.get("advisory_summary") or runtime.get("advisory_summary") or {}
+    if advisory:
+        st.markdown("**Allocation summaries**")
+        st.caption(f"Regional: {advisory.get('regional_allocation') or 'NO_DATA'}")
+        sector = advisory.get("sector_allocation") or {}
+        st.caption(f"Sector rotation: {sector.get('leader')} ({sector.get('score')})")
+        macro = advisory.get("macro_allocation") or {}
+        st.caption(f"Macro bias: {macro.get('verdict')} · adaptive={macro.get('adaptive')}")
+        st.caption(f"Capital flow: {advisory.get('capital_flow') or 'NO_DATA'}")
+        st.caption(f"Strategic bias: {advisory.get('strategic_bias') or 'NO_DATA'}")
+        st.caption(
+            f"Portfolio score: {advisory.get('portfolio_score') or 'NO_DATA'} · "
+            f"confidence: {advisory.get('allocation_confidence') or 'NO_DATA'}"
+        )
+        top = advisory.get("top_allocation_candidates") or []
+        if top:
+            st.markdown("**Top Allocation Candidates**")
+            st.dataframe(pd.DataFrame(top), width="stretch", hide_index=True)
+
+    signals_path = PROJECT_ROOT / ARTIFACT_PATHS["live_signals"]
+    if signals_path.is_file():
+        try:
+            df = pd.read_csv(signals_path)
+            if "Signal" in df.columns and "Allocation_Score" in df.columns:
+                strong = df[
+                    (df["Signal"].astype(str) == "STRONG BUY")
+                    & df["Allocation_Score"].notna()
+                ].sort_values("Allocation_Score", ascending=False)
+                if not strong.empty:
+                    cols = [
+                        c
+                        for c in [
+                            "Ticker",
+                            "Score",
+                            "Allocation_Score",
+                            "Allocation_Confidence",
+                            "Regional_Strength",
+                            "Allocation_Sector",
+                            "Capital_Flow",
+                            "Allocation_Macro",
+                            "Strategic_Portfolio_Score",
+                        ]
+                        if c in strong.columns
+                    ]
+                    st.markdown("**STRONG BUY — Allocation context**")
+                    st.dataframe(strong[cols].head(10), width="stretch", hide_index=True)
+        except (OSError, ValueError, pd.errors.ParserError):
+            pass
+
+
 def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🕐 Market Open Monitor")
     st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
@@ -1450,6 +1553,8 @@ def render_tae_command_center() -> None:
     render_research_runtime_panel(ctx)
     st.divider()
     render_committee_runtime_panel(ctx)
+    st.divider()
+    render_allocation_runtime_panel(ctx)
     st.divider()
     render_market_open_monitor_panel(ctx)
     st.divider()

@@ -1,6 +1,6 @@
 # TAE Accounting Snapshot
 
-**Generated:** 2026-06-30T11:34:12.285354+00:00  
+**Generated:** 2026-06-30T11:44:53.926184+00:00  
 **Mode:** CANONICAL_ACCOUNTING_READ_ONLY  
 **Data quality:** **HISTORICAL_RECONCILIATION_REQUIRED**
 
@@ -10,15 +10,15 @@
 - Deposits detected / counted / excluded: 10000.0 / 0.0 / 10000.0
 - **Effective contributed capital:** 30000.0
 - Cash available: 22662.33
-- Open positions value: 7807.5876
+- Open positions value: 7798.7854
 - **Corrected realized PnL:** 475.1919
-- **Corrected unrealized PnL:** -5.279
-- **Corrected total trading PnL:** 469.9129
-- **Account value (corrected):** 30469.92
-- Account value cash-based: 30469.92
-- Account value capital-based: 30469.91
+- **Corrected unrealized PnL:** -14.0812
+- **Corrected total trading PnL:** 461.1107
+- **Account value (corrected):** 30461.12
+- Account value cash-based: 30461.12
+- Account value capital-based: 30461.11
 - Capital base status: **NEEDS_OPERATOR_CONFIRMATION**
-- Raw PnL (incl. CASH rows): -10633.4308
+- Raw PnL (incl. CASH rows): -10643.4286
 - Accounting adjustments excluded: -9913.58
 - Reported realized (stale): -534.3556
 - SELL mismatches: 27

@@ -1698,6 +1698,19 @@ with tabs[10]:
         elif len(strong) > 0:
             st.caption("Committee enrichment columns not yet present — run scanner refresh committee step.")
 
+        allocation_cols = [
+            "Ticker", "Score", "Signal",
+            "Allocation_Score", "Allocation_Confidence", "Regional_Strength",
+            "Allocation_Sector", "Allocation_Macro", "Allocation_Bias",
+            "Capital_Flow", "Strategic_Portfolio_Score",
+        ]
+        strong_alloc_cols = [c for c in allocation_cols if c in pro.columns]
+        if len(strong) > 0 and len(strong_alloc_cols) >= 4:
+            st.subheader("📊 STRONG BUY — Strategic Allocation")
+            st.dataframe(strong[strong_alloc_cols], width="stretch")
+        elif len(strong) > 0:
+            st.caption("Allocation enrichment columns not yet present — run scanner refresh allocation step.")
+
         preferred_cols = [
             "Time", "Ticker", "Price", "Score", "Signal", "RSI",
             "SMA20", "SMA50", "Volume", "Avg_Volume_20", "Breakout_20"

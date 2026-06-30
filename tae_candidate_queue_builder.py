@@ -212,6 +212,12 @@ class QueueCandidate:
     committee_confidence: float | None = None
     committee_weighted_score: float | None = None
     committee_bonus: float = 0.0
+    historical_bonus: float = 0.0
+    research_bonus: float = 0.0
+    learning_bonus: float = 0.0
+    allocation_bonus: float = 0.0
+    allocation_score: float | None = None
+    allocation_confidence: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -237,6 +243,12 @@ class QueueCandidate:
             "committee_confidence": self.committee_confidence,
             "committee_weighted_score": self.committee_weighted_score,
             "committee_bonus": round(self.committee_bonus, 4),
+            "historical_bonus": round(self.historical_bonus, 4),
+            "research_bonus": round(self.research_bonus, 4),
+            "learning_bonus": round(self.learning_bonus, 4),
+            "allocation_bonus": round(self.allocation_bonus, 4),
+            "allocation_score": self.allocation_score,
+            "allocation_confidence": self.allocation_confidence,
         }
 
 
@@ -318,6 +330,25 @@ class CandidateQueueBuilder:
         if artifact_name not in merged[ticker].sources_all:
             merged[ticker].sources_all.append(artifact_name)
 
+    def _load_live_signals_context(self) -> dict[str, dict[str, Any]]:
+        by_ticker: dict[str, dict[str, Any]] = {}
+        for row in _read_csv_rows(self.root / "live_signals.csv"):
+            ticker = str(row.get("Ticker") or "").upper()
+            if ticker:
+                by_ticker[ticker] = row
+        return by_ticker
+
+    def _load_learning_context(self) -> dict[str, Any]:
+        payload = _load_json(self.root / "tae_learning_runtime.json") or {}
+        return payload.get("advisory_summary") or {}
+
+    def _load_allocation_context(self) -> dict[str, Any]:
+        enrich = _load_json(self.root / "tae_live_signals_allocation_enrich.json") or {}
+        if enrich.get("advisory_summary"):
+            return enrich["advisory_summary"]
+        runtime = _load_json(self.root / "tae_strategic_allocation_runtime.json") or {}
+        return runtime.get("advisory_summary") or {}
+
     def _load_committee_context(self) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
         by_ticker: dict[str, dict[str, Any]] = {}
         global_summary: dict[str, Any] = {}
@@ -345,41 +376,92 @@ class CandidateQueueBuilder:
 
         return by_ticker, global_summary
 
-    def _apply_committee_adjustments(
+    def _apply_runtime_bonuses(
         self,
         merged: dict[str, QueueCandidate],
+        signals_ctx: dict[str, dict[str, Any]],
         committee_by_ticker: dict[str, dict[str, Any]],
         committee_global: dict[str, Any],
+        learning_global: dict[str, Any],
+        allocation_global: dict[str, Any],
     ) -> None:
         weighted = committee_global.get("weighted_decisions") or {}
         global_decision = str(weighted.get("final_decision") or "WAIT").upper()
+        learning_score = _parse_float(learning_global.get("learning_health_score"))
 
         for record in merged.values():
-            ctx = committee_by_ticker.get(record.ticker, {})
-            conf = _parse_float(ctx.get("Committee_Confidence"))
-            w_score = _parse_float(ctx.get("Committee_Weighted_Score"))
-            decision = str(ctx.get("Committee_Decision") or global_decision).upper()
+            ctx = signals_ctx.get(record.ticker, {})
+            if not ctx and record.ticker in committee_by_ticker:
+                ctx = committee_by_ticker[record.ticker]
 
+            hist_edge = str(ctx.get("Historical_Edge") or "")
+            hist_conf = _parse_float(ctx.get("Historical_Confidence"))
+            historical_bonus = 0.0
+            if hist_edge == "POSITIVE":
+                historical_bonus += 1.5
+            elif hist_edge == "WEAK":
+                historical_bonus -= 1.0
+            if hist_conf is not None and hist_conf >= 70:
+                historical_bonus += (hist_conf - 50) * 0.03
+
+            res_conf = _parse_float(ctx.get("Research_Confidence"))
+            research_bonus = 0.0
+            if res_conf is not None and res_conf >= 65:
+                research_bonus += (res_conf - 50) * 0.03
+
+            committee_ctx = committee_by_ticker.get(record.ticker, ctx)
+            conf = _parse_float(committee_ctx.get("Committee_Confidence"))
+            w_score = _parse_float(committee_ctx.get("Committee_Weighted_Score"))
+            decision = str(committee_ctx.get("Committee_Decision") or global_decision).upper()
             record.committee_decision = decision or None
             record.committee_confidence = conf
             record.committee_weighted_score = w_score
 
-            bonus = 0.0
+            committee_bonus = 0.0
             if global_decision in {"BUY", "BUY_ALIGNED", "ACCUMULATE_US_TECH", "AGGRESSIVE", "NORMAL"}:
-                bonus += 2.0
+                committee_bonus += 2.0
             elif global_decision in {"SELL", "DEFENSIVE"}:
-                bonus -= 3.0
+                committee_bonus -= 3.0
             if conf is not None and conf >= 70:
-                bonus += (conf - 50) * 0.04
+                committee_bonus += (conf - 50) * 0.04
             if record.signal and str(record.signal).upper() == "STRONG BUY":
                 if decision in {"BUY", "BUY_ALIGNED"}:
-                    bonus += 2.0
+                    committee_bonus += 2.0
                 elif decision == "CONFLICT":
-                    bonus -= 1.0
+                    committee_bonus -= 1.0
 
-            record.committee_bonus = bonus
-            if bonus:
-                record.rank_score += bonus
+            learning_bonus = 0.0
+            if learning_score is not None and learning_score >= 60:
+                learning_bonus += (learning_score - 50) * 0.02
+
+            alloc_score = _parse_float(ctx.get("Allocation_Score"))
+            alloc_conf = _parse_float(ctx.get("Allocation_Confidence"))
+            record.allocation_score = alloc_score
+            record.allocation_confidence = alloc_conf
+            allocation_bonus = 0.0
+            if alloc_score is not None and alloc_score >= 55:
+                allocation_bonus += (alloc_score - 50) * 0.04
+            if alloc_conf is not None and alloc_conf >= 70:
+                allocation_bonus += (alloc_conf - 50) * 0.02
+            portfolio_score = _parse_float(allocation_global.get("portfolio_score"))
+            if portfolio_score is not None and portfolio_score >= 60:
+                allocation_bonus += (portfolio_score - 50) * 0.02
+
+            record.historical_bonus = round(historical_bonus, 4)
+            record.research_bonus = round(research_bonus, 4)
+            record.committee_bonus = round(committee_bonus, 4)
+            record.learning_bonus = round(learning_bonus, 4)
+            record.allocation_bonus = round(allocation_bonus, 4)
+
+            total_bonus = (
+                record.historical_bonus
+                + record.research_bonus
+                + record.committee_bonus
+                + record.learning_bonus
+                + record.allocation_bonus
+            )
+            if total_bonus:
+                record.rank_score += total_bonus
 
     def _load_candidates(self) -> dict[str, QueueCandidate]:
         merged: dict[str, QueueCandidate] = {}
@@ -495,8 +577,18 @@ class CandidateQueueBuilder:
 
         merged = self._load_candidates()
 
+        signals_ctx = self._load_live_signals_context()
         committee_by_ticker, committee_global = self._load_committee_context()
-        self._apply_committee_adjustments(merged, committee_by_ticker, committee_global)
+        learning_global = self._load_learning_context()
+        allocation_global = self._load_allocation_context()
+        self._apply_runtime_bonuses(
+            merged,
+            signals_ctx,
+            committee_by_ticker,
+            committee_global,
+            learning_global,
+            allocation_global,
+        )
 
         exit_warnings: dict[str, bool] = {}
         ranking_path = self.root / "global_opportunity_ranking.csv"
@@ -581,6 +673,9 @@ class CandidateQueueBuilder:
                     "final_decision"
                 ),
                 "committee_confidence": committee_global.get("committee_confidence"),
+                "learning_health_score": learning_global.get("learning_health_score"),
+                "allocation_confidence": allocation_global.get("allocation_confidence"),
+                "allocation_portfolio_score": allocation_global.get("portfolio_score"),
             },
             "classification_counts": counts,
             "sources": self.sources_meta,

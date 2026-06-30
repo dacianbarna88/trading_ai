@@ -1,6 +1,6 @@
 # TAE Watchlist Proposal
 
-**Generated:** 2026-06-30T11:34:01.685317+00:00
+**Generated:** 2026-06-30T11:44:41.367045+00:00
 **Mode:** PAPER_ONLY_ADVISORY
 **Safety:** PAPER_ONLY | ADVISORY_ONLY | NO_BROKER | NO_EXECUTION | NO_PORTFOLIO_CHANGE | NO_WATCHLIST_WRITE
 
@@ -31,16 +31,16 @@
 
 ## Top 10 (all sources)
 
-- DIA (US) rank=110.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- LLY (US) rank=105.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- ABBV (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- AMAT (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- MRK (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- MU (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- PG (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- PM (US) rank=88.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- GE (US) rank=83.3092 [already_in_watchlist] source=watchlist_candidates.csv
-- HD (US) rank=83.3092 [already_in_watchlist] source=watchlist_candidates.csv
+- DIA (US) rank=117.2876 [already_in_watchlist] source=watchlist_candidates.csv
+- LLY (US) rank=111.8376 [already_in_watchlist] source=watchlist_candidates.csv
+- MRK (US) rank=95.2876 [already_in_watchlist] source=watchlist_candidates.csv
+- ABBV (US) rank=94.8376 [already_in_watchlist] source=watchlist_candidates.csv
+- AMAT (US) rank=94.8376 [already_in_watchlist] source=watchlist_candidates.csv
+- MU (US) rank=94.8376 [already_in_watchlist] source=watchlist_candidates.csv
+- PG (US) rank=94.8376 [already_in_watchlist] source=watchlist_candidates.csv
+- PM (US) rank=94.8376 [already_in_watchlist] source=watchlist_candidates.csv
+- GE (US) rank=89.8376 [already_in_watchlist] source=watchlist_candidates.csv
+- HD (US) rank=89.8376 [already_in_watchlist] source=watchlist_candidates.csv
 
 ## Risk Notes
 
@@ -55,7 +55,7 @@
 
 - Registry verdict: CANDIDATE_STRATEGY_REGISTRY_READY
 - Strategy `SCORE_90_PLUS_NO_CLOSED_FREEZE` score=0.9315 decision=STRONG_PAPER_CANDIDATE
-- Strategy `LIVE_BASELINE` score=0.2693 decision=BASELINE_REFERENCE
+- Strategy `LIVE_BASELINE` score=0.2688 decision=BASELINE_REFERENCE
 - Strategy `SCORE_100_CURRENT_ONLY` score=0.2529 decision=INSUFFICIENT_SAMPLE
 
 ## Governance
