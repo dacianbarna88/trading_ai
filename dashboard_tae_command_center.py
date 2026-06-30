@@ -47,6 +47,7 @@ ARTIFACT_PATHS = {
     "scanner_refresh": "tae_scanner_refresh.json",
     "actionable_audit": "tae_actionable_signal_audit.json",
     "market_monitor": "tae_market_open_monitor.json",
+    "promotion_queue": "tae_promotion_queue.json",
     "watchlist": "watchlist.txt",
 }
 
@@ -256,6 +257,8 @@ class TAECommandCenterContext:
     actionable_audit_status: str = "MISSING"
     market_monitor: dict[str, Any] = field(default_factory=dict)
     market_monitor_status: str = "MISSING"
+    promotion_queue: dict[str, Any] = field(default_factory=dict)
+    promotion_queue_status: str = "MISSING"
     scanner_refresh_cron: str = "UNKNOWN"
     watchlist_count: int | None = None
     x9_event_count: int | None = None
@@ -441,6 +444,12 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.market_monitor_status = monitor_st
     status["tae_market_open_monitor.json"] = monitor_st
 
+    promo_path = root / ARTIFACT_PATHS["promotion_queue"]
+    promotion_queue, promo_st = _safe_read_json(promo_path)
+    ctx.promotion_queue = promotion_queue or {}
+    ctx.promotion_queue_status = promo_st
+    status["tae_promotion_queue.json"] = promo_st
+
     ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
     ctx.watchlist_count = _count_watchlist_tickers(root)
     ctx.x9_event_count = _shadow_event_count(root)
@@ -457,6 +466,7 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "scanner_refresh",
             "actionable_audit",
             "market_monitor",
+            "promotion_queue",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -1121,6 +1131,62 @@ def render_watchlist_proposal_panel(ctx: TAECommandCenterContext) -> None:
         st.caption(f"ℹ️ {note}")
 
 
+def render_promotion_queue_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("✅ Governed Promotion Queue")
+    st.caption(f"Artifact: tae_promotion_queue.json ({ctx.promotion_queue_status})")
+
+    if ctx.promotion_queue_status != "OK" or not ctx.promotion_queue:
+        st.warning(f"Promotion queue: {ctx.promotion_queue_status}")
+        st.caption("Operator CLI: `python3 tae_promotion_queue.py build`")
+        return
+
+    pq = ctx.promotion_queue
+    summary = pq.get("summary") or {}
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Queue status", pq.get("queue_status", "NO_DATA"))
+    c2.metric("Proposed", _fmt(summary.get("proposed")))
+    c3.metric("Approved", _fmt(summary.get("approved")))
+    c4.metric("Promoted", _fmt(summary.get("promoted")))
+    c5.metric("Rejected", _fmt(summary.get("rejected")))
+    c6.metric("Expired", _fmt(summary.get("expired")))
+
+    st.info(f"**Next operator action:** {pq.get('next_operator_action') or 'NO_DATA'}")
+
+    proposed = [
+        i for i in pq.get("items") or [] if str(i.get("state", "")).upper() == "PROPOSED"
+    ]
+    if proposed:
+        st.markdown("**Top proposed**")
+        rows = [
+            {
+                "ticker": i.get("ticker"),
+                "market": i.get("market"),
+                "rank_score": i.get("rank_score"),
+                "source": i.get("source"),
+                "state": i.get("state"),
+            }
+            for i in proposed[:10]
+        ]
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    else:
+        st.caption("Top proposed: —")
+
+    with st.expander("Operator commands", expanded=False):
+        st.code(
+            "\n".join(
+                [
+                    "python3 tae_promotion_queue.py build",
+                    "python3 tae_promotion_queue.py approve TICKER",
+                    'python3 tae_promotion_queue.py reject TICKER --reason "..."',
+                    "python3 tae_promotion_queue.py promote-approved",
+                    "python3 tae_promotion_queue.py status",
+                    "python3 tae_promotion_queue.py rollback-last",
+                ]
+            )
+        )
+
+
 def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🕐 Market Open Monitor")
     st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
@@ -1210,6 +1276,8 @@ def render_tae_command_center() -> None:
     render_candidate_queue_panel(ctx)
     st.divider()
     render_watchlist_proposal_panel(ctx)
+    st.divider()
+    render_promotion_queue_panel(ctx)
     st.divider()
     render_actionable_signal_audit_panel(ctx)
     st.divider()

@@ -1662,6 +1662,18 @@ with tabs[10]:
         else:
             st.success(f"{len(strong)} oportunități peste pragul de BUY.")
 
+        hist_cols = [
+            "Ticker", "Score", "Signal",
+            "Historical_Edge", "Historical_Win_Rate", "Historical_Avg_Return",
+            "Historical_Sharpe", "Strategy_Rank", "Committee_Score", "Historical_Confidence",
+        ]
+        strong_hist_cols = [c for c in hist_cols if c in pro.columns]
+        if len(strong) > 0 and len(strong_hist_cols) >= 4:
+            st.subheader("📜 STRONG BUY — Historical Intelligence")
+            st.dataframe(strong[strong_hist_cols], width="stretch")
+        elif len(strong) > 0:
+            st.caption("Historical enrichment columns not yet present — run scanner refresh enrich step.")
+
         preferred_cols = [
             "Time", "Ticker", "Price", "Score", "Signal", "RSI",
             "SMA20", "SMA50", "Volume", "Avg_Volume_20", "Breakout_20"

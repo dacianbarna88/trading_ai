@@ -511,6 +511,8 @@ class LiveAdvisoryBridge:
         take_profit = 0
         high_score_buys = 0
         latest_time = None
+        historical_enriched = 0
+        strong_buy_historical: list[dict[str, Any]] = []
 
         for row in rows:
             signal = str(row.get("Signal", "")).upper()
@@ -519,6 +521,21 @@ class LiveAdvisoryBridge:
                 strong_buy += 1
                 if score >= LIVE_MIN_BUY_SCORE:
                     high_score_buys += 1
+                if row.get("Historical_Edge"):
+                    historical_enriched += 1
+                    strong_buy_historical.append(
+                        {
+                            "ticker": str(row.get("Ticker") or "").upper(),
+                            "edge": row.get("Historical_Edge"),
+                            "win_rate": row.get("Historical_Win_Rate"),
+                            "avg_return": row.get("Historical_Avg_Return"),
+                            "sharpe": row.get("Historical_Sharpe"),
+                            "strategy_rank": row.get("Strategy_Rank"),
+                            "committee_score": row.get("Committee_Score"),
+                            "historical_confidence": row.get("Historical_Confidence"),
+                            "context": row.get("Recommendation_Context"),
+                        }
+                    )
             elif signal == "TAKE PROFIT":
                 take_profit += 1
             ts = row.get("Time")
@@ -532,6 +549,9 @@ class LiveAdvisoryBridge:
             "take_profit_signal_count": take_profit,
             "live_signals_present": True,
             "latest_signal_time": latest_time,
+            "historical_enrichment_present": historical_enriched > 0,
+            "historical_enriched_strong_buy_count": historical_enriched,
+            "strong_buy_historical_summary": strong_buy_historical[:10],
         }, blockers
 
     def _bot_status(self) -> str:
@@ -839,6 +859,22 @@ class LiveAdvisoryBridge:
             reasons.append(f"Historical robust median avg_profit_pct: {median_profit:.2f}")
         if median_sharpe is not None:
             reasons.append(f"Historical robust median avg_sharpe: {median_sharpe:.2f}")
+
+        for item in runtime.get("strong_buy_historical_summary") or []:
+            ticker = item.get("ticker")
+            edge = item.get("edge")
+            wr = item.get("win_rate")
+            sr = item.get("sharpe")
+            reasons.append(
+                f"[HISTORICAL_CONTEXT] {ticker}: edge={edge} win_rate={wr} "
+                f"hist_sharpe={sr} committee={item.get('committee_score')}"
+            )
+
+        if runtime.get("historical_enrichment_present"):
+            reasons.append(
+                f"Live signals historical enrichment active "
+                f"({runtime.get('historical_enriched_strong_buy_count', 0)} STRONG BUY rows)"
+            )
 
         confidence = max(0, min(100, confidence))
 

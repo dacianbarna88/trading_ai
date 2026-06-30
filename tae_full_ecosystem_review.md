@@ -1,6 +1,6 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-30T08:25:13.819998+00:00  
+**Generated:** 2026-06-30T11:16:41.575450+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
@@ -9,14 +9,14 @@
 - Bot process: STOPPED
 - Dashboard process: RUNNING
 - Status file: RUNNING
-- Bot log age (s): 54.4
-- Live signals age (s): 58.0
+- Bot log age (s): 54.7
+- Live signals age (s): 5.6
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T11:25:13.776163+03:00
+- Local time: 2026-06-30T14:16:41.528203+03:00
 - Verdict: **READY**
 - Session guard reason: market_session_open
 - Bot stopped expected: False
@@ -28,22 +28,22 @@
 - SELL accounting protection: ACTIVE
 - X.9 ledger: READY
 - BUY path will log on open: True
-- Next action: MARKET_OPEN_COLLECT_X9_SHADOW_EVENTS
+- Next action: MARKET_OPEN_MONITOR_SIGNALS_AND_LEDGER
 
 ## B. Financial Status (estimated, trading-only PnL)
-- Cash: 22574.18 USD
+- Cash: 22662.33 USD
 - Capital deposits (flows): 0.0 USD
 - Open positions: 4
-- Portfolio value (est.): 30444.72 USD
-- Trading realized PnL: -580.8403
-- Trading unrealized PnL: 57.4604
-- **Corrected trading total PnL:** 444.7286
-- Raw total PnL (incl. CASH rows): -10705.7287
+- Portfolio value (est.): 30471.23 USD
+- Trading realized PnL: -534.3556
+- Trading unrealized PnL: -3.9657
+- **Corrected trading total PnL:** 471.2262
+- Raw total PnL (incl. CASH rows): -10630.7549
 - Accounting adjustments excluded: -9913.58
 - Daily trading PnL: None
-- Profit % (on 30000.0 baseline): 1.4824%
-- Execution integrity: MISMATCH_DETECTED (SELL mismatches: 26)
-- Corrected realized PnL: 387.2682
+- Profit % (on 30000.0 baseline): 1.5708%
+- Execution integrity: MISMATCH_DETECTED (SELL mismatches: 27)
+- Corrected realized PnL: 475.1919
 
 ## Performance Drag Analysis
 - Stop-loss total: None (None trades)
@@ -56,7 +56,7 @@
 - CASH distortion: CASH/DEPOSIT row reported PnL -9913.58 distorts raw portfolio sums; excluded from corrected trading PnL.
 
 ## C. Live Signals Today
-- Total: 15 | STRONG BUY: 3 | TAKE PROFIT: 4 | WAIT: 8
+- Total: 25 | STRONG BUY: 7 | TAKE PROFIT: 9 | WAIT: 9
 
 ## D. TAE Advisory
 - Action: **SELL_ADVISORY** | Confidence: 78
@@ -65,7 +65,7 @@
 ## E. X.9 Shadow Validation
 - Events: 0 | Allowed: 0 | Blocked: 0 | Skipped: 0
 - Block rate: 0.0
-- tae_shadow_validation_events.csv missing — X.9 ledger connected in live_bot but no events recorded yet; cannot evaluate gate performance.
+- Ledger file exists but empty — bot may be STOPPED or no STRONG BUY evaluations occurred.
 
 ## F. Strategy Universe
 - Unique strategy IDs: 64
@@ -100,7 +100,7 @@
 - Next action: REVIEW_TAE_ARTIFACTS
 
 ## Cannot Conclude Yet
-- Gate performance: no shadow validation events yet.
+- Gate block/allow attribution: insufficient shadow events (<5).
 - Counterfactual top_100/top_200: not enough robust strategies in artifacts.
 - Daily PnL: no portfolio activity dated today.
 - Forward PnL on blocked BUYs: outcome_tracking_status PENDING_NEXT_PHASE.

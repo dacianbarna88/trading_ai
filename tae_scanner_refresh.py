@@ -148,6 +148,26 @@ def _build_steps(root: Path) -> list[StepSpec]:
             needs_pythonpath=True,
         ),
         StepSpec(
+            name="historical_results_analysis",
+            command=[PYTHON, str(root / "tae_historical_results_analysis_demo.py")],
+            artifact="tae_historical_results_analysis.json",
+            requires_artifacts=("tae_historical_execution.json",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="strategy_evolution_daily_runner",
+            command=[PYTHON, str(root / "tae_phase8_strategy_evolution_daily_runner_demo.py")],
+            artifact="tae_continuous_strategy_ranking.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="live_signals_historical_enrich",
+            command=[PYTHON, str(root / "tae_live_signals_historical_enrich.py")],
+            artifact="tae_live_signals_historical_enrich.json",
+            requires_artifacts=("live_signals.csv",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
             name="candidate_queue_builder",
             command=[PYTHON, str(root / "tae_candidate_queue_builder.py")],
             artifact="tae_candidate_queue.json",
