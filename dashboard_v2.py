@@ -1674,6 +1674,18 @@ with tabs[10]:
         elif len(strong) > 0:
             st.caption("Historical enrichment columns not yet present — run scanner refresh enrich step.")
 
+        research_cols = [
+            "Ticker", "Score", "Signal",
+            "Research_Momentum", "Research_Sector", "Research_Regional", "Research_Macro",
+            "Research_ETF", "Research_Threshold", "Research_Counterfactual", "Research_Confidence",
+        ]
+        strong_research_cols = [c for c in research_cols if c in pro.columns]
+        if len(strong) > 0 and len(strong_research_cols) >= 4:
+            st.subheader("🔬 STRONG BUY — Research Runtime")
+            st.dataframe(strong[strong_research_cols], width="stretch")
+        elif len(strong) > 0:
+            st.caption("Research enrichment columns not yet present — run scanner refresh research step.")
+
         preferred_cols = [
             "Time", "Ticker", "Price", "Score", "Signal", "RSI",
             "SMA20", "SMA50", "Volume", "Avg_Volume_20", "Breakout_20"

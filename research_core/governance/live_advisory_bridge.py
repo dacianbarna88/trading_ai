@@ -513,6 +513,8 @@ class LiveAdvisoryBridge:
         latest_time = None
         historical_enriched = 0
         strong_buy_historical: list[dict[str, Any]] = []
+        research_enriched = 0
+        strong_buy_research: list[dict[str, Any]] = []
 
         for row in rows:
             signal = str(row.get("Signal", "")).upper()
@@ -536,6 +538,21 @@ class LiveAdvisoryBridge:
                             "context": row.get("Recommendation_Context"),
                         }
                     )
+                if row.get("Research_Confidence"):
+                    research_enriched += 1
+                    strong_buy_research.append(
+                        {
+                            "ticker": str(row.get("Ticker") or "").upper(),
+                            "momentum": row.get("Research_Momentum"),
+                            "sector": row.get("Research_Sector"),
+                            "regional": row.get("Research_Regional"),
+                            "macro": row.get("Research_Macro"),
+                            "etf": row.get("Research_ETF"),
+                            "threshold": row.get("Research_Threshold"),
+                            "counterfactual": row.get("Research_Counterfactual"),
+                            "confidence": row.get("Research_Confidence"),
+                        }
+                    )
             elif signal == "TAKE PROFIT":
                 take_profit += 1
             ts = row.get("Time")
@@ -552,6 +569,9 @@ class LiveAdvisoryBridge:
             "historical_enrichment_present": historical_enriched > 0,
             "historical_enriched_strong_buy_count": historical_enriched,
             "strong_buy_historical_summary": strong_buy_historical[:10],
+            "research_enrichment_present": research_enriched > 0,
+            "research_enriched_strong_buy_count": research_enriched,
+            "strong_buy_research_summary": strong_buy_research[:10],
         }, blockers
 
     def _bot_status(self) -> str:
@@ -578,6 +598,22 @@ class LiveAdvisoryBridge:
                         loaded[name]["timestamp"] = payload.get(key)
                         break
         return loaded
+
+    def _load_research_advisory_summary(self) -> dict[str, Any]:
+        enrich_path = self._path("tae_live_signals_research_enrich.json")
+        payload, _ = _load_json(enrich_path)
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        runtime_path = self._path("tae_research_runtime.json")
+        runtime_payload, _ = _load_json(runtime_path)
+        if not runtime_payload:
+            return {}
+        try:
+            from research_core.research_runtime.live_signals_enricher import ResearchContext
+
+            return ResearchContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
 
     @staticmethod
     def _dominant_verdict(index: dict[str, Any] | None) -> str | None:
@@ -874,6 +910,44 @@ class LiveAdvisoryBridge:
             reasons.append(
                 f"Live signals historical enrichment active "
                 f"({runtime.get('historical_enriched_strong_buy_count', 0)} STRONG BUY rows)"
+            )
+
+        research_summary = self._load_research_advisory_summary()
+        if research_summary:
+            reasons.append("[RESEARCH_CONTEXT] Top Research Candidates")
+            for cand in research_summary.get("top_research_candidates") or []:
+                reasons.append(
+                    f"[RESEARCH_CONTEXT] candidate {cand.get('ticker')}: "
+                    f"momentum={cand.get('momentum_score')} edge={cand.get('edge')}"
+                )
+            reasons.append(
+                f"[RESEARCH_CONTEXT] Momentum Summary: {research_summary.get('momentum_summary')}"
+            )
+            reasons.append(
+                f"[RESEARCH_CONTEXT] Sector Summary: {research_summary.get('sector_summary')}"
+            )
+            reasons.append(
+                f"[RESEARCH_CONTEXT] Regional Summary: {research_summary.get('regional_summary')}"
+            )
+            reasons.append(
+                f"[RESEARCH_CONTEXT] Macro Summary: {research_summary.get('macro_summary')}"
+            )
+            reasons.append(
+                f"[RESEARCH_CONTEXT] Counterfactual Summary: "
+                f"{research_summary.get('counterfactual_summary')}"
+            )
+
+        for item in runtime.get("strong_buy_research_summary") or []:
+            reasons.append(
+                f"[RESEARCH_CONTEXT] {item.get('ticker')}: momentum={item.get('momentum')} "
+                f"sector={item.get('sector')} regional={item.get('regional')} "
+                f"confidence={item.get('confidence')}"
+            )
+
+        if runtime.get("research_enrichment_present"):
+            reasons.append(
+                f"Live signals research enrichment active "
+                f"({runtime.get('research_enriched_strong_buy_count', 0)} STRONG BUY rows)"
             )
 
         confidence = max(0, min(100, confidence))

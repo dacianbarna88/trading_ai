@@ -1,6 +1,6 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-30T11:16:41.575450+00:00  
+**Generated:** 2026-06-30T11:27:20.758500+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
@@ -9,14 +9,14 @@
 - Bot process: STOPPED
 - Dashboard process: RUNNING
 - Status file: RUNNING
-- Bot log age (s): 54.7
-- Live signals age (s): 5.6
+- Bot log age (s): 2.6
+- Live signals age (s): 10.9
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T14:16:41.528203+03:00
+- Local time: 2026-06-30T14:27:20.714355+03:00
 - Verdict: **READY**
 - Session guard reason: market_session_open
 - Bot stopped expected: False
@@ -34,14 +34,14 @@
 - Cash: 22662.33 USD
 - Capital deposits (flows): 0.0 USD
 - Open positions: 4
-- Portfolio value (est.): 30471.23 USD
+- Portfolio value (est.): 30473.19 USD
 - Trading realized PnL: -534.3556
-- Trading unrealized PnL: -3.9657
-- **Corrected trading total PnL:** 471.2262
-- Raw total PnL (incl. CASH rows): -10630.7549
+- Trading unrealized PnL: -2.0102
+- **Corrected trading total PnL:** 473.1817
+- Raw total PnL (incl. CASH rows): -10626.2411
 - Accounting adjustments excluded: -9913.58
 - Daily trading PnL: None
-- Profit % (on 30000.0 baseline): 1.5708%
+- Profit % (on 30000.0 baseline): 1.5773%
 - Execution integrity: MISMATCH_DETECTED (SELL mismatches: 27)
 - Corrected realized PnL: 475.1919
 
@@ -86,7 +86,7 @@
 - Evidence verdict: EVIDENCE_ENGINE_SOURCE_OF_TRUTH_ALIGNED
 - Meta confidence: {'composite_score': 0.9889, 'confidence_label': 'HIGH', 'factors': {'runtime_health': 1.0, 'orchestrator': 1.0, 'strategy_evolution': 1.0, 'governance': 1.0, 'top_strategy_score': 0.9336, 'input_coverage': 1.0}}
 - Ranking count: 3
-- Artifacts generated today: ['tae_live_advisory.json', 'tae_quick_health_check.json']
+- Artifacts generated today: ['tae_live_advisory.json', 'tae_historical_results_analysis.json', 'tae_continuous_strategy_ranking.json', 'tae_candidate_strategy_registry.json', 'tae_quick_health_check.json']
 
 ## I. Profit Maximization Advisory (no auto execution)
 - TAKE_PROFIT_REVIEW

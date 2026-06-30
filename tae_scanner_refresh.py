@@ -168,6 +168,19 @@ def _build_steps(root: Path) -> list[StepSpec]:
             needs_pythonpath=True,
         ),
         StepSpec(
+            name="research_runtime",
+            command=[PYTHON, str(root / "tae_research_runtime.py")],
+            artifact="tae_research_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="live_signals_research_enrich",
+            command=[PYTHON, str(root / "tae_live_signals_research_enrich.py")],
+            artifact="tae_live_signals_research_enrich.json",
+            requires_artifacts=("live_signals.csv",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
             name="candidate_queue_builder",
             command=[PYTHON, str(root / "tae_candidate_queue_builder.py")],
             artifact="tae_candidate_queue.json",

@@ -1,6 +1,6 @@
 # TAE Global Candidate Queue
 
-**Generated:** 2026-06-30T10:59:31.813550+00:00
+**Generated:** 2026-06-30T11:27:10.073028+00:00
 **Mode:** CONTROLLED_INTEGRATION
 **Safety:** CONTROLLED_INTEGRATION | NO_BROKER | NO_EXECUTION | NO_STRATEGY_CHANGE | NO_WATCHLIST_WRITE | NO_BUY_SELL_LOGIC
 
@@ -37,10 +37,10 @@
 
 ## Sources
 
-- `global_candidates.csv`: present=True status=OK rows=15 age_h=0.0
-- `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.0
-- `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.0
-- `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.0
+- `global_candidates.csv`: present=True status=OK rows=15 age_h=0.01
+- `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.01
+- `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.01
+- `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.01
 
 ## Governance
 

@@ -1,6 +1,6 @@
 # TAE Watchlist Proposal
 
-**Generated:** 2026-06-30T10:59:31.951574+00:00
+**Generated:** 2026-06-30T11:27:10.203754+00:00
 **Mode:** PAPER_ONLY_ADVISORY
 **Safety:** PAPER_ONLY | ADVISORY_ONLY | NO_BROKER | NO_EXECUTION | NO_PORTFOLIO_CHANGE | NO_WATCHLIST_WRITE
 
@@ -15,15 +15,15 @@
 
 ## Sources
 
-- `global_candidates.csv`: present=True status=OK rows=15 age_h=0.0
-- `global_market_scanner.csv`: present=True status=OK rows=10 age_h=0.01
-- `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.0
-- `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.0
-- `regional_strength.csv`: present=True status=OK rows=4 age_h=0.01
+- `global_candidates.csv`: present=True status=OK rows=15 age_h=0.01
+- `global_market_scanner.csv`: present=True status=OK rows=10 age_h=0.02
+- `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.01
+- `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.01
+- `regional_strength.csv`: present=True status=OK rows=4 age_h=0.02
 - `sector_rotation.csv`: present=True status=OK rows=11 age_h=0.01
-- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=40.04
-- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=40.04
-- `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.0
+- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=0.0
+- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=0.0
+- `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.01
 
 ## Recommended Additions (max 10)
 
@@ -54,9 +54,9 @@
 ## Strategy Context (non-ticker)
 
 - Registry verdict: CANDIDATE_STRATEGY_REGISTRY_READY
-- Strategy `SCORE_90_PLUS_NO_CLOSED_FREEZE` score=0.9336 decision=STRONG_PAPER_CANDIDATE
-- Strategy `SCORE_100_CURRENT_ONLY` score=0.2238 decision=INSUFFICIENT_SAMPLE
-- Strategy `LIVE_BASELINE` score=0.2135 decision=BASELINE_REFERENCE
+- Strategy `SCORE_90_PLUS_NO_CLOSED_FREEZE` score=0.9315 decision=STRONG_PAPER_CANDIDATE
+- Strategy `LIVE_BASELINE` score=0.2717 decision=BASELINE_REFERENCE
+- Strategy `SCORE_100_CURRENT_ONLY` score=0.2529 decision=INSUFFICIENT_SAMPLE
 
 ## Governance
 
