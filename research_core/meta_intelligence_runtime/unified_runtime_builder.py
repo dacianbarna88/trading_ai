@@ -17,6 +17,10 @@ from research_core.meta_intelligence_runtime.live_signals_enricher import (
 )
 from research_core.research_runtime.live_signals_enricher import RESEARCH_COLUMNS
 from research_core.strategic_allocation_runtime.live_signals_enricher import ALLOCATION_COLUMNS
+from research_core.strategy_simulation_runtime.strategy_context import (
+    STRATEGY_COLUMNS,
+    StrategyContext,
+)
 
 OUTPUT_JSON = "tae_unified_runtime.json"
 
@@ -81,8 +85,10 @@ def _compute_confidence(record: dict[str, Any]) -> float | None:
         ("Research_Confidence", 0.15),
         ("Committee_Confidence", 0.15),
         ("Allocation_Confidence", 0.15),
-        ("Meta_Confidence", 0.25),
-        ("Learning_Health_Score", 0.15),
+        ("Meta_Confidence", 0.20),
+        ("Learning_Health_Score", 0.10),
+        ("Strategy_Discovery_Confidence", 0.05),
+        ("Strategy_Simulation_Confidence", 0.05),
     )
     for key, weight in weights:
         val = _parse_float(record.get(key))
@@ -135,6 +141,10 @@ def _compute_context(record: dict[str, Any]) -> str:
         "Allocation_Score",
         "Meta_Health",
         "Meta_Ecosystem_Status",
+        "Discovery_Strategy",
+        "Simulation_Strategy",
+        "Expected_Edge",
+        "Expected_Return",
     ):
         val = record.get(key)
         if val not in (None, ""):
@@ -196,6 +206,26 @@ def _compute_bonuses(record: dict[str, Any], *, learning_score: float | None) ->
     if "HEALTHY" in ecosystem.upper():
         meta_bonus += 0.5
 
+    discovery_score = _parse_float(record.get("Strategy_Discovery_Score"))
+    discovery_conf = _parse_float(record.get("Strategy_Discovery_Confidence"))
+    strategy_discovery_bonus = _parse_float(record.get("strategy_discovery_bonus"))
+    if strategy_discovery_bonus is None:
+        strategy_discovery_bonus = 0.0
+        if discovery_score is not None and discovery_score >= 60:
+            strategy_discovery_bonus += (discovery_score - 50) * 0.02
+        if discovery_conf is not None and discovery_conf >= 65:
+            strategy_discovery_bonus += (discovery_conf - 50) * 0.015
+
+    simulation_score = _parse_float(record.get("Strategy_Simulation_Score"))
+    simulation_conf = _parse_float(record.get("Strategy_Simulation_Confidence"))
+    strategy_simulation_bonus = _parse_float(record.get("strategy_simulation_bonus"))
+    if strategy_simulation_bonus is None:
+        strategy_simulation_bonus = 0.0
+        if simulation_score is not None and simulation_score >= 55:
+            strategy_simulation_bonus += (simulation_score - 50) * 0.025
+        if simulation_conf is not None and simulation_conf >= 70:
+            strategy_simulation_bonus += (simulation_conf - 50) * 0.015
+
     return {
         "historical_bonus": round(historical_bonus, 4),
         "research_bonus": round(research_bonus, 4),
@@ -203,7 +233,25 @@ def _compute_bonuses(record: dict[str, Any], *, learning_score: float | None) ->
         "learning_bonus": round(learning_bonus, 4),
         "allocation_bonus": round(allocation_bonus, 4),
         "meta_bonus": round(meta_bonus, 4),
+        "strategy_discovery_bonus": round(strategy_discovery_bonus, 4),
+        "strategy_simulation_bonus": round(strategy_simulation_bonus, 4),
     }
+
+
+def _compute_unified_score_extended(
+    record: dict[str, Any],
+    *,
+    meta_ctx: MetaContext | None,
+    bonuses: dict[str, float],
+) -> float:
+    ctx = dict(record)
+    base = 0.0
+    if meta_ctx is not None:
+        base = meta_ctx.compute_unified_score(ctx)
+    else:
+        base = _parse_float(record.get("Unified_Runtime_Score")) or _parse_float(record.get("Score")) or 0.0
+    extended = base + bonuses.get("strategy_discovery_bonus", 0.0) + bonuses.get("strategy_simulation_bonus", 0.0)
+    return round(min(100.0, extended), 2)
 
 
 def _build_record_from_row(
@@ -211,6 +259,7 @@ def _build_record_from_row(
     *,
     learning_global: dict[str, Any],
     meta_ctx: MetaContext | None = None,
+    strategy_ctx: StrategyContext | None = None,
 ) -> dict[str, Any]:
     ticker = str(row.get("Ticker") or row.get("ticker") or "").upper()
     record: dict[str, Any] = {"Ticker": ticker}
@@ -224,21 +273,25 @@ def _build_record_from_row(
     record.update(_pick_columns(row, COMMITTEE_COLUMNS))
     record.update(_pick_columns(row, ALLOCATION_COLUMNS))
     record.update(_pick_columns(row, META_COLUMNS))
+    record.update(_pick_columns(row, STRATEGY_COLUMNS))
+
+    if strategy_ctx is not None:
+        record.update(strategy_ctx.enrich_ticker(ticker))
 
     record.update({k: v for k, v in learning_global.items() if v not in (None, "")})
 
+    learning_score = _parse_float(learning_global.get("Learning_Health_Score"))
+    bonuses = _compute_bonuses(record, learning_score=learning_score)
+    record.update(bonuses)
+
     unified = _parse_float(record.get("Unified_Runtime_Score"))
-    if unified is None and meta_ctx is not None:
-        unified = meta_ctx.compute_unified_score(row)
+    if unified is None or strategy_ctx is not None:
+        unified = _compute_unified_score_extended(record, meta_ctx=meta_ctx, bonuses=bonuses)
         record["Unified_Runtime_Score"] = unified
 
     record["Unified_Runtime_Confidence"] = _compute_confidence(record)
     record["Unified_Runtime_Recommendation"] = _compute_recommendation(record)
     record["Unified_Runtime_Context"] = _compute_context(record)
-
-    learning_score = _parse_float(learning_global.get("Learning_Health_Score"))
-    bonuses = _compute_bonuses(record, learning_score=learning_score)
-    record.update(bonuses)
     return record
 
 
@@ -247,6 +300,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
     signals_path = root / "live_signals.csv"
     learning_global = _load_learning_global(root)
     meta_ctx = MetaContext.load(root)
+    strategy_ctx = StrategyContext.load(root)
 
     records: dict[str, dict[str, Any]] = {}
 
@@ -260,6 +314,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
                     dict(row),
                     learning_global=learning_global,
                     meta_ctx=meta_ctx,
+                    strategy_ctx=strategy_ctx,
                 )
 
     for artifact_name, _source_kind in TICKER_SOURCES:
@@ -273,6 +328,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
                 partial,
                 learning_global=learning_global,
                 meta_ctx=meta_ctx,
+                strategy_ctx=strategy_ctx,
             )
             records[ticker]["source_artifact"] = artifact_name
 
@@ -322,6 +378,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
             "avg": round(sum(scores) / len(scores), 2) if scores else None,
         },
         "recommendation_distribution": {},
+        "strategy_summary": strategy_ctx.advisory_summary(),
     }
     for r in records_list:
         rec = str(r.get("Unified_Runtime_Recommendation") or "NEUTRAL")
@@ -337,6 +394,7 @@ def build_unified_runtime(root: Path | str = ".") -> dict[str, Any]:
         "records_list": records_list,
         "advisory_summary": advisory_summary,
         "learning_global": learning_global,
+        "strategy_global": strategy_ctx.advisory_summary(),
     }
 
 

@@ -1,6 +1,6 @@
 # TAE Full Ecosystem Review
 
-**Generated:** 2026-06-30T11:59:22.271021+00:00  
+**Generated:** 2026-06-30T12:22:31.882531+00:00  
 **Mode:** OBSERVABILITY_FINANCIAL_ANALYSIS  
 **Live trading impact:** NONE
 
@@ -9,21 +9,21 @@
 - Bot process: RUNNING
 - Dashboard process: RUNNING
 - Status file: RUNNING
-- Bot log age (s): 3.5
-- Live signals age (s): 18.8
+- Bot log age (s): 2.5
+- Live signals age (s): 30.4
 - Health: TAE_QUICK_HEALTH_READY_WITH_WARNINGS
 - Advisory: SELL_ADVISORY (blocks new BUY: False)
 - Git clean: False
 
 ## Market Readiness
-- Local time: 2026-06-30T14:59:22.216831+03:00
+- Local time: 2026-06-30T15:22:31.846927+03:00
 - Verdict: **READY**
 - Session guard reason: market_session_open
 - Bot stopped expected: False
 - Markets: {'US': False, 'EU': True, 'UK': True, 'ASIA': False}
 - Dashboard running: True
 - X.8 blocks new BUY: False
-- Advisory blocking warnings: 0 | informational: 5
+- Advisory blocking warnings: 0 | informational: 6
 - RISK from real blockers only: False
 - SELL accounting protection: ACTIVE
 - X.9 ledger: READY
@@ -34,14 +34,14 @@
 - Cash: 22662.33 USD
 - Capital deposits (flows): 0.0 USD
 - Open positions: 4
-- Portfolio value (est.): 30460.43 USD
+- Portfolio value (est.): 30453.92 USD
 - Trading realized PnL: -534.3556
-- Trading unrealized PnL: -14.7619
-- **Corrected trading total PnL:** 460.43
-- Raw total PnL (incl. CASH rows): -10646.6676
+- Trading unrealized PnL: -21.2781
+- **Corrected trading total PnL:** 453.9138
+- Raw total PnL (incl. CASH rows): -10651.4783
 - Accounting adjustments excluded: -9913.58
 - Daily trading PnL: None
-- Profit % (on 30000.0 baseline): 1.5348%
+- Profit % (on 30000.0 baseline): 1.513%
 - Execution integrity: MISMATCH_DETECTED (SELL mismatches: 27)
 - Corrected realized PnL: 475.1919
 
@@ -86,7 +86,7 @@
 - Evidence verdict: EVIDENCE_ENGINE_SOURCE_OF_TRUTH_ALIGNED
 - Meta confidence: {'composite_score': 0.9886, 'confidence_label': 'HIGH', 'factors': {'runtime_health': 1.0, 'orchestrator': 1.0, 'strategy_evolution': 1.0, 'governance': 1.0, 'top_strategy_score': 0.9315, 'input_coverage': 1.0}}
 - Ranking count: 3
-- Artifacts generated today: ['tae_live_advisory.json', 'tae_advisory_index.json', 'tae_historical_results_analysis.json', 'tae_continuous_strategy_ranking.json', 'tae_candidate_strategy_registry.json', 'tae_meta_intelligence.json', 'tae_quick_health_check.json']
+- Artifacts generated today: ['tae_live_advisory.json', 'tae_advisory_index.json', 'tae_historical_execution.json', 'tae_historical_results_analysis.json', 'tae_continuous_strategy_ranking.json', 'tae_candidate_strategy_registry.json', 'tae_meta_intelligence.json', 'tae_quick_health_check.json']
 
 ## I. Profit Maximization Advisory (no auto execution)
 - TAKE_PROFIT_REVIEW

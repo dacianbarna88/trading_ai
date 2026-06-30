@@ -226,6 +226,19 @@ def _build_steps(root: Path) -> list[StepSpec]:
             needs_pythonpath=True,
         ),
         StepSpec(
+            name="strategy_discovery_runtime",
+            command=[PYTHON, str(root / "tae_strategy_discovery_runtime.py")],
+            artifact="tae_strategy_discovery_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="strategy_simulation_runtime",
+            command=[PYTHON, str(root / "tae_strategy_simulation_runtime.py")],
+            artifact="tae_strategy_simulation_runtime.json",
+            requires_artifacts=("tae_strategy_discovery.json",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
             name="unified_runtime",
             command=[PYTHON, str(root / "tae_unified_runtime.py")],
             artifact="tae_unified_runtime.json",

@@ -1734,6 +1734,22 @@ with tabs[10]:
             try:
                 with unified_ssot_path.open(encoding="utf-8") as handle:
                     unified_ssot = json.load(handle)
+                strategy_global = unified_ssot.get("strategy_global") or {}
+                strategy_summary = (unified_ssot.get("advisory_summary") or {}).get("strategy_summary") or strategy_global
+                if strategy_summary:
+                    st.subheader("🧬 STRATEGY DISCOVERY & SIMULATION")
+                    st.caption(
+                        f"Discovery avg confidence: {strategy_summary.get('discovery_avg_confidence')} · "
+                        f"Simulation confidence: {strategy_summary.get('simulation_confidence')}"
+                    )
+                    top_sim = strategy_summary.get("top_simulated_strategies") or []
+                    top_disc = strategy_summary.get("top_discovered_strategies") or []
+                    if top_disc:
+                        st.markdown("**Top Discovered Strategies**")
+                        st.dataframe(pd.DataFrame(top_disc[:10]), width="stretch")
+                    if top_sim:
+                        st.markdown("**Top Simulated Strategies**")
+                        st.dataframe(pd.DataFrame(top_sim[:10]), width="stretch")
                 summary = unified_ssot.get("advisory_summary") or {}
                 top_unified = summary.get("top_unified_candidates") or []
                 if top_unified:

@@ -59,6 +59,8 @@ ARTIFACT_PATHS = {
     "meta_runtime": "tae_meta_intelligence_runtime.json",
     "meta_enrich": "tae_live_signals_meta_enrich.json",
     "unified_runtime": "tae_unified_runtime.json",
+    "strategy_discovery_runtime": "tae_strategy_discovery_runtime.json",
+    "strategy_simulation_runtime": "tae_strategy_simulation_runtime.json",
 }
 
 SCANNER_CSV_ARTIFACTS = (
@@ -289,6 +291,10 @@ class TAECommandCenterContext:
     meta_enrich_status: str = "MISSING"
     unified_runtime: dict[str, Any] = field(default_factory=dict)
     unified_runtime_status: str = "MISSING"
+    strategy_discovery_runtime: dict[str, Any] = field(default_factory=dict)
+    strategy_discovery_runtime_status: str = "MISSING"
+    strategy_simulation_runtime: dict[str, Any] = field(default_factory=dict)
+    strategy_simulation_runtime_status: str = "MISSING"
     scanner_refresh_cron: str = "UNKNOWN"
     watchlist_count: int | None = None
     x9_event_count: int | None = None
@@ -540,6 +546,18 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.unified_runtime_status = unified_st
     status["tae_unified_runtime.json"] = unified_st
 
+    strategy_disc_path = root / ARTIFACT_PATHS["strategy_discovery_runtime"]
+    strategy_disc, strategy_disc_st = _safe_read_json(strategy_disc_path)
+    ctx.strategy_discovery_runtime = strategy_disc or {}
+    ctx.strategy_discovery_runtime_status = strategy_disc_st
+    status["tae_strategy_discovery_runtime.json"] = strategy_disc_st
+
+    strategy_sim_path = root / ARTIFACT_PATHS["strategy_simulation_runtime"]
+    strategy_sim, strategy_sim_st = _safe_read_json(strategy_sim_path)
+    ctx.strategy_simulation_runtime = strategy_sim or {}
+    ctx.strategy_simulation_runtime_status = strategy_sim_st
+    status["tae_strategy_simulation_runtime.json"] = strategy_sim_st
+
     ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
     ctx.watchlist_count = _count_watchlist_tickers(root)
     ctx.x9_event_count = _shadow_event_count(root)
@@ -567,6 +585,8 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "meta_runtime",
             "meta_enrich",
             "unified_runtime",
+            "strategy_discovery_runtime",
+            "strategy_simulation_runtime",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -1591,6 +1611,72 @@ def render_unified_runtime_panel(ctx: TAECommandCenterContext) -> None:
                 st.json(rec)
 
 
+def render_strategy_discovery_simulation_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🧬 Strategy Discovery & Simulation")
+    st.caption(
+        f"Artifacts: tae_strategy_discovery_runtime.json ({ctx.strategy_discovery_runtime_status}) · "
+        f"tae_strategy_simulation_runtime.json ({ctx.strategy_simulation_runtime_status})"
+    )
+
+    disc = ctx.strategy_discovery_runtime
+    sim = ctx.strategy_simulation_runtime
+    summary = (sim.get("advisory_summary") or disc.get("advisory_summary") or {})
+    unified = ctx.unified_runtime.get("strategy_global") or ctx.unified_runtime.get("advisory_summary", {}).get(
+        "strategy_summary"
+    ) or summary
+
+    if ctx.strategy_discovery_runtime_status != "OK" and ctx.strategy_simulation_runtime_status != "OK":
+        st.warning("Strategy runtime artifacts missing — run scanner refresh strategy steps.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Discovery Avg Confidence", _fmt(unified.get("discovery_avg_confidence")))
+    c2.metric("Simulation Confidence", _fmt(unified.get("simulation_confidence")))
+    c3.metric("Top Simulated", len(unified.get("top_simulated_strategies") or []))
+
+    top_disc = unified.get("top_discovered_strategies") or []
+    if top_disc:
+        st.markdown("**Top Discovered Strategies**")
+        st.dataframe(pd.DataFrame(top_disc[:10]), width="stretch", hide_index=True)
+
+    top_sim = unified.get("top_simulated_strategies") or []
+    if top_sim:
+        st.markdown("**Top Simulated Strategies**")
+        cols = [
+            c
+            for c in [
+                "strategy_id",
+                "market",
+                "composite_score",
+                "profit_pct",
+                "expectancy",
+                "max_drawdown",
+            ]
+            if c in pd.DataFrame(top_sim).columns
+        ]
+        st.dataframe(pd.DataFrame(top_sim)[cols].head(10), width="stretch", hide_index=True)
+
+    ssot = ctx.unified_runtime.get("records_list") or []
+    if ssot:
+        with st.expander("Per-ticker strategy SSOT fields", expanded=False):
+            rows = []
+            for rec in ssot[:15]:
+                rows.append(
+                    {
+                        "Ticker": rec.get("Ticker"),
+                        "Discovery_Strategy": rec.get("Discovery_Strategy"),
+                        "Simulation_Strategy": rec.get("Simulation_Strategy"),
+                        "Expected_Return": rec.get("Expected_Return"),
+                        "Expected_Edge": rec.get("Expected_Edge"),
+                        "Expected_Drawdown": rec.get("Expected_Drawdown"),
+                        "Strategy_Discovery_Confidence": rec.get("Strategy_Discovery_Confidence"),
+                        "Strategy_Simulation_Confidence": rec.get("Strategy_Simulation_Confidence"),
+                    }
+                )
+            if rows:
+                st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+
 def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🕐 Market Open Monitor")
     st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
@@ -1692,6 +1778,8 @@ def render_tae_command_center() -> None:
     render_allocation_runtime_panel(ctx)
     st.divider()
     render_meta_intelligence_panel(ctx)
+    st.divider()
+    render_strategy_discovery_simulation_panel(ctx)
     st.divider()
     render_unified_runtime_panel(ctx)
     st.divider()

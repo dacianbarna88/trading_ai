@@ -221,6 +221,8 @@ class QueueCandidate:
     meta_bonus: float = 0.0
     meta_score: float | None = None
     meta_confidence: float | None = None
+    strategy_discovery_bonus: float = 0.0
+    strategy_simulation_bonus: float = 0.0
     unified_runtime_score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -256,6 +258,8 @@ class QueueCandidate:
             "meta_bonus": round(self.meta_bonus, 4),
             "meta_score": self.meta_score,
             "meta_confidence": self.meta_confidence,
+            "strategy_discovery_bonus": round(self.strategy_discovery_bonus, 4),
+            "strategy_simulation_bonus": round(self.strategy_simulation_bonus, 4),
             "unified_runtime_score": self.unified_runtime_score,
         }
 
@@ -370,6 +374,8 @@ class CandidateQueueBuilder:
             record.meta_score = _parse_float(ctx.get("Meta_Score"))
             record.meta_confidence = _parse_float(ctx.get("Meta_Confidence"))
             record.unified_runtime_score = _parse_float(ctx.get("Unified_Runtime_Score"))
+            record.strategy_discovery_bonus = round(_parse_float(ctx.get("strategy_discovery_bonus")) or 0.0, 4)
+            record.strategy_simulation_bonus = round(_parse_float(ctx.get("strategy_simulation_bonus")) or 0.0, 4)
 
             record.historical_bonus = round(_parse_float(ctx.get("historical_bonus")) or 0.0, 4)
             record.research_bonus = round(_parse_float(ctx.get("research_bonus")) or 0.0, 4)

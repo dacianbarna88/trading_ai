@@ -729,6 +729,24 @@ class LiveAdvisoryBridge:
         except Exception:
             return {}
 
+    def _load_strategy_advisory_summary(self) -> dict[str, Any]:
+        sim_path = self._path("tae_strategy_simulation_runtime.json")
+        payload, _ = _load_json(sim_path)
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        disc_path = self._path("tae_strategy_discovery_runtime.json")
+        disc_payload, _ = _load_json(disc_path)
+        if disc_payload and disc_payload.get("advisory_summary"):
+            summary = dict(disc_payload["advisory_summary"])
+            summary.setdefault("top_simulated_strategies", [])
+            return summary
+        try:
+            from research_core.strategy_simulation_runtime.strategy_context import StrategyContext
+
+            return StrategyContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
     @staticmethod
     def _dominant_verdict(index: dict[str, Any] | None) -> str | None:
         if not index:
@@ -1193,6 +1211,29 @@ class LiveAdvisoryBridge:
                     f"score={cand.get('unified_runtime_score')} "
                     f"confidence={cand.get('unified_runtime_confidence')} "
                     f"recommendation={cand.get('unified_runtime_recommendation')}"
+                )
+
+        strategy_summary = self._load_strategy_advisory_summary()
+        if strategy_summary:
+            reasons.append(
+                f"[STRATEGY_CONTEXT] Discovery confidence avg: "
+                f"{strategy_summary.get('discovery_avg_confidence')}"
+            )
+            reasons.append(
+                f"[STRATEGY_CONTEXT] Simulation confidence: "
+                f"{strategy_summary.get('simulation_confidence')}"
+            )
+            for item in strategy_summary.get("top_discovered_strategies") or []:
+                reasons.append(
+                    f"[STRATEGY_CONTEXT] Discovered {item.get('discovery_id')}: "
+                    f"market={item.get('market')} confidence={item.get('confidence_seed')}"
+                )
+            for item in strategy_summary.get("top_simulated_strategies") or []:
+                reasons.append(
+                    f"[STRATEGY_CONTEXT] Simulated {item.get('strategy_id')}: "
+                    f"market={item.get('market')} return={item.get('profit_pct')} "
+                    f"edge={item.get('expectancy')} drawdown={item.get('max_drawdown')} "
+                    f"confidence={strategy_summary.get('simulation_confidence')}"
                 )
 
         confidence = max(0, min(100, confidence))
