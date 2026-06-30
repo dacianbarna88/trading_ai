@@ -180,25 +180,10 @@ def calculate_rsi(close, period=14):
 
 
 def get_latest_price(ticker):
-    try:
-        data = yf.download(
-            ticker,
-            period="5d",
-            auto_adjust=False,
-            progress=False,
-        )
+    from core.market_data_layer import get_market_price
 
-        if data.empty:
-            return None
-
-        if len(data.columns.names) > 1:
-            data.columns = data.columns.droplevel(1)
-
-        return float(data["Close"].iloc[-1])
-
-    except Exception as e:
-        log(f"Eroare preț live {ticker}: {e}")
-        return None
+    result = get_market_price(ticker, purpose="risk")
+    return result.price
 
 
 def load_csv_safe(file, columns):
@@ -273,10 +258,24 @@ def update_portfolio_prices():
         if action == "BUY" and ticker not in open_tickers:
             continue
 
-        current_price = get_latest_price(ticker)
+        from core.market_data_layer import get_market_price
 
+        quote = get_market_price(ticker, purpose="display")
+        current_price = quote.price
         if current_price is None:
-            current_price = row["Price"]
+            prior = row.get("Current_Price")
+            if pd.notna(prior):
+                current_price = float(prior)
+                log(
+                    f"DISPLAY DATA STALE pentru {ticker}: keeping previous Current_Price "
+                    f"(status={quote.status}, failures={quote.consecutive_failures})"
+                )
+            else:
+                log(
+                    f"DISPLAY DATA STALE pentru {ticker}: no previous Current_Price "
+                    f"(status={quote.status}, failures={quote.consecutive_failures})"
+                )
+                continue
 
         price = float(row["Price"])
         shares = float(row["Shares"])
@@ -498,15 +497,22 @@ def sell_position(row, portfolio, reason):
 
 def manage_position_risk_independent(portfolio, signals_df=None):
     """Evaluate stop/take-profit for open positions without relying on signals_df."""
+    from core.market_data_layer import get_market_price
+
     for ticker in list(get_open_positions(portfolio).keys()):
         positions = get_open_positions(portfolio)
         if ticker not in positions:
             continue
 
-        current_price = get_latest_price(ticker)
-        if current_price is None:
-            log(f"RISK DATA STALE pentru {ticker}: stop-loss not evaluated")
+        quote = get_market_price(ticker, purpose="risk")
+        if quote.price is None:
+            log(
+                f"RISK DATA STALE pentru {ticker}: status={quote.status}, "
+                f"failures={quote.consecutive_failures}"
+            )
             continue
+
+        current_price = float(quote.price)
 
         avg_price = float(positions[ticker]["avg_price"])
         pnl_pct = ((current_price - avg_price) / avg_price) * 100

@@ -57,9 +57,19 @@ def _aapl_buy_portfolio() -> pd.DataFrame:
 
 class IndependentPositionRiskTest(unittest.TestCase):
     @patch("live_bot.send_telegram")
-    @patch("live_bot.get_latest_price")
-    def test_stop_loss_when_ticker_absent_from_signals(self, mock_price, _mock_tg):
-        mock_price.return_value = 276.91
+    @patch("core.market_data_layer.get_market_price")
+    def test_stop_loss_when_ticker_absent_from_signals(self, mock_quote_fn, _mock_tg):
+        from core.market_data_layer import PriceResult
+
+        mock_quote_fn.return_value = PriceResult(
+            ticker="AAPL",
+            price=276.91,
+            fetched_at=None,
+            source="test",
+            age_seconds=0.0,
+            status="DATA_OK",
+            consecutive_failures=0,
+        )
         portfolio = _aapl_buy_portfolio()
         signals_df = pd.DataFrame(columns=["Ticker", "Signal", "Score", "Price", "RSI"])
 
@@ -73,9 +83,20 @@ class IndependentPositionRiskTest(unittest.TestCase):
         positions = live_bot.get_open_positions(result)
         self.assertNotIn("AAPL", positions)
 
-    @patch("live_bot.get_latest_price")
-    def test_stale_price_skips_sell_and_logs(self, mock_price):
-        mock_price.return_value = None
+    @patch("core.market_data_layer.get_market_price")
+    def test_stale_price_skips_sell_and_logs(self, mock_quote_fn):
+        from core.market_data_layer import PriceResult
+
+        mock_quote_fn.return_value = PriceResult(
+            ticker="AAPL",
+            price=None,
+            fetched_at=None,
+            source=None,
+            age_seconds=130.0,
+            status="DATA_CRITICAL",
+            consecutive_failures=6,
+            error="all fetch paths failed",
+        )
         portfolio = _aapl_buy_portfolio()
         log_buffer = StringIO()
 
@@ -84,7 +105,7 @@ class IndependentPositionRiskTest(unittest.TestCase):
 
         sells = result[result["Action"].astype(str).str.upper() == "SELL"]
         self.assertTrue(sells.empty)
-        self.assertIn("RISK DATA STALE pentru AAPL: stop-loss not evaluated", log_buffer.getvalue())
+        self.assertIn("RISK DATA STALE pentru AAPL", log_buffer.getvalue())
         self.assertIn("AAPL", live_bot.get_open_positions(result))
 
     def test_fifo_avg_price_ignores_closed_lots(self):
