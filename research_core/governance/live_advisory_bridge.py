@@ -519,6 +519,8 @@ class LiveAdvisoryBridge:
         strong_buy_committee: list[dict[str, Any]] = []
         allocation_enriched = 0
         strong_buy_allocation: list[dict[str, Any]] = []
+        meta_enriched = 0
+        strong_buy_meta: list[dict[str, Any]] = []
 
         for row in rows:
             signal = str(row.get("Signal", "")).upper()
@@ -584,6 +586,19 @@ class LiveAdvisoryBridge:
                             "bias": row.get("Allocation_Bias"),
                         }
                     )
+                if row.get("Meta_Score"):
+                    meta_enriched += 1
+                    strong_buy_meta.append(
+                        {
+                            "ticker": str(row.get("Ticker") or "").upper(),
+                            "meta_score": row.get("Meta_Score"),
+                            "meta_confidence": row.get("Meta_Confidence"),
+                            "meta_health": row.get("Meta_Health"),
+                            "strategy_rank": row.get("Meta_Strategy_Rank"),
+                            "ecosystem_status": row.get("Meta_Ecosystem_Status"),
+                            "unified_runtime_score": row.get("Unified_Runtime_Score"),
+                        }
+                    )
             elif signal == "TAKE PROFIT":
                 take_profit += 1
             ts = row.get("Time")
@@ -609,6 +624,9 @@ class LiveAdvisoryBridge:
             "allocation_enrichment_present": allocation_enriched > 0,
             "allocation_enriched_strong_buy_count": allocation_enriched,
             "strong_buy_allocation_summary": strong_buy_allocation[:10],
+            "meta_enrichment_present": meta_enriched > 0,
+            "meta_enriched_strong_buy_count": meta_enriched,
+            "strong_buy_meta_summary": strong_buy_meta[:10],
         }, blockers
 
     def _bot_status(self) -> str:
@@ -679,6 +697,35 @@ class LiveAdvisoryBridge:
             )
 
             return AllocationContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
+    def _load_meta_advisory_summary(self) -> dict[str, Any]:
+        enrich_path = self._path("tae_live_signals_meta_enrich.json")
+        payload, _ = _load_json(enrich_path)
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        runtime_path = self._path("tae_meta_intelligence_runtime.json")
+        runtime_payload, _ = _load_json(runtime_path)
+        if runtime_payload and runtime_payload.get("advisory_summary"):
+            return runtime_payload["advisory_summary"]
+        try:
+            from research_core.meta_intelligence_runtime.live_signals_enricher import MetaContext
+
+            return MetaContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
+    def _load_unified_runtime_summary(self) -> dict[str, Any]:
+        payload, _ = _load_json(self._path("tae_unified_runtime.json"))
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        try:
+            from research_core.meta_intelligence_runtime.unified_runtime_builder import (
+                build_unified_runtime,
+            )
+
+            return build_unified_runtime(self._root).get("advisory_summary") or {}
         except Exception:
             return {}
 
@@ -1086,6 +1133,67 @@ class LiveAdvisoryBridge:
                 f"Live signals allocation enrichment active "
                 f"({runtime.get('allocation_enriched_strong_buy_count', 0)} STRONG BUY rows)"
             )
+
+        meta_summary = self._load_meta_advisory_summary()
+        if meta_summary:
+            reasons.append(f"[META_CONTEXT] Meta Summary: {meta_summary.get('meta_summary')}")
+            reasons.append(
+                f"[META_CONTEXT] Meta Confidence: {meta_summary.get('meta_confidence')}"
+            )
+            reasons.append(
+                f"[META_CONTEXT] Ecosystem Health: {meta_summary.get('ecosystem_health')}"
+            )
+            unified = meta_summary.get("unified_runtime_score_summary") or {}
+            reasons.append(
+                f"[META_CONTEXT] Unified Runtime Score Summary: "
+                f"avg={unified.get('avg')} max={unified.get('max')} count={unified.get('count')}"
+            )
+            for cand in meta_summary.get("top_unified_candidates") or []:
+                reasons.append(
+                    f"[META_CONTEXT] Unified candidate {cand.get('ticker')}: "
+                    f"score={cand.get('unified_runtime_score')} meta={cand.get('meta_score')}"
+                )
+
+        for item in runtime.get("strong_buy_meta_summary") or []:
+            reasons.append(
+                f"[META_CONTEXT] {item.get('ticker')}: meta_score={item.get('meta_score')} "
+                f"unified={item.get('unified_runtime_score')} health={item.get('meta_health')}"
+            )
+
+        if runtime.get("meta_enrichment_present"):
+            reasons.append(
+                f"Live signals meta enrichment active "
+                f"({runtime.get('meta_enriched_strong_buy_count', 0)} STRONG BUY rows)"
+            )
+
+        unified_summary = self._load_unified_runtime_summary()
+        if unified_summary:
+            score_summary = unified_summary.get("unified_runtime_score_summary") or {}
+            conf_summary = unified_summary.get("confidence_summary") or {}
+            reasons.append(
+                f"[UNIFIED_RUNTIME] SSOT records: {unified_summary.get('record_count')}"
+            )
+            reasons.append(
+                f"[UNIFIED_RUNTIME] Top Scores Summary: "
+                f"avg={score_summary.get('avg')} max={score_summary.get('max')} "
+                f"count={score_summary.get('count')}"
+            )
+            reasons.append(
+                f"[UNIFIED_RUNTIME] Confidence Summary: "
+                f"avg={conf_summary.get('avg')} max={conf_summary.get('max')}"
+            )
+            top_candidates = unified_summary.get("top_candidates") or []
+            if top_candidates:
+                reasons.append(
+                    f"[UNIFIED_RUNTIME] Top Candidates: {', '.join(str(t) for t in top_candidates[:10])}"
+                )
+            for cand in unified_summary.get("top_unified_candidates") or []:
+                reasons.append(
+                    f"[UNIFIED_RUNTIME] {cand.get('ticker')}: "
+                    f"score={cand.get('unified_runtime_score')} "
+                    f"confidence={cand.get('unified_runtime_confidence')} "
+                    f"recommendation={cand.get('unified_runtime_recommendation')}"
+                )
 
         confidence = max(0, min(100, confidence))
 

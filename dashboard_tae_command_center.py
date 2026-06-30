@@ -56,6 +56,9 @@ ARTIFACT_PATHS = {
     "learning_runtime": "tae_learning_runtime.json",
     "allocation_runtime": "tae_strategic_allocation_runtime.json",
     "allocation_enrich": "tae_live_signals_allocation_enrich.json",
+    "meta_runtime": "tae_meta_intelligence_runtime.json",
+    "meta_enrich": "tae_live_signals_meta_enrich.json",
+    "unified_runtime": "tae_unified_runtime.json",
 }
 
 SCANNER_CSV_ARTIFACTS = (
@@ -280,6 +283,12 @@ class TAECommandCenterContext:
     allocation_runtime_status: str = "MISSING"
     allocation_enrich: dict[str, Any] = field(default_factory=dict)
     allocation_enrich_status: str = "MISSING"
+    meta_runtime: dict[str, Any] = field(default_factory=dict)
+    meta_runtime_status: str = "MISSING"
+    meta_enrich: dict[str, Any] = field(default_factory=dict)
+    meta_enrich_status: str = "MISSING"
+    unified_runtime: dict[str, Any] = field(default_factory=dict)
+    unified_runtime_status: str = "MISSING"
     scanner_refresh_cron: str = "UNKNOWN"
     watchlist_count: int | None = None
     x9_event_count: int | None = None
@@ -513,6 +522,24 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.allocation_enrich_status = allocation_enrich_st
     status["tae_live_signals_allocation_enrich.json"] = allocation_enrich_st
 
+    meta_path = root / ARTIFACT_PATHS["meta_runtime"]
+    meta_runtime, meta_st = _safe_read_json(meta_path)
+    ctx.meta_runtime = meta_runtime or {}
+    ctx.meta_runtime_status = meta_st
+    status["tae_meta_intelligence_runtime.json"] = meta_st
+
+    meta_enrich_path = root / ARTIFACT_PATHS["meta_enrich"]
+    meta_enrich, meta_enrich_st = _safe_read_json(meta_enrich_path)
+    ctx.meta_enrich = meta_enrich or {}
+    ctx.meta_enrich_status = meta_enrich_st
+    status["tae_live_signals_meta_enrich.json"] = meta_enrich_st
+
+    unified_path = root / ARTIFACT_PATHS["unified_runtime"]
+    unified_runtime, unified_st = _safe_read_json(unified_path)
+    ctx.unified_runtime = unified_runtime or {}
+    ctx.unified_runtime_status = unified_st
+    status["tae_unified_runtime.json"] = unified_st
+
     ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
     ctx.watchlist_count = _count_watchlist_tickers(root)
     ctx.x9_event_count = _shadow_event_count(root)
@@ -537,6 +564,9 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "learning_runtime",
             "allocation_runtime",
             "allocation_enrich",
+            "meta_runtime",
+            "meta_enrich",
+            "unified_runtime",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -1456,6 +1486,111 @@ def render_allocation_runtime_panel(ctx: TAECommandCenterContext) -> None:
             pass
 
 
+def render_meta_intelligence_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🧠 Meta Intelligence")
+    st.caption(
+        f"Artifacts: tae_meta_intelligence_runtime.json ({ctx.meta_runtime_status}) · "
+        f"tae_live_signals_meta_enrich.json ({ctx.meta_enrich_status})"
+    )
+
+    runtime = ctx.meta_runtime
+    if ctx.meta_runtime_status == "OK" and runtime:
+        counts = runtime.get("step_counts") or {}
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Meta OK", _fmt(counts.get("ok")))
+        c2.metric("Skipped", _fmt(counts.get("skipped")))
+        c3.metric("Failed", _fmt(counts.get("fail")))
+    else:
+        st.warning(f"Meta runtime: {ctx.meta_runtime_status}")
+
+    enrich = ctx.meta_enrich
+    advisory = enrich.get("advisory_summary") or runtime.get("advisory_summary") or {}
+    if advisory:
+        st.markdown("**Meta summaries**")
+        st.caption(f"Summary: {advisory.get('meta_summary') or 'NO_DATA'}")
+        st.caption(f"Confidence: {advisory.get('meta_confidence') or 'NO_DATA'}")
+        st.caption(f"Health: {advisory.get('meta_health') or 'NO_DATA'}")
+        st.caption(f"Strategy rank: {advisory.get('strategy_rank')} ({advisory.get('top_strategy_id')})")
+        unified = advisory.get("unified_runtime_score_summary") or {}
+        st.caption(
+            f"Unified runtime: avg={unified.get('avg')} max={unified.get('max')} "
+            f"count={unified.get('count')}"
+        )
+        top_meta = advisory.get("top_meta_candidates") or []
+        top_unified = advisory.get("top_unified_candidates") or []
+        if top_meta:
+            st.markdown("**Top Meta Candidates**")
+            st.dataframe(pd.DataFrame(top_meta), width="stretch", hide_index=True)
+        if top_unified:
+            st.markdown("**Top Unified Candidates**")
+            st.dataframe(pd.DataFrame(top_unified[:10]), width="stretch", hide_index=True)
+
+    signals_path = PROJECT_ROOT / ARTIFACT_PATHS["live_signals"]
+    if signals_path.is_file():
+        try:
+            df = pd.read_csv(signals_path)
+            if "Unified_Runtime_Score" in df.columns:
+                strong = df[df.get("Signal", pd.Series(dtype=str)).astype(str) == "STRONG BUY"]
+                if strong.empty:
+                    strong = df
+                strong = strong.sort_values("Unified_Runtime_Score", ascending=False)
+                cols = [
+                    c
+                    for c in [
+                        "Ticker",
+                        "Score",
+                        "Meta_Score",
+                        "Meta_Confidence",
+                        "Meta_Health",
+                        "Meta_Strategy_Rank",
+                        "Unified_Runtime_Score",
+                    ]
+                    if c in strong.columns
+                ]
+                if cols:
+                    st.markdown("**Unified Runtime — top tickers**")
+                    st.dataframe(strong[cols].head(10), width="stretch", hide_index=True)
+        except (OSError, ValueError, pd.errors.ParserError):
+            pass
+
+
+def render_unified_runtime_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🔗 Unified Runtime SSOT")
+    st.caption(f"Artifact: tae_unified_runtime.json ({ctx.unified_runtime_status})")
+
+    payload = ctx.unified_runtime
+    if ctx.unified_runtime_status != "OK" or not payload:
+        st.warning(f"Unified runtime SSOT: {ctx.unified_runtime_status}")
+        return
+
+    summary = payload.get("advisory_summary") or {}
+    score_summary = summary.get("unified_runtime_score_summary") or {}
+    conf_summary = summary.get("confidence_summary") or {}
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("SSOT Records", _fmt(summary.get("record_count")))
+    c2.metric("Unified Avg", _fmt(score_summary.get("avg")))
+    c3.metric("Unified Max", _fmt(score_summary.get("max")))
+    c4.metric("Confidence Avg", _fmt(conf_summary.get("avg")))
+
+    top = summary.get("top_unified_candidates") or []
+    if top:
+        st.markdown("**Top Unified Candidates**")
+        st.dataframe(pd.DataFrame(top[:10]), width="stretch", hide_index=True)
+
+    records = payload.get("records_list") or list((payload.get("records") or {}).values())
+    if records:
+        with st.expander("Expand full Unified Runtime Records", expanded=False):
+            for rec in records[:15]:
+                ticker = rec.get("Ticker") or rec.get("ticker")
+                st.markdown(
+                    f"**{ticker}** — score={rec.get('Unified_Runtime_Score')} "
+                    f"confidence={rec.get('Unified_Runtime_Confidence')} "
+                    f"recommendation={rec.get('Unified_Runtime_Recommendation')}"
+                )
+                st.json(rec)
+
+
 def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🕐 Market Open Monitor")
     st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
@@ -1555,6 +1690,10 @@ def render_tae_command_center() -> None:
     render_committee_runtime_panel(ctx)
     st.divider()
     render_allocation_runtime_panel(ctx)
+    st.divider()
+    render_meta_intelligence_panel(ctx)
+    st.divider()
+    render_unified_runtime_panel(ctx)
     st.divider()
     render_market_open_monitor_panel(ctx)
     st.divider()

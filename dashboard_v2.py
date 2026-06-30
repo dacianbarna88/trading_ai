@@ -1711,6 +1711,51 @@ with tabs[10]:
         elif len(strong) > 0:
             st.caption("Allocation enrichment columns not yet present — run scanner refresh allocation step.")
 
+        meta_cols = [
+            "Ticker", "Score", "Signal",
+            "Meta_Score", "Meta_Confidence", "Meta_Health", "Meta_Strategy_Rank",
+            "Meta_Ecosystem_Status", "Unified_Runtime_Score",
+        ]
+        strong_meta_cols = [c for c in meta_cols if c in pro.columns]
+        if len(strong) > 0 and len(strong_meta_cols) >= 4:
+            st.subheader("🧠 STRONG BUY — Meta Intelligence")
+            st.dataframe(strong[strong_meta_cols], width="stretch")
+        elif len(strong) > 0:
+            st.caption("Meta enrichment columns not yet present — run scanner refresh meta step.")
+
+        if "Unified_Runtime_Score" in pro.columns and len(strong) > 0:
+            st.subheader("🏆 Top Unified Runtime Candidates")
+            unified = strong.sort_values("Unified_Runtime_Score", ascending=False)
+            ucols = [c for c in ["Ticker", "Score", "Unified_Runtime_Score", "Meta_Score", "Signal"] if c in unified.columns]
+            st.dataframe(unified[ucols].head(10), width="stretch")
+
+        unified_ssot_path = Path("tae_unified_runtime.json")
+        if unified_ssot_path.is_file():
+            try:
+                with unified_ssot_path.open(encoding="utf-8") as handle:
+                    unified_ssot = json.load(handle)
+                summary = unified_ssot.get("advisory_summary") or {}
+                top_unified = summary.get("top_unified_candidates") or []
+                if top_unified:
+                    st.subheader("🔗 UNIFIED RUNTIME SSOT")
+                    st.caption(
+                        f"Records: {summary.get('record_count')} · "
+                        f"Avg score: {(summary.get('unified_runtime_score_summary') or {}).get('avg')} · "
+                        f"Avg confidence: {(summary.get('confidence_summary') or {}).get('avg')}"
+                    )
+                    st.dataframe(pd.DataFrame(top_unified[:10]), width="stretch")
+                    with st.expander("Expand Unified Runtime Records", expanded=False):
+                        for rec in (unified_ssot.get("records_list") or [])[:10]:
+                            ticker = rec.get("Ticker")
+                            st.markdown(
+                                f"**{ticker}** — score={rec.get('Unified_Runtime_Score')} "
+                                f"confidence={rec.get('Unified_Runtime_Confidence')} "
+                                f"recommendation={rec.get('Unified_Runtime_Recommendation')}"
+                            )
+                            st.json(rec)
+            except (OSError, json.JSONDecodeError, ValueError):
+                st.caption("Unified runtime SSOT present but could not be parsed.")
+
         preferred_cols = [
             "Time", "Ticker", "Price", "Score", "Signal", "RSI",
             "SMA20", "SMA50", "Volume", "Avg_Volume_20", "Breakout_20"

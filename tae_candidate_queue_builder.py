@@ -218,6 +218,10 @@ class QueueCandidate:
     allocation_bonus: float = 0.0
     allocation_score: float | None = None
     allocation_confidence: float | None = None
+    meta_bonus: float = 0.0
+    meta_score: float | None = None
+    meta_confidence: float | None = None
+    unified_runtime_score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -249,6 +253,10 @@ class QueueCandidate:
             "allocation_bonus": round(self.allocation_bonus, 4),
             "allocation_score": self.allocation_score,
             "allocation_confidence": self.allocation_confidence,
+            "meta_bonus": round(self.meta_bonus, 4),
+            "meta_score": self.meta_score,
+            "meta_confidence": self.meta_confidence,
+            "unified_runtime_score": self.unified_runtime_score,
         }
 
 
@@ -330,138 +338,55 @@ class CandidateQueueBuilder:
         if artifact_name not in merged[ticker].sources_all:
             merged[ticker].sources_all.append(artifact_name)
 
-    def _load_live_signals_context(self) -> dict[str, dict[str, Any]]:
-        by_ticker: dict[str, dict[str, Any]] = {}
-        for row in _read_csv_rows(self.root / "live_signals.csv"):
-            ticker = str(row.get("Ticker") or "").upper()
-            if ticker:
-                by_ticker[ticker] = row
-        return by_ticker
-
-    def _load_learning_context(self) -> dict[str, Any]:
-        payload = _load_json(self.root / "tae_learning_runtime.json") or {}
-        return payload.get("advisory_summary") or {}
-
-    def _load_allocation_context(self) -> dict[str, Any]:
-        enrich = _load_json(self.root / "tae_live_signals_allocation_enrich.json") or {}
-        if enrich.get("advisory_summary"):
-            return enrich["advisory_summary"]
-        runtime = _load_json(self.root / "tae_strategic_allocation_runtime.json") or {}
-        return runtime.get("advisory_summary") or {}
-
-    def _load_committee_context(self) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
-        by_ticker: dict[str, dict[str, Any]] = {}
-        global_summary: dict[str, Any] = {}
-
-        enrich_path = self.root / "tae_live_signals_committee_enrich.json"
-        payload = _load_json(enrich_path)
-        if payload:
-            global_summary = payload.get("advisory_summary") or {}
-            for item in payload.get("strong_buy_committee_summary") or []:
-                ticker = str(item.get("ticker") or "").upper()
-                if ticker:
-                    by_ticker[ticker] = item
-
-        signals_path = self.root / "live_signals.csv"
-        for row in _read_csv_rows(signals_path):
-            ticker = str(row.get("Ticker") or "").upper()
-            if not ticker or ticker in by_ticker:
-                continue
-            if row.get("Committee_Confidence"):
-                by_ticker[ticker] = row
-
-        if not global_summary:
-            runtime = _load_json(self.root / "tae_committee_runtime.json") or {}
-            global_summary = runtime.get("advisory_summary") or {}
-
-        return by_ticker, global_summary
+    def _load_unified_runtime(self) -> tuple[dict[str, dict[str, Any]], dict[str, Any], dict[str, Any]]:
+        payload = _load_json(self.root / "tae_unified_runtime.json") or {}
+        records = payload.get("records") or {}
+        if not isinstance(records, dict):
+            records = {}
+        by_ticker = {
+            str(k).upper(): v for k, v in records.items() if isinstance(v, dict)
+        }
+        if not by_ticker and payload.get("records_list"):
+            by_ticker = {
+                str(r.get("Ticker") or "").upper(): r
+                for r in payload["records_list"]
+                if isinstance(r, dict) and r.get("Ticker")
+            }
+        return by_ticker, payload.get("advisory_summary") or {}, payload
 
     def _apply_runtime_bonuses(
         self,
         merged: dict[str, QueueCandidate],
-        signals_ctx: dict[str, dict[str, Any]],
-        committee_by_ticker: dict[str, dict[str, Any]],
-        committee_global: dict[str, Any],
-        learning_global: dict[str, Any],
-        allocation_global: dict[str, Any],
+        unified_by_ticker: dict[str, dict[str, Any]],
     ) -> None:
-        weighted = committee_global.get("weighted_decisions") or {}
-        global_decision = str(weighted.get("final_decision") or "WAIT").upper()
-        learning_score = _parse_float(learning_global.get("learning_health_score"))
-
         for record in merged.values():
-            ctx = signals_ctx.get(record.ticker, {})
-            if not ctx and record.ticker in committee_by_ticker:
-                ctx = committee_by_ticker[record.ticker]
+            ctx = unified_by_ticker.get(record.ticker, {})
 
-            hist_edge = str(ctx.get("Historical_Edge") or "")
-            hist_conf = _parse_float(ctx.get("Historical_Confidence"))
-            historical_bonus = 0.0
-            if hist_edge == "POSITIVE":
-                historical_bonus += 1.5
-            elif hist_edge == "WEAK":
-                historical_bonus -= 1.0
-            if hist_conf is not None and hist_conf >= 70:
-                historical_bonus += (hist_conf - 50) * 0.03
+            record.committee_decision = str(ctx.get("Committee_Decision") or "") or None
+            record.committee_confidence = _parse_float(ctx.get("Committee_Confidence"))
+            record.committee_weighted_score = _parse_float(ctx.get("Committee_Weighted_Score"))
+            record.allocation_score = _parse_float(ctx.get("Allocation_Score"))
+            record.allocation_confidence = _parse_float(ctx.get("Allocation_Confidence"))
+            record.meta_score = _parse_float(ctx.get("Meta_Score"))
+            record.meta_confidence = _parse_float(ctx.get("Meta_Confidence"))
+            record.unified_runtime_score = _parse_float(ctx.get("Unified_Runtime_Score"))
 
-            res_conf = _parse_float(ctx.get("Research_Confidence"))
-            research_bonus = 0.0
-            if res_conf is not None and res_conf >= 65:
-                research_bonus += (res_conf - 50) * 0.03
+            record.historical_bonus = round(_parse_float(ctx.get("historical_bonus")) or 0.0, 4)
+            record.research_bonus = round(_parse_float(ctx.get("research_bonus")) or 0.0, 4)
+            record.committee_bonus = round(_parse_float(ctx.get("committee_bonus")) or 0.0, 4)
+            record.learning_bonus = round(_parse_float(ctx.get("learning_bonus")) or 0.0, 4)
+            record.allocation_bonus = round(_parse_float(ctx.get("allocation_bonus")) or 0.0, 4)
+            record.meta_bonus = round(_parse_float(ctx.get("meta_bonus")) or 0.0, 4)
 
-            committee_ctx = committee_by_ticker.get(record.ticker, ctx)
-            conf = _parse_float(committee_ctx.get("Committee_Confidence"))
-            w_score = _parse_float(committee_ctx.get("Committee_Weighted_Score"))
-            decision = str(committee_ctx.get("Committee_Decision") or global_decision).upper()
-            record.committee_decision = decision or None
-            record.committee_confidence = conf
-            record.committee_weighted_score = w_score
+            if ctx.get("Signal") and not record.signal:
+                record.signal = str(ctx.get("Signal") or "").strip() or None
+            if ctx.get("Scanner_Score") is not None and record.scanner_score is None:
+                record.scanner_score = _parse_float(ctx.get("Scanner_Score"))
 
-            committee_bonus = 0.0
-            if global_decision in {"BUY", "BUY_ALIGNED", "ACCUMULATE_US_TECH", "AGGRESSIVE", "NORMAL"}:
-                committee_bonus += 2.0
-            elif global_decision in {"SELL", "DEFENSIVE"}:
-                committee_bonus -= 3.0
-            if conf is not None and conf >= 70:
-                committee_bonus += (conf - 50) * 0.04
-            if record.signal and str(record.signal).upper() == "STRONG BUY":
-                if decision in {"BUY", "BUY_ALIGNED"}:
-                    committee_bonus += 2.0
-                elif decision == "CONFLICT":
-                    committee_bonus -= 1.0
-
-            learning_bonus = 0.0
-            if learning_score is not None and learning_score >= 60:
-                learning_bonus += (learning_score - 50) * 0.02
-
-            alloc_score = _parse_float(ctx.get("Allocation_Score"))
-            alloc_conf = _parse_float(ctx.get("Allocation_Confidence"))
-            record.allocation_score = alloc_score
-            record.allocation_confidence = alloc_conf
-            allocation_bonus = 0.0
-            if alloc_score is not None and alloc_score >= 55:
-                allocation_bonus += (alloc_score - 50) * 0.04
-            if alloc_conf is not None and alloc_conf >= 70:
-                allocation_bonus += (alloc_conf - 50) * 0.02
-            portfolio_score = _parse_float(allocation_global.get("portfolio_score"))
-            if portfolio_score is not None and portfolio_score >= 60:
-                allocation_bonus += (portfolio_score - 50) * 0.02
-
-            record.historical_bonus = round(historical_bonus, 4)
-            record.research_bonus = round(research_bonus, 4)
-            record.committee_bonus = round(committee_bonus, 4)
-            record.learning_bonus = round(learning_bonus, 4)
-            record.allocation_bonus = round(allocation_bonus, 4)
-
-            total_bonus = (
-                record.historical_bonus
-                + record.research_bonus
-                + record.committee_bonus
-                + record.learning_bonus
-                + record.allocation_bonus
-            )
-            if total_bonus:
-                record.rank_score += total_bonus
+            if record.unified_runtime_score is not None:
+                record.rank_score = record.unified_runtime_score
+            elif record.scanner_score is not None:
+                record.rank_score = record.scanner_score
 
     def _load_candidates(self) -> dict[str, QueueCandidate]:
         merged: dict[str, QueueCandidate] = {}
@@ -577,18 +502,9 @@ class CandidateQueueBuilder:
 
         merged = self._load_candidates()
 
-        signals_ctx = self._load_live_signals_context()
-        committee_by_ticker, committee_global = self._load_committee_context()
-        learning_global = self._load_learning_context()
-        allocation_global = self._load_allocation_context()
-        self._apply_runtime_bonuses(
-            merged,
-            signals_ctx,
-            committee_by_ticker,
-            committee_global,
-            learning_global,
-            allocation_global,
-        )
+        unified_by_ticker, unified_summary, unified_payload = self._load_unified_runtime()
+        self._apply_runtime_bonuses(merged, unified_by_ticker)
+        learning_global = unified_payload.get("learning_global") or {}
 
         exit_warnings: dict[str, bool] = {}
         ranking_path = self.root / "global_opportunity_ranking.csv"
@@ -668,14 +584,15 @@ class CandidateQueueBuilder:
                 "current_open_positions": len(open_positions),
                 "global_data_sufficient": global_data_sufficient,
                 "recommended_action": recommended_action,
-                "committee_consensus": committee_global.get("committee_consensus"),
-                "committee_decision": (committee_global.get("weighted_decisions") or {}).get(
-                    "final_decision"
+                "unified_runtime_ssot": True,
+                "ssot_record_count": unified_summary.get("record_count"),
+                "learning_health_score": learning_global.get("Learning_Health_Score"),
+                "unified_runtime_avg": (unified_summary.get("unified_runtime_score_summary") or {}).get(
+                    "avg"
                 ),
-                "committee_confidence": committee_global.get("committee_confidence"),
-                "learning_health_score": learning_global.get("learning_health_score"),
-                "allocation_confidence": allocation_global.get("allocation_confidence"),
-                "allocation_portfolio_score": allocation_global.get("portfolio_score"),
+                "unified_runtime_confidence_avg": (
+                    unified_summary.get("confidence_summary") or {}
+                ).get("avg"),
             },
             "classification_counts": counts,
             "sources": self.sources_meta,

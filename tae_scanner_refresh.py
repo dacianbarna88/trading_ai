@@ -213,9 +213,30 @@ def _build_steps(root: Path) -> list[StepSpec]:
             needs_pythonpath=True,
         ),
         StepSpec(
+            name="meta_intelligence_runtime",
+            command=[PYTHON, str(root / "tae_meta_intelligence_runtime.py")],
+            artifact="tae_meta_intelligence_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="live_signals_meta_enrich",
+            command=[PYTHON, str(root / "tae_live_signals_meta_enrich.py")],
+            artifact="tae_live_signals_meta_enrich.json",
+            requires_artifacts=("live_signals.csv",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="unified_runtime",
+            command=[PYTHON, str(root / "tae_unified_runtime.py")],
+            artifact="tae_unified_runtime.json",
+            requires_artifacts=("live_signals.csv",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
             name="candidate_queue_builder",
             command=[PYTHON, str(root / "tae_candidate_queue_builder.py")],
             artifact="tae_candidate_queue.json",
+            requires_artifacts=("tae_unified_runtime.json",),
         ),
         StepSpec(
             name="watchlist_proposal",
