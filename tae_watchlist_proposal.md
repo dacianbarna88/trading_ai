@@ -1,6 +1,6 @@
 # TAE Watchlist Proposal
 
-**Generated:** 2026-06-30T12:30:23.139046+00:00
+**Generated:** 2026-06-30T13:12:25.915233+00:00
 **Mode:** PAPER_ONLY_ADVISORY
 **Safety:** PAPER_ONLY | ADVISORY_ONLY | NO_BROKER | NO_EXECUTION | NO_PORTFOLIO_CHANGE | NO_WATCHLIST_WRITE
 
@@ -15,15 +15,15 @@
 
 ## Sources
 
-- `global_candidates.csv`: present=True status=OK rows=15 age_h=0.02
-- `global_market_scanner.csv`: present=True status=OK rows=10 age_h=0.02
-- `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.02
-- `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.15
-- `regional_strength.csv`: present=True status=OK rows=4 age_h=0.02
-- `sector_rotation.csv`: present=True status=OK rows=11 age_h=0.02
-- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=0.02
-- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=0.02
-- `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.16
+- `global_candidates.csv`: present=True status=OK rows=15 age_h=0.03
+- `global_market_scanner.csv`: present=True status=OK rows=10 age_h=0.03
+- `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.03
+- `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.85
+- `regional_strength.csv`: present=True status=OK rows=4 age_h=0.03
+- `sector_rotation.csv`: present=True status=OK rows=11 age_h=0.03
+- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=0.0
+- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=0.0
+- `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.86
 
 ## Recommended Additions (max 10)
 
@@ -31,16 +31,16 @@
 
 ## Top 10 (all sources)
 
-- QQQ (US) rank=96.05 [already_held] source=global_opportunity_ranking.csv
-- SPY (US) rank=96.05 [already_held] source=global_opportunity_ranking.csv
-- PG (US) rank=95.15 [already_in_watchlist] source=watchlist_candidates.csv
-- PM (US) rank=95.15 [already_in_watchlist] source=watchlist_candidates.csv
-- MC.PA (EU) rank=87.08 [already_held] source=global_opportunity_ranking.csv
-- PANW (US) rank=87.08 [market_closed] source=watchlist_candidates.csv
-- DIA (US) rank=86.48 [already_in_watchlist] source=watchlist_candidates.csv
-- ULVR.L (UK) rank=86.48 [already_held] source=global_opportunity_ranking.csv
-- V (US) rank=86.48 [market_closed] source=watchlist_candidates.csv
-- MU (US) rank=85.58 [already_in_watchlist] source=watchlist_candidates.csv
+- QQQ (US) rank=99.2 [already_held] source=global_opportunity_ranking.csv
+- SPY (US) rank=99.2 [already_held] source=global_opportunity_ranking.csv
+- PG (US) rank=98.3 [already_in_watchlist] source=watchlist_candidates.csv
+- PM (US) rank=98.3 [already_in_watchlist] source=watchlist_candidates.csv
+- DIA (US) rank=92.32 [already_in_watchlist] source=watchlist_candidates.csv
+- PANW (US) rank=91.93 [market_closed] source=watchlist_candidates.csv
+- MU (US) rank=91.42 [already_in_watchlist] source=watchlist_candidates.csv
+- V (US) rank=91.33 [market_closed] source=watchlist_candidates.csv
+- MC.PA (EU) rank=89.9 [already_held] source=global_opportunity_ranking.csv
+- MA (US) rank=88.04 [market_closed] source=watchlist_candidates.csv
 
 ## Risk Notes
 
@@ -55,7 +55,7 @@
 
 - Registry verdict: CANDIDATE_STRATEGY_REGISTRY_READY
 - Strategy `SCORE_90_PLUS_NO_CLOSED_FREEZE` score=0.9315 decision=STRONG_PAPER_CANDIDATE
-- Strategy `LIVE_BASELINE` score=0.2688 decision=BASELINE_REFERENCE
+- Strategy `LIVE_BASELINE` score=0.2934 decision=BASELINE_REFERENCE
 - Strategy `SCORE_100_CURRENT_ONLY` score=0.2529 decision=INSUFFICIENT_SAMPLE
 
 ## Governance

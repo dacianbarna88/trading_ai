@@ -251,6 +251,12 @@ def _build_steps(root: Path) -> list[StepSpec]:
             needs_pythonpath=True,
         ),
         StepSpec(
+            name="ecosystem_runtime",
+            command=[PYTHON, str(root / "tae_ecosystem_runtime.py")],
+            artifact="tae_ecosystem_runtime.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
             name="unified_runtime",
             command=[PYTHON, str(root / "tae_unified_runtime.py")],
             artifact="tae_unified_runtime.json",

@@ -63,6 +63,7 @@ ARTIFACT_PATHS = {
     "strategy_simulation_runtime": "tae_strategy_simulation_runtime.json",
     "event_memory_runtime": "tae_event_memory_runtime.json",
     "counterfactual_runtime": "tae_counterfactual_runtime.json",
+    "ecosystem_runtime": "tae_ecosystem_runtime.json",
 }
 
 SCANNER_CSV_ARTIFACTS = (
@@ -301,6 +302,8 @@ class TAECommandCenterContext:
     event_memory_runtime_status: str = "MISSING"
     counterfactual_runtime: dict[str, Any] = field(default_factory=dict)
     counterfactual_runtime_status: str = "MISSING"
+    ecosystem_runtime: dict[str, Any] = field(default_factory=dict)
+    ecosystem_runtime_status: str = "MISSING"
     scanner_refresh_cron: str = "UNKNOWN"
     watchlist_count: int | None = None
     x9_event_count: int | None = None
@@ -576,6 +579,12 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.counterfactual_runtime_status = cf_st
     status["tae_counterfactual_runtime.json"] = cf_st
 
+    eco_path = root / ARTIFACT_PATHS["ecosystem_runtime"]
+    eco_runtime, eco_st = _safe_read_json(eco_path)
+    ctx.ecosystem_runtime = eco_runtime or {}
+    ctx.ecosystem_runtime_status = eco_st
+    status["tae_ecosystem_runtime.json"] = eco_st
+
     ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
     ctx.watchlist_count = _count_watchlist_tickers(root)
     ctx.x9_event_count = _shadow_event_count(root)
@@ -607,6 +616,7 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "strategy_simulation_runtime",
             "event_memory_runtime",
             "counterfactual_runtime",
+            "ecosystem_runtime",
             "bot_status",
             "session_guard_log",
             "project_book",
@@ -1742,6 +1752,54 @@ def render_event_memory_counterfactual_panel(ctx: TAECommandCenterContext) -> No
             st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
+def render_ecosystem_evidence_daily_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🌐 Ecosystem / Evidence / Daily Intelligence")
+    st.caption(
+        f"Artifact: tae_ecosystem_runtime.json ({ctx.ecosystem_runtime_status})"
+    )
+
+    eco = ctx.ecosystem_runtime.get("advisory_summary") or ctx.unified_runtime.get(
+        "ecosystem_global"
+    ) or {}
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Ecosystem Run", _fmt(eco.get("ecosystem_run_status")))
+    c2.metric("Evidence Gate", _fmt(eco.get("evidence_gate")))
+    c3.metric("Evidence Score", _fmt(eco.get("evidence_score")))
+    c4.metric("Daily Intel Score", _fmt(eco.get("daily_intelligence_score")))
+    c5.metric("Daily Health", _fmt(eco.get("daily_ecosystem_health")))
+
+    top_evidence = eco.get("top_evidence_candidates") or []
+    if top_evidence:
+        st.markdown("**Top Evidence Candidates**")
+        st.dataframe(pd.DataFrame(top_evidence), width="stretch", hide_index=True)
+
+    top_daily = eco.get("top_daily_intelligence_candidates") or []
+    if top_daily:
+        st.markdown("**Top Daily Intelligence Candidates**")
+        st.dataframe(pd.DataFrame(top_daily), width="stretch", hide_index=True)
+
+    ssot = ctx.unified_runtime.get("records_list") or []
+    if ssot:
+        rows = []
+        for rec in ssot[:15]:
+            rows.append(
+                {
+                    "Ticker": rec.get("Ticker"),
+                    "Ecosystem_Run_Status": rec.get("Ecosystem_Run_Status"),
+                    "Evidence_Score": rec.get("Evidence_Score"),
+                    "Evidence_Gate": rec.get("Evidence_Gate"),
+                    "Daily_Intelligence_Score": rec.get("Daily_Intelligence_Score"),
+                    "ecosystem_bonus": rec.get("ecosystem_bonus"),
+                    "evidence_bonus": rec.get("evidence_bonus"),
+                    "daily_intelligence_bonus": rec.get("daily_intelligence_bonus"),
+                }
+            )
+        if rows:
+            st.markdown("**Per-ticker ecosystem SSOT**")
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+
 def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("🕐 Market Open Monitor")
     st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
@@ -1847,6 +1905,8 @@ def render_tae_command_center() -> None:
     render_strategy_discovery_simulation_panel(ctx)
     st.divider()
     render_event_memory_counterfactual_panel(ctx)
+    st.divider()
+    render_ecosystem_evidence_daily_panel(ctx)
     st.divider()
     render_unified_runtime_panel(ctx)
     st.divider()

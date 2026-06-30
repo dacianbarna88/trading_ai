@@ -1758,6 +1758,15 @@ with tabs[10]:
                         f"Shadow events: {cf_global.get('shadow_total_events')} · "
                         f"Alt return: {cf_global.get('expected_alternative_return')}"
                     )
+                eco_global = unified_ssot.get("ecosystem_global") or {}
+                if eco_global:
+                    st.subheader("🌐 ECOSYSTEM / EVIDENCE / DAILY INTELLIGENCE")
+                    st.caption(
+                        f"Run: {eco_global.get('ecosystem_run_status')} · "
+                        f"Evidence: {eco_global.get('evidence_verdict')} · "
+                        f"Gate: {eco_global.get('evidence_gate')} · "
+                        f"Daily score: {eco_global.get('daily_intelligence_score')}"
+                    )
                 summary = unified_ssot.get("advisory_summary") or {}
                 top_unified = summary.get("top_unified_candidates") or []
                 if top_unified:

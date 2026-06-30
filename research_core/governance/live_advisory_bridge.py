@@ -769,6 +769,17 @@ class LiveAdvisoryBridge:
         except Exception:
             return {}
 
+    def _load_ecosystem_summary(self) -> dict[str, Any]:
+        payload, _ = _load_json(self._path("tae_ecosystem_runtime.json"))
+        if payload and payload.get("advisory_summary"):
+            return payload["advisory_summary"]
+        try:
+            from research_core.ecosystem_runtime.ecosystem_context import EcosystemContext
+
+            return EcosystemContext.load(self._root).advisory_summary()
+        except Exception:
+            return {}
+
     @staticmethod
     def _dominant_verdict(index: dict[str, Any] | None) -> str | None:
         if not index:
@@ -1287,6 +1298,34 @@ class LiveAdvisoryBridge:
                 reasons.append(f"[COUNTERFACTUAL_CONTEXT] Entry ticker: {ticker}")
             for ticker in cf_summary.get("top_exit_tickers") or []:
                 reasons.append(f"[COUNTERFACTUAL_CONTEXT] Exit ticker: {ticker}")
+
+        eco_summary = self._load_ecosystem_summary()
+        if eco_summary:
+            reasons.append(
+                f"[ECOSYSTEM_CONTEXT] Run: {eco_summary.get('ecosystem_run_status')} "
+                f"Orchestrator: {eco_summary.get('orchestrator_status')}"
+            )
+            reasons.append(
+                f"[EVIDENCE_CONTEXT] Verdict: {eco_summary.get('evidence_verdict')} "
+                f"Gate: {eco_summary.get('evidence_gate')} "
+                f"score={eco_summary.get('evidence_score')} "
+                f"allowed={eco_summary.get('evidence_allowed_count')}"
+            )
+            for item in eco_summary.get("top_evidence_candidates") or []:
+                reasons.append(
+                    f"[EVIDENCE_CONTEXT] Candidate: {item.get('evidence_id')} "
+                    f"gate={item.get('gate_status')}"
+                )
+            reasons.append(
+                f"[DAILY_INTELLIGENCE_CONTEXT] Score: {eco_summary.get('daily_intelligence_score')} "
+                f"health={eco_summary.get('daily_ecosystem_health')} "
+                f"legacy_runner={eco_summary.get('legacy_daily_runner_present')}"
+            )
+            for item in eco_summary.get("top_daily_intelligence_candidates") or []:
+                reasons.append(
+                    f"[DAILY_INTELLIGENCE_CONTEXT] Priority: {item.get('title')} "
+                    f"score={item.get('priority_score')}"
+                )
 
         confidence = max(0, min(100, confidence))
 

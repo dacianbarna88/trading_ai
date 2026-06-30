@@ -228,6 +228,9 @@ class QueueCandidate:
     entry_bonus: float = 0.0
     exit_bonus: float = 0.0
     shadow_bonus: float = 0.0
+    ecosystem_bonus: float = 0.0
+    evidence_bonus: float = 0.0
+    daily_intelligence_bonus: float = 0.0
     unified_runtime_score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -270,6 +273,9 @@ class QueueCandidate:
             "entry_bonus": round(self.entry_bonus, 4),
             "exit_bonus": round(self.exit_bonus, 4),
             "shadow_bonus": round(self.shadow_bonus, 4),
+            "ecosystem_bonus": round(self.ecosystem_bonus, 4),
+            "evidence_bonus": round(self.evidence_bonus, 4),
+            "daily_intelligence_bonus": round(self.daily_intelligence_bonus, 4),
             "unified_runtime_score": self.unified_runtime_score,
         }
 
@@ -391,6 +397,11 @@ class CandidateQueueBuilder:
             record.entry_bonus = round(_parse_float(ctx.get("entry_bonus")) or 0.0, 4)
             record.exit_bonus = round(_parse_float(ctx.get("exit_bonus")) or 0.0, 4)
             record.shadow_bonus = round(_parse_float(ctx.get("shadow_bonus")) or 0.0, 4)
+            record.ecosystem_bonus = round(_parse_float(ctx.get("ecosystem_bonus")) or 0.0, 4)
+            record.evidence_bonus = round(_parse_float(ctx.get("evidence_bonus")) or 0.0, 4)
+            record.daily_intelligence_bonus = round(
+                _parse_float(ctx.get("daily_intelligence_bonus")) or 0.0, 4
+            )
 
             record.historical_bonus = round(_parse_float(ctx.get("historical_bonus")) or 0.0, 4)
             record.research_bonus = round(_parse_float(ctx.get("research_bonus")) or 0.0, 4)
