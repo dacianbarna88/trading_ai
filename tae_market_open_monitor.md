@@ -1,7 +1,7 @@
 # TAE Market Open Monitor
 
-**Verdict:** WARNING
-**Generated:** 2026-06-30T08:25:20.508719+00:00
+**Verdict:** PASS
+**Generated:** 2026-06-30T10:11:05.417032+00:00
 
 ## Summary
 
@@ -9,7 +9,7 @@
 - Bot: **RUNNING** (pid=16525, alive=False)
 - Dashboard: **RUNNING** (port8501=True)
 - DRY_RUN live mode: **True** (source=default_live)
-- Session guard last run: 2026-06-30 11:25:02
+- Session guard last run: 2026-06-30 13:10:01
 - Startup runner last run: Tue Jun 30 10:55:14 EEST 2026
 
 ## Q&A
@@ -24,11 +24,7 @@
 - **8_bot_fail_if_open_and_stopped**: False
 - **9_bot_running_no_signals_warning**: False
 - **10_x9_empty_before_open_ok**: False
-- **11_x9_empty_after_buy_eval_warning**: True
-
-## Warnings
-
-- X.9 ledger has no events after market open / BUY evaluation window
+- **11_x9_empty_after_buy_eval_warning**: False
 
 ## Sleep / Wake Readiness
 
@@ -43,8 +39,8 @@
 - awake_guard_executable: True
 - market_guard_executable: True
 - last_startup_runner_time: Tue Jun 30 10:55:14 EEST 2026
-- last_startup_runner_age_hours: 0.5
-- last_session_guard_time: 2026-06-30 11:25:02
-- last_session_guard_age_hours: 0.01
+- last_startup_runner_age_hours: 2.26
+- last_session_guard_time: 2026-06-30 13:10:01
+- last_session_guard_age_hours: 0.02
 - verdict: READY
 - note: Sleep/wake cannot be simulated; chain checks LaunchAgent, executables, and recent startup/guard log timestamps.
