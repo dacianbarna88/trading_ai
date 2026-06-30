@@ -7,11 +7,14 @@ Does not modify live_bot.py, portfolio.csv, live_signals.csv, or execute trades.
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +23,8 @@ import streamlit as st
 
 PROJECT_ROOT = Path(".").resolve()
 REVIEW_SCRIPT = "tae_full_ecosystem_review.sh"
+SCANNER_REFRESH_SCRIPT = "tae_scanner_refresh.sh"
+CSV_STALE_MAX_AGE_HOURS = 168.0
 
 ARTIFACT_PATHS = {
     "ecosystem_review_json": "tae_full_ecosystem_review.json",
@@ -39,7 +44,109 @@ ARTIFACT_PATHS = {
     "session_guard_log": "market_session_guard.log",
     "candidate_queue": "tae_candidate_queue.json",
     "watchlist_proposal": "tae_watchlist_proposal.json",
+    "scanner_refresh": "tae_scanner_refresh.json",
+    "actionable_audit": "tae_actionable_signal_audit.json",
+    "market_monitor": "tae_market_open_monitor.json",
+    "watchlist": "watchlist.txt",
 }
+
+SCANNER_CSV_ARTIFACTS = (
+    "global_market_scanner.csv",
+    "regional_strength.csv",
+    "sector_rotation.csv",
+    "watchlist_candidates.csv",
+    "multi_market_candidates.csv",
+    "global_candidates.csv",
+    "global_opportunity_ranking.csv",
+)
+
+
+def _csv_artifact_meta(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {"present": False, "status": "MISSING", "path": str(path.name)}
+    age_hours = (time.time() - path.stat().st_mtime) / 3600.0
+    status = "STALE" if age_hours > CSV_STALE_MAX_AGE_HOURS else "OK"
+    row_count: int | None = None
+    try:
+        with path.open(encoding="utf-8", errors="replace", newline="") as handle:
+            row_count = sum(1 for _ in csv.DictReader(handle))
+    except OSError:
+        row_count = None
+    return {
+        "present": True,
+        "status": status,
+        "path": str(path.name),
+        "row_count": row_count,
+        "freshness_hours": round(age_hours, 2),
+        "artifact_mtime": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(),
+    }
+
+
+def _detect_scanner_refresh_cron() -> str:
+    try:
+        result = subprocess.run(
+            ["crontab", "-l"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "UNKNOWN"
+    if result.returncode != 0:
+        return "UNKNOWN"
+    if "tae_scanner_refresh.sh" in (result.stdout or ""):
+        return "INSTALLED"
+    return "NOT_INSTALLED"
+
+
+def _run_tae_command(
+    label: str,
+    command: list[str],
+    *,
+    timeout: int = 600,
+    shell: bool = False,
+) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            shell=shell,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"{label} timed out after {timeout}s"
+    except OSError as exc:
+        return False, f"{label} failed: {exc}"
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0:
+        return False, output or f"{label} exit code {result.returncode}"
+    return True, output
+
+
+def _count_watchlist_tickers(root: Path) -> int | None:
+    path = root / ARTIFACT_PATHS["watchlist"]
+    if not path.is_file():
+        return None
+    return sum(
+        1
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    )
+
+
+def _shadow_event_count(root: Path) -> int | None:
+    path = root / ARTIFACT_PATHS["shadow_events"]
+    if not path.is_file():
+        return None
+    try:
+        with path.open(encoding="utf-8", errors="replace", newline="") as handle:
+            return sum(1 for _ in csv.DictReader(handle))
+    except OSError:
+        return None
 
 
 def _safe_read_json(path: Path) -> tuple[dict[str, Any] | None, str]:
@@ -143,6 +250,15 @@ class TAECommandCenterContext:
     candidate_queue_status: str = "MISSING"
     watchlist_proposal: dict[str, Any] = field(default_factory=dict)
     watchlist_proposal_status: str = "MISSING"
+    scanner_refresh: dict[str, Any] = field(default_factory=dict)
+    scanner_refresh_status: str = "MISSING"
+    actionable_audit: dict[str, Any] = field(default_factory=dict)
+    actionable_audit_status: str = "MISSING"
+    market_monitor: dict[str, Any] = field(default_factory=dict)
+    market_monitor_status: str = "MISSING"
+    scanner_refresh_cron: str = "UNKNOWN"
+    watchlist_count: int | None = None
+    x9_event_count: int | None = None
 
     @property
     def runtime(self) -> dict[str, Any]:
@@ -307,6 +423,28 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.watchlist_proposal_status = proposal_st
     status["tae_watchlist_proposal.json"] = proposal_st
 
+    refresh_path = root / ARTIFACT_PATHS["scanner_refresh"]
+    scanner_refresh, refresh_st = _safe_read_json(refresh_path)
+    ctx.scanner_refresh = scanner_refresh or {}
+    ctx.scanner_refresh_status = refresh_st
+    status["tae_scanner_refresh.json"] = refresh_st
+
+    audit_path = root / ARTIFACT_PATHS["actionable_audit"]
+    actionable_audit, audit_st = _safe_read_json(audit_path)
+    ctx.actionable_audit = actionable_audit or {}
+    ctx.actionable_audit_status = audit_st
+    status["tae_actionable_signal_audit.json"] = audit_st
+
+    monitor_path = root / ARTIFACT_PATHS["market_monitor"]
+    market_monitor, monitor_st = _safe_read_json(monitor_path)
+    ctx.market_monitor = market_monitor or {}
+    ctx.market_monitor_status = monitor_st
+    status["tae_market_open_monitor.json"] = monitor_st
+
+    ctx.scanner_refresh_cron = _detect_scanner_refresh_cron()
+    ctx.watchlist_count = _count_watchlist_tickers(root)
+    ctx.x9_event_count = _shadow_event_count(root)
+
     for name, rel in ARTIFACT_PATHS.items():
         if name in {
             "ecosystem_review_json",
@@ -316,10 +454,14 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
             "execution_integrity",
             "candidate_queue",
             "watchlist_proposal",
+            "scanner_refresh",
+            "actionable_audit",
+            "market_monitor",
             "bot_status",
             "session_guard_log",
             "project_book",
             "session_start",
+            "watchlist",
         }:
             continue
         path = root / rel
@@ -363,28 +505,65 @@ def _metric_card(label: str, value: Any, *, help_text: str | None = None) -> Non
 
 
 def render_refresh_bar(ctx: TAECommandCenterContext) -> None:
-    col_btn, col_info = st.columns([1, 3])
-    with col_btn:
-        if st.button("🔄 Run Full Ecosystem Review", type="primary", key="tae_cc_refresh"):
+    st.markdown("**Refresh actions** (explicit — no auto-trading)")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        if st.button("🔄 Full Ecosystem Review", type="primary", key="tae_cc_refresh"):
             with st.spinner("Running tae_full_ecosystem_review.sh …"):
                 ok, output = run_full_ecosystem_review()
-            if ok:
-                st.session_state["tae_cc_last_refresh_ok"] = True
-                st.session_state["tae_cc_last_refresh_output"] = output[-4000:]
-                st.success("Ecosystem review completed.")
-                st.rerun()
-            else:
-                st.session_state["tae_cc_last_refresh_ok"] = False
-                st.session_state["tae_cc_last_refresh_output"] = output[-4000:]
-                st.error("Ecosystem review failed — dashboard still running.")
-    with col_info:
-        gen = ctx.review.get("generated_at") or ctx.advisory.get("generated_at")
-        st.caption(
-            f"UI/OBSERVABILITY ONLY · NO EXECUTION · "
-            f"Review: {ctx.review_status} · Generated: {gen or 'NO_DATA'}"
-        )
+            st.session_state["tae_cc_last_cmd"] = "Full Ecosystem Review"
+            st.session_state["tae_cc_last_refresh_ok"] = ok
+            st.session_state["tae_cc_last_refresh_output"] = output[-4000:]
+            st.success("Completed.") if ok else st.error("Failed.")
+            st.rerun()
+    with c2:
+        if st.button("📡 Scanner Refresh", key="tae_cc_scanner_refresh"):
+            with st.spinner("Running tae_scanner_refresh.sh …"):
+                ok, output = _run_tae_command(
+                    "Scanner Refresh",
+                    ["/bin/bash", str(PROJECT_ROOT / SCANNER_REFRESH_SCRIPT)],
+                    timeout=900,
+                )
+            st.session_state["tae_cc_last_cmd"] = "Scanner Refresh"
+            st.session_state["tae_cc_last_refresh_ok"] = ok
+            st.session_state["tae_cc_last_refresh_output"] = output[-4000:]
+            st.success("Completed.") if ok else st.error("Failed.")
+            st.rerun()
+    with c3:
+        if st.button("🎯 Actionable Signal Audit", key="tae_cc_actionable_audit"):
+            with st.spinner("Running tae_actionable_signal_audit.py …"):
+                ok, output = _run_tae_command(
+                    "Actionable Signal Audit",
+                    [sys.executable, "tae_actionable_signal_audit.py"],
+                    timeout=120,
+                )
+            st.session_state["tae_cc_last_cmd"] = "Actionable Signal Audit"
+            st.session_state["tae_cc_last_refresh_ok"] = ok
+            st.session_state["tae_cc_last_refresh_output"] = output[-4000:]
+            st.success("Completed.") if ok else st.error("Failed.")
+            st.rerun()
+    with c4:
+        if st.button("🌍 Candidate Queue Builder", key="tae_cc_candidate_queue"):
+            with st.spinner("Running tae_candidate_queue_builder.py …"):
+                ok, output = _run_tae_command(
+                    "Candidate Queue Builder",
+                    [sys.executable, "tae_candidate_queue_builder.py"],
+                    timeout=120,
+                )
+            st.session_state["tae_cc_last_cmd"] = "Candidate Queue Builder"
+            st.session_state["tae_cc_last_refresh_ok"] = ok
+            st.session_state["tae_cc_last_refresh_output"] = output[-4000:]
+            st.success("Completed.") if ok else st.error("Failed.")
+            st.rerun()
+
+    gen = ctx.review.get("generated_at") or ctx.advisory.get("generated_at")
+    st.caption(
+        f"UI/OBSERVABILITY ONLY · NO EXECUTION · Review: {ctx.review_status} · "
+        f"Generated: {gen or 'NO_DATA'}"
+    )
     if st.session_state.get("tae_cc_last_refresh_output"):
-        with st.expander("Last review run output", expanded=not st.session_state.get("tae_cc_last_refresh_ok", True)):
+        title = st.session_state.get("tae_cc_last_cmd", "Last command")
+        with st.expander(f"{title} output", expanded=not st.session_state.get("tae_cc_last_refresh_ok", True)):
             st.code(st.session_state["tae_cc_last_refresh_output"])
 
 
@@ -426,24 +605,34 @@ def render_command_center_metrics(ctx: TAECommandCenterContext) -> None:
 
     x9_label = mor.get("x9_ledger_readiness") or x9.get("readiness_label", "NO_DATA")
 
+    refresh = ctx.scanner_refresh
+    queue_summary = (ctx.candidate_queue.get("summary") or {}) if ctx.candidate_queue_status == "OK" else {}
+    audit_summary = (ctx.actionable_audit.get("summary") or {}) if ctx.actionable_audit_status == "OK" else {}
+
     rows = [
         [
+            ("Scanner Refresh", refresh.get("final_verdict", ctx.scanner_refresh_status)),
+            ("Candidate Queue Action", queue_summary.get("recommended_action", "NO_DATA")),
+            ("Actionable BUY New", audit_summary.get("strong_buy_actionable_new", "NO_DATA")),
+            ("Market Closed BUY", audit_summary.get("strong_buy_market_closed", "NO_DATA")),
+        ],
+        [
+            ("X.9 Event Count", ctx.x9_event_count if ctx.x9_event_count is not None else "NO_DATA"),
+            ("Watchlist Count", ctx.watchlist_count if ctx.watchlist_count is not None else "NO_DATA"),
             ("Ecosystem Verdict", ctx.final.get("ecosystem_verdict", "NO_DATA")),
             ("Bot Status", rt.get("bot_status_effective") or ctx.bot_status),
+        ],
+        [
             ("Dashboard Status", rt.get("dashboard_process_status", "NO_DATA")),
             ("Market Readiness", ctx.market.get("verdict") or mor.get("market_readiness_verdict", "NO_DATA")),
-        ],
-        [
             ("Advisory Action", adv.get("action", "NO_DATA")),
             ("Blocks New BUY", blocks),
-            ("Effective Capital", fin.get("effective_contributed_capital")),
-            ("Account Value", fin.get("account_value_corrected")),
         ],
         [
+            ("Effective Capital", fin.get("effective_contributed_capital")),
+            ("Account Value", fin.get("account_value_corrected")),
             ("Trading PnL", fin.get("corrected_total_pnl_excluding_cash_deposits")),
             ("Cash", fin.get("cash_available")),
-            ("Open Positions Value", fin.get("open_positions_value")),
-            ("Data Quality", fin.get("data_quality_status", "NO_DATA")),
         ],
         [
             ("STRONG BUY count", sig.get("strong_buy_count", "NO_DATA")),
@@ -454,6 +643,8 @@ def render_command_center_metrics(ctx: TAECommandCenterContext) -> None:
         [
             ("Robust Strategies", counts.get("robust_shortlist_count", "NO_DATA")),
             ("Weak Strategies", counts.get("weak_shortlist_count", "NO_DATA")),
+            ("Data Quality", fin.get("data_quality_status", "NO_DATA")),
+            ("Open Positions Value", fin.get("open_positions_value")),
         ],
     ]
 
@@ -772,86 +963,224 @@ def render_project_book_panel(ctx: TAECommandCenterContext) -> None:
             st.caption("MISSING")
 
 
-def render_global_candidate_queue_panel(ctx: TAECommandCenterContext) -> None:
-    st.subheader("🌍 Global Candidate Queue")
-    st.caption(
-        "CONTROLLED INTEGRATION · Reads tae_candidate_queue.json · "
-        "Does not write watchlist.txt or execute trades"
-    )
+def render_scanner_refresh_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("📡 Scanner Refresh")
+    st.caption(f"Artifact: tae_scanner_refresh.json ({ctx.scanner_refresh_status})")
 
-    queue = ctx.candidate_queue
-    if ctx.candidate_queue_status != "OK" or not queue:
-        st.warning(f"Candidate queue artifact: {ctx.candidate_queue_status}")
-        if st.button("Build candidate queue", key="tae_build_candidate_queue"):
-            with st.spinner("Running tae_candidate_queue_builder.py …"):
-                try:
-                    result = subprocess.run(
-                        [sys.executable, "tae_candidate_queue_builder.py"],
-                        cwd=str(PROJECT_ROOT),
-                        capture_output=True,
-                        text=True,
-                        timeout=120,
-                        check=False,
-                    )
-                except subprocess.TimeoutExpired:
-                    st.error("Candidate queue builder timed out")
-                except OSError as exc:
-                    st.error(f"Failed to run builder: {exc}")
-                else:
-                    if result.returncode == 0:
-                        st.success("Candidate queue built.")
-                        st.rerun()
-                    else:
-                        st.error((result.stderr or result.stdout or "Builder failed")[-2000:])
+    if ctx.scanner_refresh_status != "OK" or not ctx.scanner_refresh:
+        st.warning(f"Scanner refresh report: {ctx.scanner_refresh_status}")
+        st.caption("Run Scanner Refresh from the action bar above.")
         return
 
+    refresh = ctx.scanner_refresh
+    counts = refresh.get("step_counts") or {}
+    downstream = refresh.get("downstream") or {}
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Verdict", refresh.get("final_verdict", "NO_DATA"))
+    c2.metric("Last Run", (refresh.get("generated_at") or "NO_DATA")[:19])
+    c3.metric("Runtime (s)", refresh.get("total_runtime_seconds", "NO_DATA"))
+    c4.metric("Steps OK", counts.get("ok", 0))
+    c5.metric("FAIL / SKIP", f"{counts.get('fail', 0)} / {counts.get('skipped', 0)}")
+    c6.metric("Scheduler Cron", ctx.scanner_refresh_cron)
+
+    st.caption(
+        f"Next recommended action (downstream): "
+        f"{downstream.get('candidate_queue_action') or 'NO_DATA'} · "
+        f"watchlist.txt written: {refresh.get('watchlist_txt_written', False)}"
+    )
+
+    steps = refresh.get("steps") or []
+    if steps:
+        step_rows = [
+            {
+                "step": s.get("name"),
+                "status": s.get("status"),
+                "runtime_s": s.get("runtime_seconds"),
+                "artifact": s.get("artifact"),
+                "rows": s.get("row_count"),
+                "freshness_h": s.get("freshness_hours"),
+            }
+            for s in steps
+        ]
+        st.dataframe(pd.DataFrame(step_rows), width="stretch", hide_index=True)
+
+    failed = [s for s in steps if s.get("status") == "FAIL"]
+    if failed:
+        with st.expander("Failed steps", expanded=True):
+            for step in failed:
+                st.error(f"{step.get('name')}: {step.get('errors', '')[:300]}")
+
+
+def render_candidate_queue_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🌍 Global Candidate Queue")
+    st.caption(f"Artifact: tae_candidate_queue.json ({ctx.candidate_queue_status})")
+
+    if ctx.candidate_queue_status != "OK" or not ctx.candidate_queue:
+        st.warning(f"Candidate queue: {ctx.candidate_queue_status}")
+        return
+
+    queue = ctx.candidate_queue
     summary = queue.get("summary") or {}
     pq = queue.get("promotion_queue") or {}
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Total candidates", _fmt(summary.get("total_candidates")))
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+    c1.metric("Total", _fmt(summary.get("total_candidates")))
     c2.metric("Promotion eligible", _fmt(summary.get("promotion_eligible_count")))
     c3.metric("Already held", _fmt(summary.get("already_held_count")))
     c4.metric("In watchlist", _fmt(summary.get("already_in_watchlist_count")))
     c5.metric("Market closed", _fmt(summary.get("market_closed_count")))
-    c6.metric("Recommended action", summary.get("recommended_action") or "NO_DATA")
+    c6.metric("Low rank", _fmt(summary.get("low_rank_count")))
+    c7.metric("Action", summary.get("recommended_action") or "NO_DATA")
 
-    st.caption(
-        f"Generated: {queue.get('generated_at') or 'NO_DATA'} · "
-        f"Global data sufficient: {summary.get('global_data_sufficient')}"
-    )
-
-    top10 = pq.get("top_10_promotion_eligible") or []
-    if top10:
-        st.markdown("**Top 10 promotion eligible**")
-        df = pd.DataFrame(top10)[
-            ["ticker", "market", "rank_score", "source", "market_open", "classification", "reason"]
+    monitor = pq.get("top_25_monitor") or []
+    if monitor:
+        st.markdown("**Top monitor (first 10)**")
+        df = pd.DataFrame(monitor[:10])[
+            ["ticker", "market", "rank_score", "classification", "market_open", "reason"]
         ]
         st.dataframe(df, width="stretch", hide_index=True)
     else:
-        st.info("No promotion-eligible candidates at this time.")
+        st.info("No monitor candidates.")
+
+
+def render_actionable_signal_audit_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🎯 Actionable Signal Audit")
+    st.caption(f"Artifact: tae_actionable_signal_audit.json ({ctx.actionable_audit_status})")
+
+    if ctx.actionable_audit_status != "OK" or not ctx.actionable_audit:
+        st.warning(f"Actionable signal audit: {ctx.actionable_audit_status}")
+        return
+
+    audit = ctx.actionable_audit
+    summary = audit.get("summary") or {}
+
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
+    c1.metric("STRONG BUY total", _fmt(summary.get("strong_buy_total")))
+    c2.metric("Already held", _fmt(summary.get("strong_buy_already_held")))
+    c3.metric("Actionable new", _fmt(summary.get("strong_buy_actionable_new")))
+    c4.metric("Market closed", _fmt(summary.get("strong_buy_market_closed")))
+    c5.metric("Blocked TAE", _fmt(summary.get("blocked_by_tae")))
+    c6.metric("Blocked cash", _fmt(summary.get("blocked_by_cash")))
+    c7.metric("Blocked max pos", _fmt(summary.get("blocked_by_max_positions")))
+    c8.metric("Verdict", summary.get("verdict") or "NO_DATA")
+
+    st.info(f"**Recommendation:** {summary.get('recommendation') or 'NO_DATA'}")
+
+    held = summary.get("already_held_tickers") or []
+    actionable = summary.get("actionable_tickers") or []
+    closed = summary.get("market_closed_tickers") or []
+    col_a, col_b, col_c = st.columns(3)
+    col_a.caption(f"Already held: {', '.join(held) or '—'}")
+    col_b.caption(f"Actionable: {', '.join(actionable) or '—'}")
+    col_c.caption(f"Market closed: {', '.join(closed) or '—'}")
+
+
+def render_watchlist_proposal_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("📋 Watchlist Proposal")
+    st.caption(f"Artifact: tae_watchlist_proposal.json ({ctx.watchlist_proposal_status})")
+
+    if ctx.watchlist_proposal_status != "OK" or not ctx.watchlist_proposal:
+        st.warning(f"Watchlist proposal: {ctx.watchlist_proposal_status}")
+        return
 
     proposal = ctx.watchlist_proposal
-    if ctx.watchlist_proposal_status == "OK" and proposal:
-        recs = proposal.get("recommended_additions_max_10") or []
-        st.markdown("**Proposal bridge (tae_watchlist_proposal.json)**")
-        st.caption(
-            f"Recommended additions: {len(recs)} · "
-            f"Queue source: {(proposal.get('summary') or {}).get('candidate_queue_source') or 'direct CSV'}"
-        )
-        if recs:
-            st.write(", ".join(str(r.get("ticker", r)) for r in recs))
-        else:
-            st.write("—")
+    summary = proposal.get("summary") or {}
+    recs = proposal.get("recommended_additions_max_10") or []
+    rec_count = summary.get("recommended_additions_count", len(recs))
 
-    with st.expander("Market statuses & sources", expanded=False):
-        st.json(
+    if rec_count and rec_count > 0:
+        promotion_status = "READY_TO_PROMOTE"
+    else:
+        promotion_status = "NO_PROMOTION_NEEDED"
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Watchlist count", _fmt(summary.get("current_watchlist_count")))
+    c2.metric("Recommended adds", _fmt(rec_count))
+    c3.metric("Queue source", summary.get("candidate_queue_source") or "direct CSV")
+    c4.metric("Queue action", summary.get("candidate_queue_recommended_action") or "NO_DATA")
+    c5.metric("Promotion status", promotion_status)
+
+    if recs:
+        st.markdown("**Top recommended additions**")
+        rows = [
             {
-                "market_statuses": queue.get("market_statuses"),
-                "sources": queue.get("sources"),
-                "advisory_snapshot": queue.get("advisory_snapshot"),
+                "ticker": r.get("ticker"),
+                "market": r.get("market"),
+                "rank_score": r.get("rank_score"),
+                "source": r.get("primary_source") or r.get("source"),
+                "signal": r.get("signal"),
             }
-        )
+            for r in recs
+        ]
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    else:
+        st.info("No watchlist additions proposed — governed promotion not required.")
+
+    for note in proposal.get("risk_notes") or []:
+        st.caption(f"ℹ️ {note}")
+
+
+def render_market_open_monitor_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🕐 Market Open Monitor")
+    st.caption(f"Artifact: tae_market_open_monitor.json ({ctx.market_monitor_status})")
+
+    if ctx.market_monitor_status != "OK" or not ctx.market_monitor:
+        st.warning(f"Market open monitor: {ctx.market_monitor_status}")
+        return
+
+    mon = ctx.market_monitor
+    market = mon.get("market") or {}
+    process = mon.get("process") or {}
+    dry = mon.get("dry_run") or {}
+    x9 = mon.get("x9_ledger") or {}
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Verdict", mon.get("verdict", "NO_DATA"))
+    c2.metric("Bot", process.get("bot_effective") or process.get("bot_status_file", "NO_DATA"))
+    c3.metric("Dashboard", process.get("dashboard_effective") or process.get("dashboard_status_file", "NO_DATA"))
+    c4.metric("Markets open", ", ".join(market.get("open_markets") or []) or "—")
+    c5.metric("DRY_RUN", f"{dry.get('value')} ({dry.get('source', 'NO_DATA')})")
+    c6.metric("X.9 events", x9.get("count", ctx.x9_event_count or "NO_DATA"))
+
+    guard = mon.get("session_guard") or {}
+    if guard.get("last_session_line"):
+        with st.expander("Session guard (last line)", expanded=False):
+            st.code(guard.get("last_session_line"))
+
+
+def render_scanner_freshness_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("🗂️ Scanner Freshness")
+    st.caption("Read-only CSV artifact age / row counts — does not trigger refresh on load")
+
+    rows = [_csv_artifact_meta(PROJECT_ROOT / name) for name in SCANNER_CSV_ARTIFACTS]
+    df = pd.DataFrame(
+        [
+            {
+                "artifact": r.get("path"),
+                "status": r.get("status"),
+                "rows": r.get("row_count"),
+                "freshness_h": r.get("freshness_hours"),
+                "mtime": (r.get("artifact_mtime") or "")[:19],
+            }
+            for r in rows
+        ]
+    )
+    st.dataframe(df, width="stretch", hide_index=True)
+
+    stale = [r for r in rows if r.get("status") == "STALE"]
+    missing = [r for r in rows if r.get("status") == "MISSING"]
+    if missing:
+        st.warning(f"Missing scanner CSVs: {', '.join(r['path'] for r in missing)}")
+    elif stale:
+        st.warning(f"Stale scanner CSVs (>168h): {', '.join(r['path'] for r in stale)}")
+    else:
+        st.success("All scanner CSV artifacts present and fresh.")
+
+
+def render_global_candidate_queue_panel(ctx: TAECommandCenterContext) -> None:
+    """Backward-compatible alias."""
+    render_candidate_queue_panel(ctx)
 
 
 def render_artifact_status(ctx: TAECommandCenterContext) -> None:
@@ -864,8 +1193,8 @@ def render_tae_command_center() -> None:
     """Main entry: render full TAE Command Center tab."""
     st.subheader("🏠 TAE Command Center")
     st.caption(
-        "PAPER_ONLY · UI/OBSERVABILITY ONLY · Reads tae_full_ecosystem_review.json and related artifacts · "
-        "No writes to portfolio.csv or live_signals.csv"
+        "PAPER_ONLY · UI/OBSERVABILITY ONLY · End-to-end TAE ecosystem artifacts · "
+        "No writes to watchlist.txt, portfolio.csv, or live_signals.csv"
     )
 
     ctx = load_command_center_context()
@@ -874,11 +1203,22 @@ def render_tae_command_center() -> None:
     render_command_center_metrics(ctx)
     st.divider()
 
+    render_scanner_refresh_panel(ctx)
+    st.divider()
+    render_scanner_freshness_panel(ctx)
+    st.divider()
+    render_candidate_queue_panel(ctx)
+    st.divider()
+    render_watchlist_proposal_panel(ctx)
+    st.divider()
+    render_actionable_signal_audit_panel(ctx)
+    st.divider()
+    render_market_open_monitor_panel(ctx)
+    st.divider()
+
     render_financial_panel(ctx)
     st.divider()
     render_advisory_panel(ctx)
-    st.divider()
-    render_global_candidate_queue_panel(ctx)
     st.divider()
     render_shadow_panel(ctx)
     st.divider()

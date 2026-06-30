@@ -1,7 +1,7 @@
 # TAE Market Open Monitor
 
 **Verdict:** PASS
-**Generated:** 2026-06-30T10:33:38.737176+00:00
+**Generated:** 2026-06-30T10:58:30.027948+00:00
 
 ## Summary
 
@@ -9,7 +9,7 @@
 - Bot: **RUNNING** (pid=16525, alive=False)
 - Dashboard: **RUNNING** (port8501=True)
 - DRY_RUN live mode: **True** (source=default_live)
-- Session guard last run: 2026-06-30 13:31:35
+- Session guard last run: 2026-06-30 13:56:47
 - Startup runner last run: Tue Jun 30 10:55:14 EEST 2026
 
 ## Q&A
@@ -39,8 +39,8 @@
 - awake_guard_executable: True
 - market_guard_executable: True
 - last_startup_runner_time: Tue Jun 30 10:55:14 EEST 2026
-- last_startup_runner_age_hours: 2.64
-- last_session_guard_time: 2026-06-30 13:31:35
+- last_startup_runner_age_hours: 3.05
+- last_session_guard_time: 2026-06-30 13:56:47
 - last_session_guard_age_hours: 0.03
 - verdict: READY
 - note: Sleep/wake cannot be simulated; chain checks LaunchAgent, executables, and recent startup/guard log timestamps.

@@ -1,6 +1,6 @@
 # TAE Watchlist Proposal
 
-**Generated:** 2026-06-30T10:49:17.587494+00:00
+**Generated:** 2026-06-30T10:59:31.951574+00:00
 **Mode:** PAPER_ONLY_ADVISORY
 **Safety:** PAPER_ONLY | ADVISORY_ONLY | NO_BROKER | NO_EXECUTION | NO_PORTFOLIO_CHANGE | NO_WATCHLIST_WRITE
 
@@ -21,8 +21,8 @@
 - `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.0
 - `regional_strength.csv`: present=True status=OK rows=4 age_h=0.01
 - `sector_rotation.csv`: present=True status=OK rows=11 age_h=0.01
-- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=39.87
-- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=39.87
+- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=40.04
+- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=40.04
 - `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.0
 
 ## Recommended Additions (max 10)
