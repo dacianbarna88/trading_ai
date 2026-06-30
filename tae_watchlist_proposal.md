@@ -1,6 +1,6 @@
 # TAE Watchlist Proposal
 
-**Generated:** 2026-06-30T10:33:38.245624+00:00
+**Generated:** 2026-06-30T10:49:17.587494+00:00
 **Mode:** PAPER_ONLY_ADVISORY
 **Safety:** PAPER_ONLY | ADVISORY_ONLY | NO_BROKER | NO_EXECUTION | NO_PORTFOLIO_CHANGE | NO_WATCHLIST_WRITE
 
@@ -15,15 +15,15 @@
 
 ## Sources
 
-- `global_candidates.csv`: present=True status=OK rows=15 age_h=0.42
-- `global_market_scanner.csv`: present=True status=OK rows=10 age_h=0.44
-- `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.42
-- `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.42
-- `regional_strength.csv`: present=True status=OK rows=4 age_h=0.44
-- `sector_rotation.csv`: present=True status=OK rows=11 age_h=0.44
-- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=39.61
-- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=39.61
-- `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.43
+- `global_candidates.csv`: present=True status=OK rows=15 age_h=0.0
+- `global_market_scanner.csv`: present=True status=OK rows=10 age_h=0.01
+- `global_opportunity_ranking.csv`: present=True status=OK rows=15 age_h=0.0
+- `multi_market_candidates.csv`: present=True status=OK rows=15 age_h=0.0
+- `regional_strength.csv`: present=True status=OK rows=4 age_h=0.01
+- `sector_rotation.csv`: present=True status=OK rows=11 age_h=0.01
+- `tae_candidate_strategy_registry.json`: present=True status=OK rows=3 age_h=39.87
+- `tae_continuous_strategy_ranking.json`: present=True status=OK rows=3 age_h=39.87
+- `watchlist_candidates.csv`: present=True status=OK rows=53 age_h=0.0
 
 ## Recommended Additions (max 10)
 
