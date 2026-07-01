@@ -433,11 +433,22 @@ def print_summary(report: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    from tae_intraday_fade_history import record_fade_report
+
     report = build_report()
     write_outputs(report)
+    history_result = record_fade_report(report)
     print_summary(report)
     print()
     print("Wrote:", OUTPUT_JSON, OUTPUT_MD)
+    if history_result.get("appended"):
+        print(
+            "History recorded:",
+            history_result["run_id"],
+            f"({history_result['records_added']} positions)",
+        )
+    else:
+        print("History:", history_result.get("reason", "skipped"))
     return 0
 
 
