@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingai.startup</string>
+    <key>Comment</key>
+    <string>TAE login/reboot startup — python launcher avoids Desktop bash TCC block</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/book/Desktop/trading_ai/venv/bin/python3</string>
+        <string>/Users/book/Desktop/trading_ai/tae_startup_launcher.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/book/Desktop/trading_ai</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TAE_SCHEDULER_SOURCE</key>
+        <string>launchagent</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/book/Desktop/trading_ai/startup_launchagent.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/book/Desktop/trading_ai/startup_launchagent.err.log</string>
+</dict>
+</plist>
