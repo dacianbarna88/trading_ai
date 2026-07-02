@@ -81,10 +81,17 @@ class InfrastructureHealthTest(unittest.TestCase):
             self.assertTrue(quarantine)
             self.assertEqual(quarantine[0]["status"], "FAIL")
 
-    def test_provenance_warn_only(self) -> None:
+    def test_provenance_info_not_warn(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             self._bootstrap_project(base)
+            (base / "startup_runner.log").write_text(
+                "Launcher: tae_startup_launcher.py\nSTARTUP COMPLETE\n",
+                encoding="utf-8",
+            )
+            (base / "market_open_runner.log").write_text("", encoding="utf-8")
+            (base / "startup_launchagent.out.log").write_text("OK\n", encoding="utf-8")
+            (base / "market_open_launchagent.out.log").write_text("OK\n", encoding="utf-8")
             with mock.patch(
                 "tae_infrastructure_health.read_xattrs",
                 return_value={"com.apple.provenance": "1"},
@@ -97,8 +104,55 @@ class InfrastructureHealthTest(unittest.TestCase):
                 )
             prov = [c for c in report["checks"] if c["name"].startswith("provenance:")]
             self.assertTrue(prov)
-            self.assertEqual(prov[0]["status"], "WARN")
-            self.assertNotEqual(report["overall_status"], "FAIL")
+            self.assertEqual(prov[0]["status"], "INFO")
+            self.assertEqual(report["overall_status"], "PASS")
+
+    def test_historical_cleared_log_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            (base / "market_open_runner.log").write_text("", encoding="utf-8")
+            report = build_health_report(
+                project_dir=base,
+                crontab_fn=lambda: GOOD_CRON,
+                launchctl_fn=lambda: LAUNCH_AGENTS_OK.copy(),
+                pgrep_fn=lambda _p: 1,
+            )
+            legacy = next(c for c in report["checks"] if c["name"] == "market_open_runner_log_legacy")
+            self.assertEqual(legacy["status"], "PASS")
+
+    def test_recent_operation_not_permitted_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            err_log = base / "market_open_launchagent.err.log"
+            err_log.write_text(
+                "Operation not permitted\n",
+                encoding="utf-8",
+            )
+            report = build_health_report(
+                project_dir=base,
+                crontab_fn=lambda: GOOD_CRON,
+                launchctl_fn=lambda: LAUNCH_AGENTS_OK.copy(),
+                pgrep_fn=lambda _p: 1,
+            )
+            mo_log = next(c for c in report["checks"] if c["name"] == "market_open_launchagent_log")
+            self.assertIn(mo_log["status"], {"FAIL", "WARN"})
+
+    def test_valid_launchagents_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            report = build_health_report(
+                project_dir=base,
+                crontab_fn=lambda: GOOD_CRON,
+                launchctl_fn=lambda: LAUNCH_AGENTS_OK.copy(),
+                pgrep_fn=lambda _p: 1,
+            )
+            for label in LAUNCH_AGENTS_OK:
+                check = next(c for c in report["checks"] if c["name"] == f"launchagent:{label}")
+                self.assertEqual(check["status"], "PASS")
+            self.assertIn(report["overall_status"], {"PASS", "WARN"})
 
     def test_exit_126_fail(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

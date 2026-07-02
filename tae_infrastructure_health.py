@@ -352,9 +352,23 @@ def build_health_report(
 
         xattrs = read_xattrs(path)
         if "com.apple.quarantine" in xattrs:
-            _check(checks, name=f"quarantine:{script_name}", status="FAIL", detail="quarantine present")
+            _check(
+                checks,
+                name=f"quarantine:{script_name}",
+                status="FAIL",
+                detail="com.apple.quarantine present — may block execution",
+                remediation="Remove quarantine only if macOS blocks the script; do not strip provenance.",
+            )
         elif "com.apple.provenance" in xattrs:
-            _check(checks, name=f"provenance:{script_name}", status="WARN", detail="provenance present")
+            _check(
+                checks,
+                name=f"provenance:{script_name}",
+                status="INFO",
+                detail=(
+                    "com.apple.provenance present — normal on macOS; "
+                    "not a blocker when scripts are executable and launchd last_exit=0"
+                ),
+            )
         else:
             _check(checks, name=f"xattrs:{script_name}", status="PASS", detail="no blocking xattrs")
 
@@ -524,6 +538,7 @@ def build_health_report(
         "checks": checks,
         "summary": {
             "pass": sum(1 for c in checks if c["status"] == "PASS"),
+            "info": sum(1 for c in checks if c["status"] == "INFO"),
             "warn": sum(1 for c in checks if c["status"] == "WARN"),
             "fail": sum(1 for c in checks if c["status"] == "FAIL"),
             "total": len(checks),
@@ -545,6 +560,7 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path]:
         "",
         "## Summary",
         f"- PASS: {report['summary']['pass']}",
+        f"- INFO: {report['summary'].get('info', 0)}",
         f"- WARN: {report['summary']['warn']}",
         f"- FAIL: {report['summary']['fail']}",
         "",
@@ -562,7 +578,13 @@ def print_summary(report: dict[str, Any]) -> None:
     print("===== TAE INFRASTRUCTURE HEALTH =====")
     print("Overall:", report["overall_status"])
     print("Autostart readiness:", report["autostart_readiness"])
-    print("PASS/WARN/FAIL:", report["summary"]["pass"], report["summary"]["warn"], report["summary"]["fail"])
+    print(
+        "PASS/INFO/WARN/FAIL:",
+        report["summary"]["pass"],
+        report["summary"].get("info", 0),
+        report["summary"]["warn"],
+        report["summary"]["fail"],
+    )
     for check in [c for c in report["checks"] if c["status"] == "FAIL"][:5]:
         print("FAIL:", check["name"], "-", check["detail"])
 
