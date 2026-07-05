@@ -7,13 +7,17 @@ import json
 import os
 import plistlib
 import stat
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from tae_infrastructure_health import (
+    SPAWN_BLOCKED,
     build_health_report,
+    get_crontab,
+    launchctl_labels,
     overall_status,
     write_outputs,
 )
@@ -294,6 +298,61 @@ class InfrastructureHealthTest(unittest.TestCase):
         self.assertEqual(overall_status([{"status": "PASS"}]), "PASS")
         self.assertEqual(overall_status([{"status": "WARN"}]), "WARN")
         self.assertEqual(overall_status([{"status": "PASS"}, {"status": "FAIL"}]), "FAIL")
+
+    def test_get_crontab_spawn_blocked_returns_unavailable(self) -> None:
+        blocked = subprocess.CompletedProcess(["crontab", "-l"], SPAWN_BLOCKED, "", "blocked")
+        with mock.patch("tae_infrastructure_health._run", return_value=blocked):
+            text, available = get_crontab()
+        self.assertEqual(text, "")
+        self.assertFalse(available)
+
+    def test_launchctl_spawn_blocked_returns_unavailable(self) -> None:
+        blocked = subprocess.CompletedProcess(["launchctl", "list"], SPAWN_BLOCKED, "", "blocked")
+        with mock.patch("tae_infrastructure_health._run", return_value=blocked):
+            labels, available = launchctl_labels()
+        self.assertFalse(available)
+        self.assertIsNone(labels["com.tradingai.startup"])
+
+    def test_launchctl_nonzero_exit_returns_unavailable(self) -> None:
+        failed = subprocess.CompletedProcess(["launchctl", "list"], 1, "", "restricted")
+        with mock.patch("tae_infrastructure_health._run", return_value=failed):
+            labels, available = launchctl_labels()
+        self.assertFalse(available)
+        self.assertIsNone(labels["com.tradingai.startup"])
+
+    def test_launchctl_unavailable_warn_completes_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            with mock.patch("tae_infrastructure_health.launchctl_labels", return_value=({}, False)):
+                report = build_health_report(
+                    project_dir=base,
+                    crontab_fn=lambda: GOOD_CRON,
+                    pgrep_fn=lambda _p: 1,
+                )
+            access = next(c for c in report["checks"] if c["name"] == "launchctl:access")
+            self.assertEqual(access["status"], "WARN")
+            launchagent_fail = [
+                c for c in report["checks"] if c["name"].startswith("launchagent:") and c["status"] == "FAIL"
+            ]
+            self.assertEqual(launchagent_fail, [])
+            self.assertIn(report["overall_status"], {"PASS", "WARN"})
+
+    def test_crontab_unavailable_warn_completes_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            with mock.patch("tae_infrastructure_health.get_crontab", return_value=("", False)):
+                report = build_health_report(
+                    project_dir=base,
+                    launchctl_fn=lambda: LAUNCH_AGENTS_OK.copy(),
+                    pgrep_fn=lambda _p: 1,
+                )
+            access = next(c for c in report["checks"] if c["name"] == "cron:access")
+            self.assertEqual(access["status"], "WARN")
+            self.assertIn(report["overall_status"], {"PASS", "WARN"})
+            cron_fail = [c for c in report["checks"] if c["name"].startswith("cron:") and c["status"] == "FAIL"]
+            self.assertEqual(cron_fail, [])
 
     def test_json_md_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

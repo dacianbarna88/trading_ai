@@ -15,6 +15,8 @@ from tae_knowledge_base import (
     build_knowledge_base,
     dedupe_entries,
     make_entry,
+    map_confidence_evolution_status,
+    normalize_confidence_evolution,
     normalize_evidence_report,
     normalize_intraday_discovery,
     normalize_learning_memory,
@@ -35,6 +37,7 @@ class KnowledgeBaseTest(unittest.TestCase):
                 fade_daily_summary=base / "missing4.json",
                 knowledge_candidates=base / "missing5.json",
                 discovery_rankings=base / "missing6.json",
+                confidence_evolution=base / "missing7.json",
             )
             self.assertEqual(report["schema"], "tae_knowledge_base")
             self.assertEqual(report["entries"], [])
@@ -190,6 +193,7 @@ class KnowledgeBaseTest(unittest.TestCase):
                 fade_daily_summary=base / "none3.json",
                 knowledge_candidates=base / "none4.json",
                 discovery_rankings=base / "none5.json",
+                confidence_evolution=base / "none6.json",
             )
 
             import tae_knowledge_base as kb
@@ -213,6 +217,130 @@ class KnowledgeBaseTest(unittest.TestCase):
             self.assertIn("Experimental Knowledge", md_text)
             self.assertNotIn("BUY", md_text)
             self.assertNotIn("SELL", md_text)
+
+    def test_confidence_evolution_missing_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            report = build_knowledge_base(confidence_evolution=base / "missing.json")
+            self.assertFalse(report["sources_loaded"][str(base / "missing.json")])
+
+    def test_confidence_evolution_entries_ingested(self) -> None:
+        data = {
+            "generated_at": "2026-07-03T16:00:00",
+            "confidence_evolution_entries": [
+                {
+                    "id": "ce_score_persistence_after_stop",
+                    "hypothesis": "SCORE_PERSISTENCE_AFTER_STOP",
+                    "evidence_count": 10,
+                    "confidence_before": "HIGH",
+                    "confidence_after": "HIGH",
+                    "confidence_delta": 0,
+                    "trend": "IMPROVING",
+                    "status": "LEARNING",
+                    "reason": "10/10 score persistence",
+                    "recommendation": "SCORE_DECAY_SHADOW",
+                },
+                {
+                    "id": "ce_cooldown_15m",
+                    "hypothesis": "COOLDOWN_15M_HYPOTHESIS",
+                    "evidence_count": 10,
+                    "confidence_before": "LOW",
+                    "confidence_after": "MEDIUM",
+                    "trend": "STABLE",
+                    "status": "DO_NOT_PROMOTE",
+                    "reason": "small sample",
+                    "recommendation": "TEST_15M_COOLDOWN_SHADOW",
+                },
+            ],
+            "score_decay_candidates": [],
+        }
+        entries = normalize_confidence_evolution(data, "tae_confidence_evolution.json")
+        self.assertEqual(len(entries), 2)
+        sp = next(e for e in entries if e["pattern_type"] == "SCORE_PERSISTENCE_AFTER_STOP")
+        self.assertEqual(sp["source"], "confidence_evolution")
+        self.assertEqual(sp["category"], "score_decay")
+        self.assertTrue(sp["shadow_only"])
+        self.assertEqual(sp["status"], "LEARNING")
+        dn = next(e for e in entries if e["pattern_type"] == "COOLDOWN_15M_HYPOTHESIS")
+        self.assertEqual(dn["status"], "EXPERIMENTAL")
+        self.assertEqual(dn["recommendation"], "DO_NOT_PROMOTE_TO_ADVISORY_YET")
+
+    def test_score_decay_candidate_ingested(self) -> None:
+        data = {
+            "generated_at": "2026-07-03T16:00:00",
+            "confidence_evolution_entries": [],
+            "score_decay_candidates": [
+                {
+                    "ticker": "MU",
+                    "stop_time": "2026-07-01 16:31:02",
+                    "reentry_time": "2026-07-01 16:32:22",
+                    "original_score": 100.0,
+                    "shadow_adjusted_score": 80.0,
+                    "decay_window_minutes": 30,
+                    "reason": "second STOP confirmed",
+                    "outcome": "REENTRY_SECOND_STOP",
+                    "confidence": "HIGH",
+                    "recommendation": "SCORE_DECAY_SHADOW",
+                }
+            ],
+        }
+        entries = normalize_confidence_evolution(data, "tae_confidence_evolution.json")
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry["subject"], "MU|2026-07-01 16:31:02")
+        self.assertEqual(entry["category"], "score_decay")
+        self.assertEqual(entry["recommendation"], "SCORE_DECAY_SHADOW")
+        self.assertNotIn(entry["recommendation"], FORBIDDEN_RECOMMENDATIONS)
+
+    def test_confidence_evolution_markdown_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            ce = base / "ce.json"
+            ce.write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-03",
+                        "confidence_evolution_entries": [
+                            {
+                                "id": "ce_stop_reentry_churn",
+                                "hypothesis": "STOP_REENTRY_CHURN",
+                                "evidence_count": 7,
+                                "confidence_after": "MEDIUM",
+                                "status": "WATCH",
+                                "trend": "IMPROVING",
+                                "reason": "immediate reentries",
+                                "recommendation": "TEST_15M_COOLDOWN_SHADOW",
+                            }
+                        ],
+                        "score_decay_candidates": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            report = build_knowledge_base(confidence_evolution=ce)
+            import tae_knowledge_base as kb
+
+            out_md = base / "out.md"
+            orig_md = kb.OUTPUT_MD
+            kb.OUTPUT_MD = out_md
+            try:
+                write_knowledge_outputs(report)
+            finally:
+                kb.OUTPUT_MD = orig_md
+            md = out_md.read_text(encoding="utf-8")
+            self.assertIn("Confidence Evolution (X.KNOWLEDGE-1B/1C)", md)
+            self.assertIn("confidence_evolution", json.dumps(report["entries"]))
+
+    def test_materialized_view_not_ssot(self) -> None:
+        report = build_knowledge_base(confidence_evolution=Path("tae_confidence_evolution.json"))
+        self.assertEqual(report["view_type"], "MATERIALIZED_VIEW")
+        self.assertIn("ssot_note", report)
+
+    def test_map_confidence_evolution_status_rules(self) -> None:
+        self.assertEqual(map_confidence_evolution_status("HIGH", "WATCH"), "LEARNING")
+        self.assertEqual(map_confidence_evolution_status("MEDIUM", "WATCH"), "WATCH")
+        self.assertEqual(map_confidence_evolution_status("LOW", "LEARNING"), "EXPERIMENTAL")
+        self.assertEqual(map_confidence_evolution_status("MEDIUM", "DO_NOT_PROMOTE"), "EXPERIMENTAL")
 
 
 if __name__ == "__main__":

@@ -54,15 +54,24 @@ LOG_PATHS = {
     "market_open_legacy": PROJECT_DIR / "market_open_runner.log",
 }
 
+SPAWN_BLOCKED = -999
+
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        cmd,
-        cwd=str(cwd or PROJECT_DIR),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=str(cwd or PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (PermissionError, OSError) as exc:
+        return subprocess.CompletedProcess(cmd, SPAWN_BLOCKED, "", str(exc))
+
+
+def _spawn_blocked(result: subprocess.CompletedProcess[str]) -> bool:
+    return result.returncode == SPAWN_BLOCKED
 
 
 def _check(
@@ -99,36 +108,46 @@ def is_executable(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
 
 
-def bash_syntax_ok(path: Path) -> bool:
-    return _run(["bash", "-n", str(path)]).returncode == 0
+def bash_syntax_ok(path: Path) -> tuple[bool | None, bool]:
+    result = _run(["bash", "-n", str(path)])
+    if _spawn_blocked(result):
+        return None, False
+    return result.returncode == 0, True
 
 
-def get_crontab() -> str:
+def get_crontab() -> tuple[str, bool]:
+    """Return (crontab_text, available). available=False when spawn is blocked."""
     result = _run(["crontab", "-l"])
+    if _spawn_blocked(result):
+        return "", False
     if result.returncode != 0:
-        return ""
-    return result.stdout or ""
+        return "", True
+    return result.stdout or "", True
 
 
-def launchctl_labels() -> dict[str, str | None]:
+def launchctl_labels() -> tuple[dict[str, str | None], bool]:
     result = _run(["launchctl", "list"])
     labels: dict[str, str | None] = {label: None for label in LAUNCH_AGENT_LABELS}
+    if _spawn_blocked(result):
+        return labels, False
     if result.returncode != 0:
-        return labels
+        return labels, False
     for line in (result.stdout or "").splitlines():
         parts = line.split()
         if len(parts) >= 3:
             pid, exit_code, label = parts[0], parts[1], parts[2]
             if label in labels:
                 labels[label] = f"pid={pid} last_exit={exit_code}"
-    return labels
+    return labels, True
 
 
-def pgrep_count(pattern: str) -> int:
+def pgrep_count(pattern: str) -> tuple[int, bool]:
     result = _run(["pgrep", "-f", pattern])
+    if _spawn_blocked(result):
+        return 0, False
     if result.returncode != 0:
-        return 0
-    return len([line for line in (result.stdout or "").splitlines() if line.strip()])
+        return 0, True
+    return len([line for line in (result.stdout or "").splitlines() if line.strip()]), True
 
 
 def read_log_tail(path: Path, *, tail_lines: int = 5) -> list[str]:
@@ -205,6 +224,14 @@ def validate_plist_checks(
         return
 
     lint = _run(["plutil", "-lint", str(path)])
+    if _spawn_blocked(lint):
+        _check(
+            checks,
+            name=f"plist_lint:{label}",
+            status="WARN",
+            detail=f"plutil unavailable in restricted context for {path.name}",
+        )
+        return
     if lint.returncode != 0:
         _check(
             checks,
@@ -326,9 +353,23 @@ def build_health_report(
     checks: list[dict[str, Any]] = []
     venv_python = project_dir / "venv" / "bin" / "python3"
     runtime_outputs = project_dir / "runtime_outputs"
-    crontab_text = crontab_fn() if crontab_fn else get_crontab()
-    launch_agents = launchctl_fn() if launchctl_fn else launchctl_labels()
-    pgrep = pgrep_fn or pgrep_count
+    if crontab_fn:
+        crontab_text = crontab_fn()
+        crontab_available = True
+    else:
+        crontab_text, crontab_available = get_crontab()
+    if launchctl_fn:
+        launch_agents = launchctl_fn()
+        launchctl_available = True
+    else:
+        launch_agents, launchctl_available = launchctl_labels()
+
+    def _pgrep(pattern: str) -> tuple[int, bool]:
+        if pgrep_fn:
+            return pgrep_fn(pattern), True
+        return pgrep_count(pattern)
+
+    bash_syntax_available = True
 
     for script_name in INFRA_SCRIPTS:
         path = project_dir / script_name
@@ -372,14 +413,35 @@ def build_health_report(
         else:
             _check(checks, name=f"xattrs:{script_name}", status="PASS", detail="no blocking xattrs")
 
+        syntax_ok, syntax_available = bash_syntax_ok(path)
+        if not syntax_available:
+            bash_syntax_available = False
+        elif syntax_ok:
+            _check(
+                checks,
+                name=f"bash_syntax:{script_name}",
+                status="PASS",
+                detail=f"{script_name} bash -n OK",
+            )
+        else:
+            _check(
+                checks,
+                name=f"bash_syntax:{script_name}",
+                status="FAIL",
+                detail=f"{script_name} bash -n FAIL",
+            )
+
+    if not bash_syntax_available:
         _check(
             checks,
-            name=f"bash_syntax:{script_name}",
-            status="PASS" if bash_syntax_ok(path) else "FAIL",
-            detail=f"{script_name} bash -n OK" if bash_syntax_ok(path) else f"{script_name} bash -n FAIL",
+            name="bash:access",
+            status="WARN",
+            detail="bash syntax check unavailable in this context (sandbox or restricted permissions)",
         )
 
     for pattern in EXPECTED_CRON_PATTERNS:
+        if not crontab_available:
+            continue
         found = bool(re.search(pattern, crontab_text))
         _check(
             checks,
@@ -388,7 +450,17 @@ def build_health_report(
             detail="Crontab entry found" if found else f"Missing crontab entry for {pattern}",
         )
 
+    if not crontab_available:
+        _check(
+            checks,
+            name="cron:access",
+            status="WARN",
+            detail="crontab unavailable in this context (sandbox or restricted permissions)",
+        )
+
     for pattern in CRON_DUPLICATE_PATTERNS:
+        if not crontab_available:
+            continue
         if re.search(pattern, crontab_text):
             _check(
                 checks,
@@ -426,44 +498,70 @@ def build_health_report(
         expect_bash=False,
     )
 
-    for label in LAUNCH_AGENT_LABELS:
-        info = launch_agents.get(label)
-        if info is None:
-            _check(checks, name=f"launchagent:{label}", status="FAIL", detail=f"{label} not loaded")
-        elif "last_exit=126" in info or "last_exit=127" in info:
-            _check(
-                checks,
-                name=f"launchagent:{label}",
-                status="FAIL",
-                detail=f"{label} permission/path failure ({info})",
-                remediation="Reload plist; verify /bin/bash and WorkingDirectory; check Desktop TCC.",
-            )
+    if not launchctl_available:
+        _check(
+            checks,
+            name="launchctl:access",
+            status="WARN",
+            detail="launchctl unavailable in this context (sandbox or restricted permissions)",
+        )
+    else:
+        for label in LAUNCH_AGENT_LABELS:
+            info = launch_agents.get(label)
+            if info is None:
+                _check(checks, name=f"launchagent:{label}", status="FAIL", detail=f"{label} not loaded")
+            elif "last_exit=126" in info or "last_exit=127" in info:
+                _check(
+                    checks,
+                    name=f"launchagent:{label}",
+                    status="FAIL",
+                    detail=f"{label} permission/path failure ({info})",
+                    remediation="Reload plist; verify /bin/bash and WorkingDirectory; check Desktop TCC.",
+                )
+            else:
+                _check(checks, name=f"launchagent:{label}", status="PASS", detail=f"{label} loaded ({info})")
+
+    caffeinate_count, pgrep_available = _pgrep("caffeinate -d -i -m")
+    if not pgrep_available:
+        _check(
+            checks,
+            name="pgrep:access",
+            status="WARN",
+            detail="pgrep unavailable in this context (sandbox or restricted permissions)",
+        )
+        _check(
+            checks,
+            name="awake_guard_caffeinate",
+            status="WARN",
+            detail="caffeinate process count unverified (pgrep blocked)",
+        )
+    else:
+        _check(
+            checks,
+            name="awake_guard_caffeinate",
+            status="PASS" if caffeinate_count >= 1 else "WARN",
+            detail=f"caffeinate processes={caffeinate_count}",
+        )
+
+    if not pgrep_available:
+        _check(checks, name="live_bot_process", status="WARN", detail="live_bot.py unverified (pgrep blocked)")
+        _check(checks, name="dashboard_process", status="WARN", detail="dashboard unverified (pgrep blocked)")
+    else:
+        bot_count, _ = _pgrep("live_bot.py")
+        if bot_count == 0:
+            _check(checks, name="live_bot_process", status="WARN", detail="live_bot.py not running")
+        elif bot_count == 1:
+            _check(checks, name="live_bot_process", status="PASS", detail="live_bot.py running (1)")
         else:
-            _check(checks, name=f"launchagent:{label}", status="PASS", detail=f"{label} loaded ({info})")
+            _check(checks, name="live_bot_process", status="FAIL", detail=f"duplicate live_bot ({bot_count})")
 
-    caffeinate_count = pgrep("caffeinate -d -i -m")
-    _check(
-        checks,
-        name="awake_guard_caffeinate",
-        status="PASS" if caffeinate_count >= 1 else "WARN",
-        detail=f"caffeinate processes={caffeinate_count}",
-    )
-
-    bot_count = pgrep("live_bot.py")
-    if bot_count == 0:
-        _check(checks, name="live_bot_process", status="WARN", detail="live_bot.py not running")
-    elif bot_count == 1:
-        _check(checks, name="live_bot_process", status="PASS", detail="live_bot.py running (1)")
-    else:
-        _check(checks, name="live_bot_process", status="FAIL", detail=f"duplicate live_bot ({bot_count})")
-
-    dash_count = pgrep("streamlit run dashboard_v2.py")
-    if dash_count == 0:
-        _check(checks, name="dashboard_process", status="WARN", detail="dashboard not running")
-    elif dash_count == 1:
-        _check(checks, name="dashboard_process", status="PASS", detail="dashboard running (1)")
-    else:
-        _check(checks, name="dashboard_process", status="WARN", detail=f"duplicate dashboard ({dash_count})")
+        dash_count, _ = _pgrep("streamlit run dashboard_v2.py")
+        if dash_count == 0:
+            _check(checks, name="dashboard_process", status="WARN", detail="dashboard not running")
+        elif dash_count == 1:
+            _check(checks, name="dashboard_process", status="PASS", detail="dashboard running (1)")
+        else:
+            _check(checks, name="dashboard_process", status="WARN", detail=f"duplicate dashboard ({dash_count})")
 
     _check(
         checks,

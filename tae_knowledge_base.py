@@ -23,6 +23,7 @@ FADE_HISTORY_CSV = Path("runtime_outputs/tae_intraday_fade_history.csv")
 FADE_DAILY_SUMMARY_JSON = Path("runtime_outputs/tae_intraday_fade_daily_summary.json")
 KNOWLEDGE_CANDIDATES_JSON = Path("tae_knowledge_candidates.json")
 DISCOVERY_RANKINGS_JSON = Path("tae_discovery_hypothesis_rankings.json")
+CONFIDENCE_EVOLUTION_JSON = Path("tae_confidence_evolution.json")
 
 OUTPUT_JSON = Path("tae_knowledge_base.json")
 OUTPUT_MD = Path("tae_knowledge_base.md")
@@ -34,7 +35,11 @@ SHADOW_RECOMMENDATIONS = frozenset(
         "PRIORITIZE_TRACKING",
         "TEST_TRAILING_SHADOW",
         "TEST_PARTIAL_SELL_SHADOW",
+        "TEST_15M_COOLDOWN_SHADOW",
+        "SCORE_DECAY_SHADOW",
         "INSUFFICIENT_DATA",
+        "DO_NOT_PROMOTE_TO_ADVISORY_YET",
+        "DO_NOT_PROMOTE_TO_LIVE",
     }
 )
 
@@ -112,6 +117,12 @@ def sanitize_recommendation(value: str | None) -> str:
         return "INSUFFICIENT_DATA"
     if "PRIORITIZE" in rec or "TRACK" in rec:
         return "PRIORITIZE_TRACKING"
+    if "SCORE_DECAY" in rec:
+        return "SCORE_DECAY_SHADOW"
+    if "COOLDOWN" in rec:
+        return "TEST_15M_COOLDOWN_SHADOW"
+    if "DO_NOT_PROMOTE" in rec:
+        return "DO_NOT_PROMOTE_TO_ADVISORY_YET"
     return "CONTINUE_OBSERVATION"
 
 
@@ -462,6 +473,130 @@ def normalize_discovery_rankings(
     return entries
 
 
+CONFIDENCE_EVOLUTION_CATEGORIES: dict[str, str] = {
+    "SCORE_PERSISTENCE_AFTER_STOP": "score_decay",
+    "STOP_REENTRY_CHURN": "reentry",
+    "MISSED_PROFIT_PROTECTION": "profit_protection",
+    "TRAILING_1_PROTECTION_HYPOTHESIS": "profit_protection",
+    "COOLDOWN_15M_HYPOTHESIS": "reentry",
+    "SCORE_DECAY_AFTER_STOP": "score_decay",
+    "SCORE_DECAY_SHADOW": "score_decay",
+}
+
+
+def map_confidence_evolution_status(
+    confidence_after: str,
+    upstream_status: str,
+) -> str:
+    """Map X.KNOWLEDGE-1B evolution status into knowledge VIEW status."""
+    if str(upstream_status).upper() == "DO_NOT_PROMOTE":
+        return "EXPERIMENTAL"
+    conf = str(confidence_after or "LOW").upper()
+    st = str(upstream_status or "EXPERIMENTAL").upper()
+    if conf == "HIGH" and st in {"WATCH", "LEARNING"}:
+        return "LEARNING"
+    if conf == "MEDIUM":
+        return "WATCH" if st == "WATCH" else "LEARNING"
+    if conf == "LOW":
+        return "EXPERIMENTAL"
+    if st in {"EXPERIMENTAL", "LEARNING", "WATCH", "CONFIRMED", "RETIRED"}:
+        return st
+    return "EXPERIMENTAL"
+
+
+def map_confidence_evolution_recommendation(
+    upstream_status: str,
+    recommendation: str | None,
+) -> str:
+    if str(upstream_status).upper() == "DO_NOT_PROMOTE":
+        return sanitize_recommendation("DO_NOT_PROMOTE_TO_ADVISORY_YET")
+    return sanitize_recommendation(recommendation)
+
+
+def normalize_confidence_evolution(
+    data: dict[str, Any],
+    source_file: str,
+) -> list[dict[str, Any]]:
+    generated = str(data.get("generated_at", datetime.now().isoformat(timespec="seconds")))
+    entries: list[dict[str, Any]] = []
+
+    for row in data.get("confidence_evolution_entries") or []:
+        hypothesis = str(row.get("hypothesis", "UNKNOWN"))
+        upstream_status = str(row.get("status", "EXPERIMENTAL"))
+        confidence_after = str(row.get("confidence_after", "LOW"))
+        kb_status = map_confidence_evolution_status(confidence_after, upstream_status)
+        recommendation = map_confidence_evolution_recommendation(upstream_status, row.get("recommendation"))
+        entry_id = str(row.get("id") or f"ce_{_slug(hypothesis)}")
+        entries.append(
+            make_entry(
+                entry_id=f"kb_{entry_id}" if not entry_id.startswith("kb_") else entry_id,
+                title=f"Confidence evolution: {hypothesis.replace('_', ' ').title()}",
+                description=str(row.get("reason", "")),
+                source="confidence_evolution",
+                source_file=source_file,
+                category=CONFIDENCE_EVOLUTION_CATEGORIES.get(hypothesis, "cognitive_evolution"),
+                subject=hypothesis,
+                pattern_type=hypothesis,
+                first_seen=generated,
+                last_seen=generated,
+                observations=int(row.get("evidence_count") or 0),
+                confidence=confidence_after,
+                status=kb_status,
+                recommendation=recommendation,
+                trend=str(row.get("trend", "NEW")),
+                metrics={
+                    "confidence_before": row.get("confidence_before"),
+                    "confidence_after": row.get("confidence_after"),
+                    "confidence_delta": row.get("confidence_delta"),
+                    "positive_evidence": row.get("positive_evidence"),
+                    "negative_evidence": row.get("negative_evidence"),
+                    "upstream_status": upstream_status,
+                    "upstream_source": row.get("source"),
+                },
+                evidence_refs=[f"{source_file}#confidence_evolution_entries/{entry_id}"],
+            )
+        )
+
+    for cand in data.get("score_decay_candidates") or []:
+        ticker = str(cand.get("ticker") or "unknown")
+        stop_time = str(cand.get("stop_time") or generated)
+        slug = _slug(f"{ticker}_{stop_time}")
+        subject = f"{ticker}|{stop_time}"
+        entries.append(
+            make_entry(
+                entry_id=f"kb_ce_decay_{slug}",
+                title=f"Score decay shadow: {ticker}",
+                description=str(cand.get("reason", "")),
+                source="confidence_evolution",
+                source_file=source_file,
+                category="score_decay",
+                subject=subject,
+                pattern_type="SCORE_DECAY_SHADOW",
+                first_seen=stop_time,
+                last_seen=generated,
+                observations=1,
+                confidence=str(cand.get("confidence", "LOW")),
+                status=map_confidence_evolution_status(
+                    str(cand.get("confidence", "LOW")),
+                    "LEARNING",
+                ),
+                recommendation="SCORE_DECAY_SHADOW",
+                trend="IMPROVING" if str(cand.get("confidence", "")).upper() == "HIGH" else "NEW",
+                metrics={
+                    "original_score": cand.get("original_score"),
+                    "shadow_adjusted_score": cand.get("shadow_adjusted_score"),
+                    "decay_window_minutes": cand.get("decay_window_minutes"),
+                    "stop_time": cand.get("stop_time"),
+                    "reentry_time": cand.get("reentry_time"),
+                    "outcome": cand.get("outcome"),
+                },
+                evidence_refs=[f"{source_file}#score_decay_candidates/{ticker}/{stop_time}"],
+            )
+        )
+
+    return entries
+
+
 def normalize_fade_history_metadata(
     df: pd.DataFrame,
     source_file: str,
@@ -557,6 +692,7 @@ def build_knowledge_base(
     fade_daily_summary: Path = FADE_DAILY_SUMMARY_JSON,
     knowledge_candidates: Path = KNOWLEDGE_CANDIDATES_JSON,
     discovery_rankings: Path = DISCOVERY_RANKINGS_JSON,
+    confidence_evolution: Path = CONFIDENCE_EVOLUTION_JSON,
 ) -> dict[str, Any]:
     sources_loaded: dict[str, bool] = {}
     entries: list[dict[str, Any]] = []
@@ -594,6 +730,11 @@ def build_knowledge_base(
     sources_loaded[str(discovery_rankings)] = ok
     if rankings_data:
         entries.extend(normalize_discovery_rankings(rankings_data, str(discovery_rankings)))
+
+    confidence_data, ok = load_json(confidence_evolution)
+    sources_loaded[str(confidence_evolution)] = ok
+    if confidence_data:
+        entries.extend(normalize_confidence_evolution(confidence_data, str(confidence_evolution)))
 
     entries = dedupe_entries(entries)
     summary = summarize_entries(entries)
@@ -655,6 +796,7 @@ def write_knowledge_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
     growing = [e for e in entries if e.get("status") == "LEARNING" and e.get("trend") in {"NEW", "IMPROVING"}]
     needs_data = [e for e in entries if e.get("recommendation") == "INSUFFICIENT_DATA"]
     declining = [e for e in entries if e.get("trend") == "DECLINING" or e.get("status") == "RETIRED"]
+    confidence_evolution_entries = [e for e in entries if e.get("source") == "confidence_evolution"]
 
     base_md = [
         "# TAE Knowledge Base",
@@ -675,6 +817,11 @@ def write_knowledge_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
         _entries_table(needs_data),
         "## Retired / Declining",
         _entries_table(declining),
+        "",
+        "## Confidence Evolution (X.KNOWLEDGE-1B/1C)",
+        "_Ingested from `tae_confidence_evolution.json` — SHADOW_ONLY, not promoted to live._",
+        "",
+        _entries_table(confidence_evolution_entries),
         "",
         "## Summary counts",
         json.dumps(report.get("summary", {}), indent=2),
@@ -710,8 +857,10 @@ def write_knowledge_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
 
 def print_summary(report: dict[str, Any]) -> None:
     summary = report.get("summary") or {}
+    ce_count = (summary.get("by_source") or {}).get("confidence_evolution", 0)
     print("===== TAE KNOWLEDGE BASE (VIEW) =====")
     print("Entries:", summary.get("entries_total", 0))
+    print("Confidence evolution entries:", ce_count)
     print("By status:", summary.get("by_status", {}))
     print("Sources loaded:", sum(1 for v in (report.get("sources_loaded") or {}).values() if v))
     print("View type:", report.get("view_type"))

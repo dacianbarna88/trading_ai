@@ -34,6 +34,9 @@ LIVE_ADVISORY_SAFETY_BANNER = (
 )
 
 DEFAULT_OUTPUT_PATH = Path("tae_live_advisory.json")
+GOVERNOR_JSON_PATH = Path("tae_decision_governor.json")
+GOVERNOR_ENRICHMENT_MAX_BLOCKERS = 8
+GOVERNOR_ENRICHMENT_MAX_TICKER_SAMPLE = 5
 ADVISORY_INDEX_PATH = Path("tae_advisory_index.json")
 PORTFOLIO_PATH = Path("portfolio.csv")
 LIVE_SIGNALS_PATH = Path("live_signals.csv")
@@ -344,6 +347,7 @@ class LiveAdvisoryReport:
     warning_audit: list[dict[str, Any]] = field(default_factory=list)
     runtime_evidence_used: list[str] = field(default_factory=list)
     relevant_reports: dict[str, Any] = field(default_factory=dict)
+    governor_enrichment: dict[str, Any] = field(default_factory=dict)
     live_bot_not_modified: bool = True
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -381,11 +385,14 @@ class LiveAdvisoryReport:
             },
             "runtime_evidence_used": list(self.runtime_evidence_used),
             "relevant_reports_summary": self.relevant_reports,
+            "governor_enrichment": dict(self.governor_enrichment),
             "safety": {
                 "no_broker": True,
                 "no_execution": True,
                 "live_bot_not_modified": self.live_bot_not_modified,
                 "advisory_only": True,
+                "governor_informational_only": True,
+                "governor_controls_live_blocking": False,
             },
         }
 
@@ -398,6 +405,64 @@ class LiveAdvisoryBridge:
 
     def _path(self, name: str | Path) -> Path:
         return self._root / name
+
+    @staticmethod
+    def _extract_governor_enrichment(payload: dict[str, Any] | None) -> dict[str, Any]:
+        """Read-only governor VIEW summary for advisory artifact enrichment."""
+        base: dict[str, Any] = {
+            "present": False,
+            "informational_only": True,
+            "controls_live_blocking": False,
+            "source": str(GOVERNOR_JSON_PATH),
+        }
+        if not payload:
+            return base
+
+        readiness = payload.get("readiness") or {}
+        shadow = payload.get("shadow_verdict") or {}
+        blockers = payload.get("blocker_summary") or []
+        posture_sample = [
+            row
+            for row in (payload.get("ticker_postures") or [])
+            if isinstance(row, dict) and row.get("posture") in ("WATCH", "BLOCKED")
+        ][:GOVERNOR_ENRICHMENT_MAX_TICKER_SAMPLE]
+
+        return {
+            **base,
+            "present": True,
+            "generated_at": payload.get("generated_at"),
+            "mode": payload.get("mode"),
+            "view_type": payload.get("view_type"),
+            "overall_advisory_posture": payload.get("overall_advisory_posture"),
+            "readiness": {
+                "final_status": readiness.get("final_status"),
+                "protect_readiness": readiness.get("protect_readiness"),
+                "cooldown_readiness": readiness.get("cooldown_readiness"),
+            },
+            "posture_counts": dict(payload.get("posture_counts") or {}),
+            "shadow_verdict": {
+                "primary_cause": shadow.get("primary_cause"),
+                "secondary_cause": shadow.get("secondary_cause"),
+                "best_shadow_hypothesis": shadow.get("best_shadow_hypothesis"),
+            },
+            "blocker_codes": [
+                {"code": item.get("code"), "detail": item.get("detail")}
+                for item in blockers[:GOVERNOR_ENRICHMENT_MAX_BLOCKERS]
+                if isinstance(item, dict)
+            ],
+            "ticker_posture_sample": posture_sample,
+            "advisory_notes": list(payload.get("advisory_notes") or [])[:5],
+            "sources_loaded_count": sum(
+                1 for loaded in (payload.get("sources_loaded") or {}).values() if loaded
+            ),
+            "governor_note": payload.get("governor_note"),
+            "informational_only": True,
+            "controls_live_blocking": False,
+        }
+
+    def _load_governor_enrichment(self) -> dict[str, Any]:
+        payload, _error = _load_json(self._path(GOVERNOR_JSON_PATH))
+        return self._extract_governor_enrichment(payload)
 
     def _read_portfolio_rows(self) -> tuple[list[dict[str, str]], str | None]:
         path = self._path(PORTFOLIO_PATH)
@@ -1701,6 +1766,7 @@ class LiveAdvisoryBridge:
                 }
                 for name, meta in relevant_meta.items()
             },
+            governor_enrichment=self._load_governor_enrichment(),
             live_bot_not_modified=live_bot_not_modified,
         )
 
@@ -1772,4 +1838,23 @@ class LiveAdvisoryBridge:
         lines.extend(["", "===== SAFETY ====="])
         for key, value in payload["safety"].items():
             lines.append(f"  {key}: {value}")
+        gov = payload.get("governor_enrichment") or {}
+        lines.extend(["", "===== GOVERNOR ENRICHMENT (INFORMATIONAL ONLY) ====="])
+        lines.append(f"  present: {gov.get('present')}")
+        lines.append(f"  informational_only: {gov.get('informational_only')}")
+        lines.append(f"  controls_live_blocking: {gov.get('controls_live_blocking')}")
+        if gov.get("present"):
+            lines.append(f"  overall_advisory_posture: {gov.get('overall_advisory_posture')}")
+            readiness = gov.get("readiness") or {}
+            lines.append(
+                f"  readiness: final={readiness.get('final_status')} "
+                f"protect={readiness.get('protect_readiness')} "
+                f"cooldown={readiness.get('cooldown_readiness')}"
+            )
+            lines.append(f"  posture_counts: {gov.get('posture_counts')}")
+            shadow = gov.get("shadow_verdict") or {}
+            lines.append(
+                f"  shadow_verdict: primary={shadow.get('primary_cause')} "
+                f"hypothesis={shadow.get('best_shadow_hypothesis')}"
+            )
         return "\n".join(lines)
