@@ -31,6 +31,7 @@ from research_core.governance.shadow_validation_ledger import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_SUMMARY_PATH = Path("tae_shadow_validation_summary.json")
+DEFAULT_OUTCOMES_PATH = Path("tae_shadow_validation_outcomes.json")
 SCHEMA = "tae.shadow_validation_summary.v1"
 
 
@@ -89,7 +90,21 @@ def load_events(path: Path | str | None = None) -> list[dict[str, Any]]:
     return rows
 
 
-def build_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+def _load_outcomes_summary(path: Path | str | None = None) -> dict[str, Any] | None:
+    outcomes_path = Path(path or DEFAULT_OUTCOMES_PATH)
+    if not outcomes_path.is_file():
+        return None
+    try:
+        payload = json.loads(outcomes_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def build_summary(
+    events: list[dict[str, Any]],
+    outcomes_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     total = len(events)
     buy_allowed = sum(1 for e in events if e.get("event_type") == EVENT_BUY_ALLOWED)
     buy_blocked = sum(
@@ -117,7 +132,32 @@ def build_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
 
     latest = events[-20:] if events else []
 
-    return {
+    outcome_status = "PENDING_NEXT_PHASE"
+    outcome_attribution: dict[str, Any] | None = None
+    if outcomes_report:
+        outcome_status = str(
+            outcomes_report.get("outcome_tracking_status") or outcome_status
+        )
+        headline = (
+            outcomes_report.get("aggregate_statistics", {})
+            .get("windows", {})
+            .get("10", {})
+        )
+        outcome_attribution = {
+            "eligible_blocked_events": outcomes_report.get("eligible_events"),
+            "headline_window_trading_days": 10,
+            "win": headline.get("win"),
+            "loss": headline.get("loss"),
+            "neutral": headline.get("neutral"),
+            "pending": headline.get("pending"),
+            "mean_intervention_value_usd": headline.get("mean_intervention_value_usd"),
+            "learning_recommendation": (
+                outcomes_report.get("learning_promotion", {}).get("recommendation")
+            ),
+            "policy_change_allowed": outcomes_report.get("policy_change_allowed", False),
+        }
+
+    summary = {
         "schema": SCHEMA,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": MODE,
@@ -132,8 +172,11 @@ def build_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "average_advisory_confidence": avg_confidence,
         "top_block_reasons": dict(block_reasons.most_common(10)),
         "latest_20_events": latest,
-        "outcome_tracking_status": "PENDING_NEXT_PHASE",
+        "outcome_tracking_status": outcome_status,
     }
+    if outcome_attribution is not None:
+        summary["outcome_attribution"] = outcome_attribution
+    return summary
 
 
 def persist_summary(
@@ -148,7 +191,8 @@ def persist_summary(
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     events = load_events()
-    summary = build_summary(events)
+    outcomes = _load_outcomes_summary()
+    summary = build_summary(events, outcomes_report=outcomes)
     out_path = persist_summary(summary)
 
     logger.info("Events loaded: %d", summary["total_events"])
