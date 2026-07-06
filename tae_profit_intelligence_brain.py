@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-TAE Profit Intelligence Brain v1 — SHADOW_ONLY / NO_BROKER.
+TAE Profit Intelligence Brain v2 — SHADOW_ONLY / NO_BROKER.
 
-Multi-factor shadow recommendation engine for profit protection.
+Multi-factor shadow recommendation engine with Profit Survival Probability (PSP).
 Does NOT modify live_bot, portfolio, signals, or broker execution.
 """
 
@@ -41,6 +41,19 @@ MEMORY_AVOID = frozenset({"AVOID_PROTECTION_FOR_NOW", "DO_NOT_PROMOTE_TO_ADVISOR
 MEMORY_SUPPORT = frozenset(
     {"TEST_TRAILING_SHADOW", "TEST_PARTIAL_SELL_SHADOW", "CONTINUE_OBSERVATION"}
 )
+
+PSP_URGENCY_LEVELS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
+REC_RANK = {
+    "NO_ACTION": 0,
+    "HOLD": 1,
+    "WATCH": 2,
+    "TRAIL_SHADOW": 3,
+    "PARTIAL_PROTECT_SHADOW": 4,
+    "EXIT_PROTECT_SHADOW": 5,
+}
+SMALL_PROFIT_PCT = 2.0
+SEVERE_DRAWDOWN_PCT = 5.0
+HIGH_PEAK_PCT = 6.0
 
 
 def load_json(path: Path) -> tuple[dict[str, Any] | None, bool]:
@@ -230,6 +243,176 @@ def vote_safety_guard(
     }
 
 
+def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
+    return max(low, min(high, value))
+
+
+def compute_psp(
+    *,
+    current_pct: float,
+    high_pct: float,
+    drawdown: float,
+    missed_usd: float,
+    votes: dict[str, str],
+) -> dict[str, Any]:
+    """
+    Shadow-only Profit Survival Probability model.
+    Returns survival prob, giveback risk prob, and protection urgency.
+    """
+    fade_from_peak = max(high_pct - current_pct, abs(drawdown))
+
+    if current_pct <= 0:
+        giveback = 1.0 if high_pct > 0 else 0.0
+        urgency = "CRITICAL" if high_pct >= HIGH_PEAK_PCT and fade_from_peak >= SEVERE_DRAWDOWN_PCT else "HIGH"
+        if high_pct < 2.0:
+            urgency = "MEDIUM"
+        return {
+            "psp_survival_probability": 0.0,
+            "psp_giveback_risk": round(giveback, 3),
+            "psp_protection_urgency": urgency,
+        }
+
+    retention = current_pct / high_pct if high_pct > 0 else 1.0
+    survival = 0.30 + 0.50 * _clamp(retention)
+
+    trend = votes.get("trend_defender", "")
+    decay = votes.get("profit_decay", "")
+    vol = votes.get("volatility_context", "")
+    memory = votes.get("profit_memory", "")
+
+    if trend == "HOLD_TREND_HEALTHY":
+        survival += 0.12
+    elif trend == "WEAKENING_TREND":
+        survival -= 0.15
+
+    if decay == "PROFIT_STABLE":
+        survival += 0.10
+    elif decay == "PROFIT_DECAY":
+        survival -= 0.12
+    elif decay == "PROFIT_AT_RISK":
+        survival -= 0.22
+
+    if vol == "NORMAL_VOLATILITY" and drawdown > -1.5:
+        survival += 0.06
+    elif vol == "HIGH_VOLATILITY_RISK":
+        survival -= 0.10
+
+    if current_pct < SMALL_PROFIT_PCT:
+        survival -= 0.05
+
+    survival = round(_clamp(survival), 3)
+
+    if retention <= 0.5:
+        giveback = 0.85
+    else:
+        giveback = 0.25 + 0.55 * (fade_from_peak / max(high_pct, 0.01))
+        if decay == "PROFIT_AT_RISK":
+            giveback += 0.15
+        if vol == "HIGH_VOLATILITY_RISK":
+            giveback += 0.10
+        if high_pct >= HIGH_PEAK_PCT and fade_from_peak >= SEVERE_DRAWDOWN_PCT:
+            giveback += 0.20
+        giveback = _clamp(giveback)
+
+    if memory == "MEMORY_SUPPORTS_PROTECTION" and decay in {"PROFIT_DECAY", "PROFIT_AT_RISK"}:
+        giveback = _clamp(giveback + 0.05)
+        survival = round(_clamp(survival - 0.05), 3)
+
+    giveback = round(giveback, 3)
+
+    if high_pct >= HIGH_PEAK_PCT and fade_from_peak >= SEVERE_DRAWDOWN_PCT + 2:
+        urgency = "CRITICAL"
+    elif giveback >= 0.75 or (survival <= 0.25 and decay == "PROFIT_AT_RISK"):
+        urgency = "CRITICAL"
+    elif giveback >= 0.55 or survival <= 0.40:
+        urgency = "HIGH"
+    elif giveback >= 0.35 or survival <= 0.60:
+        urgency = "MEDIUM"
+    else:
+        urgency = "LOW"
+
+    if memory == "MEMORY_SUPPORTS_PROTECTION" and decay in {"PROFIT_DECAY", "PROFIT_AT_RISK"}:
+        idx = PSP_URGENCY_LEVELS.index(urgency)
+        urgency = PSP_URGENCY_LEVELS[min(idx + 1, len(PSP_URGENCY_LEVELS) - 1)]
+
+    return {
+        "psp_survival_probability": survival,
+        "psp_giveback_risk": giveback,
+        "psp_protection_urgency": urgency,
+    }
+
+
+def adjust_recommendation_with_psp(
+    *,
+    pib_recommendation: str,
+    current_pct: float,
+    psp: dict[str, Any],
+    votes: dict[str, str],
+) -> tuple[str, str]:
+    """
+    Adjust v1 PIB recommendation using PSP metrics (shadow-only).
+    Returns (adjusted_recommendation, explanation_suffix).
+    """
+    survival = float(psp["psp_survival_probability"])
+    giveback = float(psp["psp_giveback_risk"])
+    urgency = str(psp["psp_protection_urgency"])
+    decay = votes.get("profit_decay", "")
+
+    adjusted = pib_recommendation
+    notes: list[str] = []
+
+    if current_pct <= 0:
+        if pib_recommendation in {"EXIT_PROTECT_SHADOW", "PARTIAL_PROTECT_SHADOW", "TRAIL_SHADOW"}:
+            adjusted = "WATCH"
+            notes.append("PSP: PnL ≤ 0 — downgraded to WATCH (no take-profit).")
+        elif pib_recommendation == "HOLD" and urgency in {"HIGH", "CRITICAL"}:
+            adjusted = "WATCH"
+            notes.append("PSP: profit already faded — observe recovery.")
+        else:
+            notes.append("PSP: survival=0 with non-positive PnL.")
+        return adjusted, " ".join(notes)
+
+    rank = REC_RANK.get(adjusted, 0)
+
+    if current_pct > 0 and current_pct < SMALL_PROFIT_PCT:
+        if adjusted == "EXIT_PROTECT_SHADOW":
+            adjusted = "WATCH"
+            notes.append("PSP: small positive profit — WATCH instead of EXIT.")
+        elif urgency == "CRITICAL" and adjusted in {"HOLD", "NO_ACTION"}:
+            adjusted = "WATCH"
+            notes.append("PSP: small profit but elevated giveback risk — WATCH.")
+        rank = REC_RANK.get(adjusted, rank)
+
+    if urgency == "CRITICAL" and current_pct >= SMALL_PROFIT_PCT:
+        target = "EXIT_PROTECT_SHADOW" if giveback >= 0.70 and decay == "PROFIT_AT_RISK" else "PARTIAL_PROTECT_SHADOW"
+        if REC_RANK[target] > rank:
+            adjusted = target
+            notes.append(f"PSP: CRITICAL urgency (giveback={giveback:.2f}) — escalated to {target}.")
+    elif urgency == "HIGH":
+        target = "PARTIAL_PROTECT_SHADOW" if decay == "PROFIT_AT_RISK" else "TRAIL_SHADOW"
+        if REC_RANK[target] > rank and current_pct >= 1.0:
+            adjusted = target
+            notes.append(f"PSP: HIGH urgency — escalated to {target}.")
+        elif adjusted in {"HOLD", "NO_ACTION"} and decay in {"PROFIT_DECAY", "PROFIT_AT_RISK"}:
+            adjusted = "WATCH"
+            notes.append("PSP: HIGH giveback risk — WATCH.")
+    elif urgency == "MEDIUM" and adjusted in {"HOLD", "NO_ACTION"} and decay != "PROFIT_STABLE":
+        adjusted = "WATCH"
+        notes.append("PSP: MEDIUM urgency with decay — WATCH.")
+
+    if survival >= 0.70 and urgency == "LOW" and adjusted in {"EXIT_PROTECT_SHADOW", "PARTIAL_PROTECT_SHADOW"}:
+        adjusted = "TRAIL_SHADOW" if decay == "PROFIT_DECAY" else "WATCH"
+        notes.append(f"PSP: strong survival ({survival:.2f}) — de-escalated protection.")
+
+    if not notes:
+        notes.append(
+            f"PSP: survival={survival:.2f}, giveback={giveback:.2f}, urgency={urgency} — "
+            f"confirms {pib_recommendation}."
+        )
+
+    return adjusted, " ".join(notes)
+
+
 def synthesize_recommendation(
     *,
     votes: dict[str, str],
@@ -397,6 +580,21 @@ def analyze_position(
     )
     confidence = conf_level if conf_level else confidence_from_observations(obs_count)
 
+    psp = compute_psp(
+        current_pct=current_pct,
+        high_pct=high_pct,
+        drawdown=drawdown,
+        missed_usd=missed_usd,
+        votes=votes,
+    )
+    psp_adjusted, psp_note = adjust_recommendation_with_psp(
+        pib_recommendation=final_rec,
+        current_pct=current_pct,
+        psp=psp,
+        votes=votes,
+    )
+    full_explanation = f"{explanation} {psp_note}"
+
     return {
         "ticker": ticker,
         "current_pct": round(current_pct, 2),
@@ -406,8 +604,13 @@ def analyze_position(
         "votes": votes,
         "safety_guard": safety,
         "final_recommendation": final_rec,
+        "existing_pib_recommendation": final_rec,
         "confidence": confidence,
-        "explanation": explanation,
+        "explanation": full_explanation,
+        "psp_survival_probability": psp["psp_survival_probability"],
+        "psp_giveback_risk": psp["psp_giveback_risk"],
+        "psp_protection_urgency": psp["psp_protection_urgency"],
+        "psp_adjusted_recommendation": psp_adjusted,
         "shadow_protection_signal": row.get("protection_signal"),
         "shadow_only": True,
     }
@@ -418,28 +621,27 @@ def build_global_verdict(
     *,
     shadow_loaded: bool,
     validation_loaded: bool,
-    validation_verdict: str | None,
 ) -> str:
     if not shadow_loaded or not positions:
-        return "NOT_READY"
+        return "PSP_NOT_READY"
     unknown_votes = sum(
         1
         for p in positions
         for v in (p.get("votes") or {}).values()
         if str(v).startswith("UNKNOWN")
     )
-    actionable = sum(
+    urgent = sum(
         1
         for p in positions
-        if p.get("final_recommendation") not in {"NO_ACTION", "HOLD"}
+        if p.get("psp_protection_urgency") in {"HIGH", "CRITICAL"}
     )
     if unknown_votes > len(positions) * 3:
-        return "SHADOW_ONLY_NEEDS_MORE_DATA"
-    if shadow_loaded and validation_loaded and validation_verdict == "PROMISING_BUT_NOT_READY":
-        return "SHADOW_ONLY_READY_FOR_OBSERVATION"
-    if actionable > 0 or len(positions) >= 3:
-        return "SHADOW_ONLY_READY_FOR_OBSERVATION"
-    return "SHADOW_ONLY_NEEDS_MORE_DATA"
+        return "PSP_SHADOW_NEEDS_MORE_DATA"
+    if shadow_loaded and validation_loaded and (urgent > 0 or len(positions) >= 3):
+        return "PSP_SHADOW_READY_FOR_OBSERVATION"
+    if len(positions) >= 1:
+        return "PSP_SHADOW_READY_FOR_OBSERVATION"
+    return "PSP_SHADOW_NEEDS_MORE_DATA"
 
 
 def build_brain_report(
@@ -478,9 +680,12 @@ def build_brain_report(
     positions.sort(key=lambda p: p.get("missed_usd", 0), reverse=True)
 
     rec_counts = {k: 0 for k in FINAL_RECOMMENDATIONS}
+    psp_rec_counts = {k: 0 for k in FINAL_RECOMMENDATIONS}
     for p in positions:
         rec = p.get("final_recommendation", "NO_ACTION")
         rec_counts[rec] = rec_counts.get(rec, 0) + 1
+        psp_rec = p.get("psp_adjusted_recommendation", rec)
+        psp_rec_counts[psp_rec] = psp_rec_counts.get(psp_rec, 0) + 1
 
     profit_at_risk = [
         p for p in positions if (p.get("votes") or {}).get("profit_decay") == "PROFIT_AT_RISK"
@@ -492,21 +697,42 @@ def build_brain_report(
             "current_pct": p["current_pct"],
             "high_pct": p["high_pct"],
             "final_recommendation": p["final_recommendation"],
+            "psp_adjusted_recommendation": p.get("psp_adjusted_recommendation"),
         }
         for p in profit_at_risk[:5]
     ]
+
+    by_giveback = sorted(positions, key=lambda p: p.get("psp_giveback_risk", 0), reverse=True)
+    top5_giveback = [
+        {
+            "ticker": p["ticker"],
+            "psp_giveback_risk": p.get("psp_giveback_risk"),
+            "psp_survival_probability": p.get("psp_survival_probability"),
+            "psp_protection_urgency": p.get("psp_protection_urgency"),
+            "current_pct": p["current_pct"],
+            "high_pct": p["high_pct"],
+            "psp_adjusted_recommendation": p.get("psp_adjusted_recommendation"),
+        }
+        for p in by_giveback[:5]
+    ]
+
+    survivals = [p.get("psp_survival_probability", 0) for p in positions]
+    givebacks = [p.get("psp_giveback_risk", 0) for p in positions]
+    urgent_count = sum(
+        1 for p in positions if p.get("psp_protection_urgency") in {"HIGH", "CRITICAL"}
+    )
 
     total_missed = round(sum(p.get("missed_usd", 0) for p in positions), 2)
     final_verdict = build_global_verdict(
         positions,
         shadow_loaded=shadow_loaded,
         validation_loaded=validation_loaded,
-        validation_verdict=validation_verdict,
     )
 
     return {
         "schema": "tae_profit_intelligence_brain",
-        "version": "v1",
+        "version": "v2",
+        "psp_enabled": True,
         "mode": "SHADOW_ONLY",
         "live_trading_impact": "NONE",
         "no_broker": True,
@@ -526,9 +752,24 @@ def build_brain_report(
         "global_summary": {
             "total_positions": len(positions),
             "recommendation_counts": rec_counts,
+            "psp_adjusted_recommendation_counts": psp_rec_counts,
             "total_missed_usd": total_missed,
+            "average_survival_probability": round(sum(survivals) / len(survivals), 3)
+            if survivals
+            else 0.0,
+            "average_giveback_risk": round(sum(givebacks) / len(givebacks), 3)
+            if givebacks
+            else 0.0,
+            "urgent_positions": urgent_count,
             "top_5_profit_at_risk": top5_at_risk,
+            "top_5_highest_giveback_risk": top5_giveback,
             "final_verdict": final_verdict,
+        },
+        "psp_config": {
+            "small_profit_pct": SMALL_PROFIT_PCT,
+            "high_peak_pct": HIGH_PEAK_PCT,
+            "severe_drawdown_pct": SEVERE_DRAWDOWN_PCT,
+            "urgency_levels": list(PSP_URGENCY_LEVELS),
         },
     }
 
@@ -538,8 +779,9 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path]:
 
     summary = report["global_summary"]
     counts = summary["recommendation_counts"]
+    psp_counts = summary.get("psp_adjusted_recommendation_counts") or {}
     lines = [
-        "# TAE Profit Intelligence Brain v1",
+        "# TAE Profit Intelligence Brain v2 (PSP)",
         "",
         f"**Generated:** {report['generated_at']}",
         f"**Mode:** {report['mode']} — {report['live_trading_impact']}",
@@ -549,22 +791,51 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path]:
         "",
         "## Global summary",
         f"- Total positions: **{summary['total_positions']}**",
+        f"- Avg survival probability: **{summary.get('average_survival_probability', 0)}**",
+        f"- Avg giveback risk: **{summary.get('average_giveback_risk', 0)}**",
+        f"- Urgent positions (HIGH/CRITICAL): **{summary.get('urgent_positions', 0)}**",
+        f"- Total missed USD: **{summary['total_missed_usd']}**",
+        "",
+        "### PIB v1 recommendations",
         f"- HOLD: **{counts.get('HOLD', 0)}** | WATCH: **{counts.get('WATCH', 0)}** | "
-        f"TRAIL_SHADOW: **{counts.get('TRAIL_SHADOW', 0)}** | "
+        f"TRAIL: **{counts.get('TRAIL_SHADOW', 0)}** | "
         f"PARTIAL: **{counts.get('PARTIAL_PROTECT_SHADOW', 0)}** | "
         f"EXIT: **{counts.get('EXIT_PROTECT_SHADOW', 0)}** | "
         f"NO_ACTION: **{counts.get('NO_ACTION', 0)}**",
-        f"- Total missed USD: **{summary['total_missed_usd']}**",
         "",
-        "## Top 5 profit-at-risk",
+        "### PSP-adjusted recommendations",
+        f"- HOLD: **{psp_counts.get('HOLD', 0)}** | WATCH: **{psp_counts.get('WATCH', 0)}** | "
+        f"TRAIL: **{psp_counts.get('TRAIL_SHADOW', 0)}** | "
+        f"PARTIAL: **{psp_counts.get('PARTIAL_PROTECT_SHADOW', 0)}** | "
+        f"EXIT: **{psp_counts.get('EXIT_PROTECT_SHADOW', 0)}** | "
+        f"NO_ACTION: **{psp_counts.get('NO_ACTION', 0)}**",
         "",
-        "| ticker | missed_usd | current_pct | high_pct | recommendation |",
-        "| --- | --- | --- | --- | --- |",
+        "## Top 5 highest giveback risk",
+        "",
+        "| ticker | giveback | survival | urgency | current% | high% | psp_rec |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
+    for row in summary.get("top_5_highest_giveback_risk") or []:
+        lines.append(
+            f"| {row['ticker']} | {row['psp_giveback_risk']} | {row['psp_survival_probability']} | "
+            f"{row['psp_protection_urgency']} | {row['current_pct']} | {row['high_pct']} | "
+            f"{row['psp_adjusted_recommendation']} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Top 5 profit-at-risk",
+            "",
+            "| ticker | missed_usd | current_pct | high_pct | pib_rec | psp_rec |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+    )
     for row in summary.get("top_5_profit_at_risk") or []:
         lines.append(
             f"| {row['ticker']} | {row['missed_usd']} | {row['current_pct']} | "
-            f"{row['high_pct']} | {row['final_recommendation']} |"
+            f"{row['high_pct']} | {row['final_recommendation']} | "
+            f"{row.get('psp_adjusted_recommendation', '—')} |"
         )
 
     lines.extend(
@@ -572,23 +843,24 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path]:
             "",
             "## Positions",
             "",
-            "| ticker | current% | high% | drawdown | missed | recommendation | confidence | trend | decay | vol | time | memory |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| ticker | current% | high% | drawdown | missed | survival | giveback | urgency | pib_rec | psp_rec |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for p in report.get("positions") or []:
-        v = p.get("votes") or {}
         lines.append(
             f"| {p['ticker']} | {p['current_pct']} | {p['high_pct']} | {p['drawdown']} | "
-            f"{p['missed_usd']} | {p['final_recommendation']} | {p['confidence']} | "
-            f"{v.get('trend_defender', '—')} | {v.get('profit_decay', '—')} | "
-            f"{v.get('volatility_context', '—')} | {v.get('time_intelligence', '—')} | "
-            f"{v.get('profit_memory', '—')} |"
+            f"{p['missed_usd']} | {p.get('psp_survival_probability')} | {p.get('psp_giveback_risk')} | "
+            f"{p.get('psp_protection_urgency')} | {p.get('existing_pib_recommendation')} | "
+            f"{p.get('psp_adjusted_recommendation')} |"
         )
 
     lines.extend(["", "## Explanations", ""])
     for p in report.get("positions") or []:
-        lines.append(f"### {p['ticker']} — {p['final_recommendation']}")
+        lines.append(
+            f"### {p['ticker']} — {p.get('psp_adjusted_recommendation')} "
+            f"(PIB: {p.get('existing_pib_recommendation')})"
+        )
         lines.append(p.get("explanation", ""))
         lines.append("")
 
@@ -598,19 +870,22 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path]:
 
 def print_summary(report: dict[str, Any]) -> None:
     summary = report["global_summary"]
-    counts = summary["recommendation_counts"]
-    print("===== TAE PROFIT INTELLIGENCE BRAIN v1 =====")
+    psp_counts = summary.get("psp_adjusted_recommendation_counts") or {}
+    print("===== TAE PROFIT INTELLIGENCE BRAIN v2 (PSP) =====")
     print("Mode: SHADOW_ONLY — no live orders")
     print("Final verdict:", summary["final_verdict"])
     print("Positions:", summary["total_positions"])
+    print("Avg survival:", summary.get("average_survival_probability"))
+    print("Avg giveback risk:", summary.get("average_giveback_risk"))
+    print("Urgent positions:", summary.get("urgent_positions"))
     print(
-        "HOLD / WATCH / TRAIL / PARTIAL / EXIT / NO_ACTION:",
-        counts.get("HOLD", 0),
-        counts.get("WATCH", 0),
-        counts.get("TRAIL_SHADOW", 0),
-        counts.get("PARTIAL_PROTECT_SHADOW", 0),
-        counts.get("EXIT_PROTECT_SHADOW", 0),
-        counts.get("NO_ACTION", 0),
+        "PSP-adjusted HOLD / WATCH / TRAIL / PARTIAL / EXIT / NO_ACTION:",
+        psp_counts.get("HOLD", 0),
+        psp_counts.get("WATCH", 0),
+        psp_counts.get("TRAIL_SHADOW", 0),
+        psp_counts.get("PARTIAL_PROTECT_SHADOW", 0),
+        psp_counts.get("EXIT_PROTECT_SHADOW", 0),
+        psp_counts.get("NO_ACTION", 0),
     )
     print("Total missed USD:", summary["total_missed_usd"])
 
