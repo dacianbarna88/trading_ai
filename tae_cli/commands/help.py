@@ -9,11 +9,13 @@ Available commands:
   health
   protect
   portfolio-protect
+  policy
   status
   help
 
   protect — run shadow profit protection + adaptive committee + context pipeline
   portfolio-protect — portfolio-level profit governor (PDG + PPG)
+  policy — adaptive profit policy memory + evaluation (PPG + APPE)
 ================================="""
 
 
