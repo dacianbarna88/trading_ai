@@ -15,6 +15,7 @@ from tae_profit_protection_shadow import (
     build_profit_protection_report,
     confidence_from_observations,
     evaluate_protection_signal,
+    evaluate_rules_v1,
     knowledge_prefers_trailing,
     write_outputs,
 )
@@ -158,6 +159,42 @@ class ProfitProtectionShadowTest(unittest.TestCase):
             "entries": [],
         }
         self.assertTrue(knowledge_prefers_trailing(kb))
+
+    def test_rules_v1_profit_lock(self) -> None:
+        rules = evaluate_rules_v1(current_pnl_pct=4.5, peak_pnl_pct=4.5)
+        self.assertIn("PROFIT_LOCK_ACTIVE", rules["flags"])
+        self.assertTrue(rules["profit_lock_active"])
+
+    def test_rules_v1_profit_at_risk(self) -> None:
+        rules = evaluate_rules_v1(current_pnl_pct=2.0, peak_pnl_pct=6.0)
+        self.assertIn("PROFIT_LOCK_ACTIVE", rules["flags"])
+        self.assertIn("PROFIT_AT_RISK", rules["flags"])
+        self.assertTrue(rules["profit_at_risk"])
+
+    def test_rules_v1_partial_take_profit_levels(self) -> None:
+        rules = evaluate_rules_v1(current_pnl_pct=10.5, peak_pnl_pct=10.5)
+        advisories = rules["partial_take_profit_advisories"]
+        self.assertEqual(
+            advisories,
+            [
+                "TAKE_PROFIT_PARTIAL_25",
+                "TAKE_PROFIT_PARTIAL_33",
+                "TAKE_PROFIT_PARTIAL_50",
+            ],
+        )
+
+    def test_rules_v1_no_take_profit_when_negative(self) -> None:
+        rules = evaluate_rules_v1(current_pnl_pct=-1.0, peak_pnl_pct=8.0)
+        self.assertEqual(rules["partial_take_profit_advisories"], [])
+        self.assertFalse(any(a.startswith("TAKE_PROFIT_PARTIAL") for a in rules["flags"]))
+
+    def test_rules_v1_reentry_cooldown(self) -> None:
+        rules = evaluate_rules_v1(
+            current_pnl_pct=2.0,
+            peak_pnl_pct=2.0,
+            reentry_cooldown=True,
+        )
+        self.assertIn("REENTRY_COOLDOWN_REQUIRED", rules["flags"])
 
     def test_json_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

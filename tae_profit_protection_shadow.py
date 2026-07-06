@@ -25,6 +25,17 @@ KNOWLEDGE_BASE_JSON = Path("tae_knowledge_base.json")
 
 OUTPUT_JSON = Path("tae_profit_protection_shadow.json")
 OUTPUT_MD = Path("tae_profit_protection_shadow.md")
+COOLDOWN_AUDIT_JSON = Path("tae_stop_reentry_cooldown_audit.json")
+
+RULES_VERSION = "v1"
+PROFIT_LOCK_PCT = 4.0
+PEAK_FADE_ALERT_PCT = 1.5
+PARTIAL_ADVISORY_LEVELS: tuple[tuple[float, str], ...] = (
+    (6.0, "TAKE_PROFIT_PARTIAL_25"),
+    (8.0, "TAKE_PROFIT_PARTIAL_33"),
+    (10.0, "TAKE_PROFIT_PARTIAL_50"),
+)
+COOLDOWN_HOURS_AFTER_PROFIT_SELL = 24.0
 
 SHADOW_ACTIONS = frozenset(
     {
@@ -122,6 +133,168 @@ def preferred_trailing_action(shadow: dict[str, float]) -> str:
     return "TEST_TRAILING_1_5"
 
 
+def load_peak_state(path: Path = OUTPUT_JSON) -> dict[str, float]:
+    """Highest observed PnL % per ticker from prior shadow run (read-only)."""
+    data, ok = load_json(path)
+    if not ok or not data:
+        return {}
+    peaks: dict[str, float] = {}
+    for row in data.get("positions") or []:
+        ticker = str(row.get("ticker", "")).upper()
+        if not ticker:
+            continue
+        rules = row.get("rules_v1") or {}
+        peak = rules.get("peak_pnl_pct")
+        if peak is not None:
+            peaks[ticker] = float(peak)
+    return peaks
+
+
+def portfolio_latest_metrics(portfolio: pd.DataFrame) -> dict[str, dict[str, float]]:
+    """Latest PnL_% and Current_Price per ticker from portfolio rows (read-only)."""
+    if portfolio.empty:
+        return {}
+    df = portfolio.copy()
+    df["Ticker"] = df["Ticker"].astype(str).str.upper()
+    metrics: dict[str, dict[str, float]] = {}
+    for ticker, group in df.groupby("Ticker"):
+        if ticker == "CASH":
+            continue
+        last = group.iloc[-1]
+        pnl_pct = pd.to_numeric(last.get("PnL_%"), errors="coerce")
+        current_price = pd.to_numeric(last.get("Current_Price"), errors="coerce")
+        entry: dict[str, float] = {}
+        if pd.notna(pnl_pct):
+            entry["current_pnl_pct"] = float(pnl_pct)
+        if pd.notna(current_price):
+            entry["current_price"] = float(current_price)
+        if entry:
+            metrics[ticker] = entry
+    return metrics
+
+
+def detect_reentry_cooldown(
+    ticker: str,
+    portfolio: pd.DataFrame,
+    *,
+    cooldown_hours: float = COOLDOWN_HOURS_AFTER_PROFIT_SELL,
+) -> tuple[bool, str]:
+    """
+    REENTRY_COOLDOWN_REQUIRED when a profitable SELL was followed by a BUY
+    within the cooldown window (read-only portfolio scan).
+    """
+    if portfolio.empty:
+        return False, ""
+
+    df = portfolio.copy()
+    df["Ticker"] = df["Ticker"].astype(str).str.upper()
+    df = df[df["Ticker"] == ticker.upper()].copy()
+    if df.empty:
+        return False, ""
+
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df.sort_values("Date")
+
+    last_profit_sell: pd.Timestamp | None = None
+    last_profit_reason = ""
+    for _, row in df.iterrows():
+        action = str(row.get("Action", "")).upper()
+        reason = str(row.get("Reason", ""))
+        if action == "SELL" and "PROFIT" in reason.upper():
+            ts = row["Date"]
+            if pd.notna(ts):
+                last_profit_sell = ts
+                last_profit_reason = reason
+
+    if last_profit_sell is None:
+        return False, ""
+
+    buys_after = df[
+        (df["Action"].astype(str).str.upper() == "BUY")
+        & (df["Date"] > last_profit_sell)
+    ]
+    if buys_after.empty:
+        return False, ""
+
+    first_rebuy = buys_after.iloc[0]
+    rebuy_ts = first_rebuy["Date"]
+    if pd.isna(rebuy_ts):
+        return False, ""
+
+    hours = (rebuy_ts - last_profit_sell).total_seconds() / 3600.0
+    if hours <= cooldown_hours:
+        return (
+            True,
+            f"SHADOW_ONLY: profitable SELL then BUY within {hours:.1f}h "
+            f"(cooldown {cooldown_hours:.0f}h); last sell reason: {last_profit_reason}",
+        )
+    return False, ""
+
+
+def evaluate_rules_v1(
+    *,
+    current_pnl_pct: float,
+    peak_pnl_pct: float,
+    reentry_cooldown: bool = False,
+    reentry_reason: str = "",
+) -> dict[str, Any]:
+    """
+    TAE Profit Protection Rules v1 — advisory flags only (SHADOW_ONLY).
+    """
+    flags: list[str] = []
+    partial_advisories: list[str] = []
+
+    profit_lock_active = current_pnl_pct >= PROFIT_LOCK_PCT or peak_pnl_pct >= PROFIT_LOCK_PCT
+    if profit_lock_active:
+        flags.append("PROFIT_LOCK_ACTIVE")
+
+    fade_from_peak = peak_pnl_pct - current_pnl_pct
+    profit_at_risk = (
+        profit_lock_active
+        and peak_pnl_pct >= PROFIT_LOCK_PCT
+        and fade_from_peak >= PEAK_FADE_ALERT_PCT
+    )
+    if profit_at_risk:
+        flags.append("PROFIT_AT_RISK")
+
+    if current_pnl_pct > 0:
+        for threshold, advisory in PARTIAL_ADVISORY_LEVELS:
+            if current_pnl_pct >= threshold:
+                partial_advisories.append(advisory)
+                flags.append(advisory)
+
+    if reentry_cooldown:
+        flags.append("REENTRY_COOLDOWN_REQUIRED")
+
+    primary = flags[-1] if flags else "NO_RULES_V1_FLAG"
+
+    reason_parts: list[str] = ["SHADOW_ONLY: rules v1 evaluation."]
+    if profit_lock_active:
+        reason_parts.append(f"Profit lock at >= {PROFIT_LOCK_PCT}%.")
+    if profit_at_risk:
+        reason_parts.append(
+            f"Peak {peak_pnl_pct:.2f}% faded {fade_from_peak:.2f}% from peak."
+        )
+    if partial_advisories:
+        reason_parts.append(f"Partial TP advisories: {', '.join(partial_advisories)}.")
+    if reentry_cooldown and reentry_reason:
+        reason_parts.append(reentry_reason)
+
+    return {
+        "rules_version": RULES_VERSION,
+        "flags": flags,
+        "primary_flag": primary if flags else "NO_RULES_V1_FLAG",
+        "profit_lock_active": profit_lock_active,
+        "profit_at_risk": profit_at_risk,
+        "peak_pnl_pct": round(peak_pnl_pct, 2),
+        "current_pnl_pct": round(current_pnl_pct, 2),
+        "fade_from_peak_pct": round(fade_from_peak, 2),
+        "partial_take_profit_advisories": partial_advisories,
+        "reentry_cooldown_required": reentry_cooldown,
+        "reason": " ".join(reason_parts),
+    }
+
+
 def evaluate_protection_signal(
     *,
     high_pct: float,
@@ -196,6 +369,10 @@ def analyze_position(
     obs_count: int,
     discovery_strategy: str | None,
     knowledge_trailing: bool,
+    prior_peak_pnl_pct: float | None = None,
+    portfolio_pnl_pct: float | None = None,
+    reentry_cooldown: bool = False,
+    reentry_reason: str = "",
 ) -> dict[str, Any]:
     ticker = str(position.get("ticker", "")).upper()
     shares = float(fifo_shares if fifo_shares is not None else position.get("shares") or 0)
@@ -223,6 +400,21 @@ def analyze_position(
             action = preferred_trailing_action(shadow)
             reason = "SHADOW_ONLY: knowledge base prioritizes trailing shadow testing."
 
+    effective_current = float(
+        portfolio_pnl_pct if portfolio_pnl_pct is not None else current_pct
+    )
+    peak_pnl = max(
+        effective_current,
+        high_pct,
+        float(prior_peak_pnl_pct or 0),
+    )
+    rules_v1 = evaluate_rules_v1(
+        current_pnl_pct=effective_current,
+        peak_pnl_pct=peak_pnl,
+        reentry_cooldown=reentry_cooldown,
+        reentry_reason=reentry_reason,
+    )
+
     return {
         "ticker": ticker,
         "shares": round(shares, 4),
@@ -240,6 +432,7 @@ def analyze_position(
         "estimated_protected_value_30": round(shadow["sell_30"], 2),
         "estimated_trailing_value_1": round(shadow["trailing_1"], 2),
         "estimated_trailing_value_1_5": round(shadow["trailing_1_5"], 2),
+        "rules_v1": rules_v1,
         "shadow_only": True,
     }
 
@@ -272,6 +465,19 @@ def build_daily_summary(positions: list[dict[str, Any]]) -> dict[str, Any]:
         "estimated_total_trailing_1_5": round(
             sum(p.get("estimated_trailing_value_1_5", 0) for p in positions), 2
         ),
+        "num_profit_lock_active": sum(
+            1 for p in positions if (p.get("rules_v1") or {}).get("profit_lock_active")
+        ),
+        "num_profit_at_risk": sum(
+            1 for p in positions if (p.get("rules_v1") or {}).get("profit_at_risk")
+        ),
+        "num_partial_tp_advisories": sum(
+            len((p.get("rules_v1") or {}).get("partial_take_profit_advisories") or [])
+            for p in positions
+        ),
+        "num_reentry_cooldown": sum(
+            1 for p in positions if (p.get("rules_v1") or {}).get("reentry_cooldown_required")
+        ),
     }
 
     method_totals = {
@@ -284,13 +490,24 @@ def build_daily_summary(positions: list[dict[str, Any]]) -> dict[str, Any]:
     totals["best_shadow_protection_method"] = best_method
 
     actionable = totals["num_watch"] + totals["num_partial20"] + totals["num_partial30"] + totals["num_trailing"]
+    v1_actionable = (
+        totals["num_profit_at_risk"]
+        + totals["num_partial_tp_advisories"]
+        + totals["num_reentry_cooldown"]
+    )
     if totals["total_missed_opportunity"] > 300:
         verdict = "SHADOW_ONLY: TAE missed major intraday profit — protection shadow review recommended."
-    elif actionable > 0:
+    elif actionable > 0 or v1_actionable > 0:
         verdict = "SHADOW_ONLY: profit protection signals active — paper simulation only."
     else:
         verdict = "SHADOW_ONLY: no profit protection shadow triggers today."
 
+    totals["rules_v1_verdict"] = (
+        f"SHADOW_ONLY rules v1: {totals['num_profit_lock_active']} lock, "
+        f"{totals['num_profit_at_risk']} at-risk, "
+        f"{totals['num_partial_tp_advisories']} partial TP advisories, "
+        f"{totals['num_reentry_cooldown']} reentry cooldown."
+    )
     totals["verdict"] = verdict
     return totals
 
@@ -318,24 +535,50 @@ def build_profit_protection_report(
     sources_loaded[str(portfolio_path)] = portfolio_path.is_file()
 
     fifo_map: dict[str, tuple[float, float]] = {}
+    portfolio_metrics: dict[str, dict[str, float]] = {}
+    portfolio_df = pd.DataFrame()
+    cooldown_by_ticker: dict[str, tuple[bool, str]] = {}
     if portfolio_path.is_file():
         try:
-            portfolio = pd.read_csv(portfolio_path)
-            for ticker, pos in fifo_open_positions(portfolio).items():
+            portfolio_df = pd.read_csv(portfolio_path)
+            for ticker, pos in fifo_open_positions(portfolio_df).items():
                 fifo_map[ticker] = (pos.shares, pos.avg_price)
+            portfolio_metrics = portfolio_latest_metrics(portfolio_df)
+            for ticker in fifo_map:
+                cooldown_by_ticker[ticker] = detect_reentry_cooldown(ticker, portfolio_df)
         except OSError:
             pass
 
+    prior_peaks = load_peak_state()
     obs_counts = observation_counts(history_csv_path)
     discovery_by_ticker = discovery_best_shadow_by_ticker(discovery)
     knowledge_trailing = knowledge_prefers_trailing(knowledge)
 
-    positions: list[dict[str, Any]] = []
+    fade_rows: dict[str, dict[str, Any]] = {}
     for row in (fade_intel or {}).get("positions") or []:
         if row.get("classification") == "DATA_UNAVAILABLE":
             continue
         ticker = str(row.get("ticker", "")).upper()
+        if ticker:
+            fade_rows[ticker] = row
+
+    all_tickers = sorted(set(fade_rows) | set(fifo_map))
+    positions: list[dict[str, Any]] = []
+    for ticker in all_tickers:
+        row = fade_rows.get(ticker) or {
+            "ticker": ticker,
+            "shares": fifo_map.get(ticker, (0, 0))[0],
+            "avg_price": fifo_map.get(ticker, (0, 0))[1],
+            "high_pct": portfolio_metrics.get(ticker, {}).get("current_pnl_pct", 0),
+            "current_pct": portfolio_metrics.get(ticker, {}).get("current_pnl_pct", 0),
+            "drawdown_from_high_pct": 0,
+            "missed_opportunity_usd": 0,
+            "classification": "PORTFOLIO_ONLY",
+            "shadow": {},
+        }
         fifo = fifo_map.get(ticker, (None, None))
+        cooldown, cooldown_reason = cooldown_by_ticker.get(ticker, (False, ""))
+        pm = portfolio_metrics.get(ticker, {})
         positions.append(
             analyze_position(
                 row,
@@ -344,19 +587,35 @@ def build_profit_protection_report(
                 obs_count=int(obs_counts.get(ticker, 0)),
                 discovery_strategy=discovery_by_ticker.get(ticker),
                 knowledge_trailing=knowledge_trailing,
+                prior_peak_pnl_pct=prior_peaks.get(ticker),
+                portfolio_pnl_pct=pm.get("current_pnl_pct"),
+                reentry_cooldown=cooldown,
+                reentry_reason=cooldown_reason,
             )
         )
 
     positions.sort(key=lambda p: p.get("missed_opportunity_usd", 0), reverse=True)
     summary = build_daily_summary(positions)
 
+    rules_v1_config = {
+        "profit_lock_pct": PROFIT_LOCK_PCT,
+        "peak_fade_alert_pct": PEAK_FADE_ALERT_PCT,
+        "partial_levels": [
+            {"threshold_pct": t, "advisory": a} for t, a in PARTIAL_ADVISORY_LEVELS
+        ],
+        "cooldown_hours_after_profit_sell": COOLDOWN_HOURS_AFTER_PROFIT_SELL,
+        "never_take_profit_when_pnl_lte_zero": True,
+    }
+
     return {
         "schema": "tae_profit_protection_shadow",
+        "rules_version": RULES_VERSION,
         "mode": "SHADOW_ONLY",
         "live_trading_impact": "NONE",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "sources_loaded": sources_loaded,
         "knowledge_trailing_priority": knowledge_trailing,
+        "rules_v1_config": rules_v1_config,
         "positions": positions,
         "daily_summary": summary,
     }
@@ -384,17 +643,27 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path]:
         f"- Total missed opportunity: **{summary['total_missed_opportunity']} USD**",
         f"- Best shadow method: **{summary['best_shadow_protection_method']}**",
         "",
+        "## Rules v1 summary",
+        summary.get("rules_v1_verdict", ""),
+        f"- Profit lock active: **{summary.get('num_profit_lock_active', 0)}**",
+        f"- Profit at risk: **{summary.get('num_profit_at_risk', 0)}**",
+        f"- Partial TP advisories: **{summary.get('num_partial_tp_advisories', 0)}**",
+        f"- Reentry cooldown: **{summary.get('num_reentry_cooldown', 0)}**",
+        "",
         "## Positions",
         "",
-        "| ticker | high_pct | current_pct | drawdown | missed_usd | signal | action | confidence |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| ticker | high_pct | current_pct | drawdown | missed_usd | signal | action | rules_v1 | confidence |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
     for row in report.get("positions") or []:
+        rules = row.get("rules_v1") or {}
+        v1_flags = ", ".join(rules.get("flags") or []) or "—"
         lines.append(
             f"| {row['ticker']} | {row['high_pct']} | {row['current_pct']} | "
             f"{row['drawdown_from_high_pct']} | {row['missed_opportunity_usd']} | "
-            f"{row['protection_signal']} | {row['suggested_shadow_action']} | {row['confidence']} |"
+            f"{row['protection_signal']} | {row['suggested_shadow_action']} | "
+            f"{v1_flags} | {row['confidence']} |"
         )
 
     OUTPUT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -408,6 +677,13 @@ def print_summary(report: dict[str, Any]) -> None:
     print("Positions:", summary["total_positions"])
     print("Missed opportunity:", summary["total_missed_opportunity"])
     print("Watch / Partial20 / Partial30 / Trailing:", summary["num_watch"], summary["num_partial20"], summary["num_partial30"], summary["num_trailing"])
+    print(
+        "Rules v1 lock / at-risk / partial TP / cooldown:",
+        summary.get("num_profit_lock_active", 0),
+        summary.get("num_profit_at_risk", 0),
+        summary.get("num_partial_tp_advisories", 0),
+        summary.get("num_reentry_cooldown", 0),
+    )
     print("Best shadow method:", summary["best_shadow_protection_method"])
     print("Verdict:", summary["verdict"])
 
