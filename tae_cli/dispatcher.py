@@ -6,6 +6,7 @@ import sys
 
 from tae_cli.commands import (
     growth_analytics,
+    growth_intelligence,
     health,
     help as help_cmd,
     opportunity,
@@ -24,6 +25,7 @@ COMMANDS = {
     "growth-analytics": growth_analytics.run,
     "opportunity": opportunity.run,
     "winner": winner.run,
+    "growth-intelligence": growth_intelligence.run,
     "status": status.run,
     "help": help_cmd.run,
 }

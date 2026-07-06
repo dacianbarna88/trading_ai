@@ -13,6 +13,7 @@ Available commands:
   growth-analytics
   opportunity
   winner
+  growth-intelligence
   status
   help
 
@@ -22,6 +23,7 @@ Available commands:
   growth-analytics — profit growth analytics SSOT (read-only join)
   opportunity — opportunity cost ledger (why profit was missed)
   winner — winner lifecycle profiler (how winners grow and die)
+  growth-intelligence — unified profit growth intelligence integrator (GII)
 ================================="""
 
 
