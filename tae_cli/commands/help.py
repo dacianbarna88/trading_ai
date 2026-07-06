@@ -10,12 +10,14 @@ Available commands:
   protect
   portfolio-protect
   policy
+  growth-analytics
   status
   help
 
   protect — run shadow profit protection + adaptive committee + context pipeline
   portfolio-protect — portfolio-level profit governor (PDG + PPG)
   policy — adaptive profit policy memory + evaluation (PPG + APPE)
+  growth-analytics — profit growth analytics SSOT (read-only join)
 ================================="""
 
 
