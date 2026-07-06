@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import sys
 
-from tae_cli.commands import health, help as help_cmd, status
+from tae_cli.commands import health, help as help_cmd, portfolio_protect, protect, status
 
 COMMANDS = {
     "health": health.run,
+    "protect": protect.run,
+    "portfolio-protect": portfolio_protect.run,
     "status": status.run,
     "help": help_cmd.run,
 }

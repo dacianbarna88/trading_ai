@@ -7,8 +7,13 @@ TAE COMMAND CENTER
 
 Available commands:
   health
+  protect
+  portfolio-protect
   status
   help
+
+  protect — run shadow profit protection + adaptive committee + context pipeline
+  portfolio-protect — portfolio-level profit governor (PDG + PPG)
 ================================="""
 
 
