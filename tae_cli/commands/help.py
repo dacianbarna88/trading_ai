@@ -11,6 +11,8 @@ Available commands:
   portfolio-protect
   policy
   growth-analytics
+  opportunity
+  winner
   status
   help
 
@@ -18,6 +20,8 @@ Available commands:
   portfolio-protect — portfolio-level profit governor (PDG + PPG)
   policy — adaptive profit policy memory + evaluation (PPG + APPE)
   growth-analytics — profit growth analytics SSOT (read-only join)
+  opportunity — opportunity cost ledger (why profit was missed)
+  winner — winner lifecycle profiler (how winners grow and die)
 ================================="""
 
 

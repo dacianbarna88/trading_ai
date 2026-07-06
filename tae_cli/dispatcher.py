@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import sys
 
-from tae_cli.commands import growth_analytics, health, help as help_cmd, policy, portfolio_protect, protect, status
+from tae_cli.commands import (
+    growth_analytics,
+    health,
+    help as help_cmd,
+    opportunity,
+    policy,
+    portfolio_protect,
+    protect,
+    status,
+    winner,
+)
 
 COMMANDS = {
     "health": health.run,
@@ -12,6 +22,8 @@ COMMANDS = {
     "portfolio-protect": portfolio_protect.run,
     "policy": policy.run,
     "growth-analytics": growth_analytics.run,
+    "opportunity": opportunity.run,
+    "winner": winner.run,
     "status": status.run,
     "help": help_cmd.run,
 }
