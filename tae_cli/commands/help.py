@@ -24,6 +24,7 @@ Available commands:
   dpe-learning
   dpe-adaptive
   learning-profit
+  paper-experiments
   morning-audit
   status
   help
@@ -45,6 +46,7 @@ Available commands:
   dpe-learning — learn from evaluation results (append-only history)
   dpe-adaptive — adaptive philosophy selector (learning → recommendation)
   learning-profit — learning-to-profit bridge (ranked PAPER hypotheses + queue)
+  paper-experiments — run PAPER scoring experiments from hypothesis queue
   morning-audit — consolidated read-only morning operational brief
 ================================="""
 
