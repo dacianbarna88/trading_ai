@@ -14,6 +14,17 @@ Available commands:
   opportunity
   winner
   growth-intelligence
+  profit-targets
+  philosophy
+  dpe-events
+  dpe-splitter
+  dpe-competitive
+  dpe-collaborative
+  dpe-evaluator
+  dpe-learning
+  dpe-adaptive
+  learning-profit
+  morning-audit
   status
   help
 
@@ -24,6 +35,17 @@ Available commands:
   opportunity — opportunity cost ledger (why profit was missed)
   winner — winner lifecycle profiler (how winners grow and die)
   growth-intelligence — unified profit growth intelligence integrator (GII)
+  profit-targets — dynamic profit target adapter (numeric shadow targets)
+  philosophy — market philosophy lab (competitive vs collaborative models)
+  dpe-events — decision event bus (immutable DPE snapshots)
+  dpe-splitter — execution splitter (competitive + collaborative jobs)
+  dpe-competitive — competitive paper executor (isolated DPE portfolio)
+  dpe-collaborative — collaborative paper executor (isolated DPE portfolio)
+  dpe-evaluator — compare competitive vs collaborative paper results
+  dpe-learning — learn from evaluation results (append-only history)
+  dpe-adaptive — adaptive philosophy selector (learning → recommendation)
+  learning-profit — learning-to-profit bridge (ranked PAPER hypotheses + queue)
+  morning-audit — consolidated read-only morning operational brief
 ================================="""
 
 
