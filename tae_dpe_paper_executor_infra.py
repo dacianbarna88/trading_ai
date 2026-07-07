@@ -19,10 +19,21 @@ METRICS_SCHEMA_VERSION = "dpe.paper_metrics.v2"
 MODE = "PAPER_ONLY"
 
 JOBS_PATH = Path("runtime_outputs/dpe/execution_jobs.jsonl")
-PAPER_DECISIONS_JSONL = Path("runtime_outputs/paper_decisions/paper_decisions.jsonl")
-PAPER_DECISION_VALIDATION_DIR = Path("runtime_outputs/paper_decisions")
+PAPER_DECISIONS_DIR = Path("runtime_outputs/paper_decisions")
+PAPER_DECISIONS_JSON = PAPER_DECISIONS_DIR / "paper_decisions.json"
+PAPER_DECISIONS_JSONL = PAPER_DECISIONS_DIR / "paper_decisions.jsonl"
+PAPER_DECISION_VALIDATION_DIR = PAPER_DECISIONS_DIR
 PAPER_DECISION_VALIDATION_JSON = PAPER_DECISION_VALIDATION_DIR / "decision_validation_results.json"
 PAPER_DECISION_VALIDATION_JSONL = PAPER_DECISION_VALIDATION_DIR / "decision_validation_results.jsonl"
+DECISION_VALIDATION_REPORT_MD = Path("TAE_PAPER_DECISION_VALIDATION_REPORT.md")
+EXPERIMENT_RUNNER_REPORT_MD = Path("TAE_PAPER_EXPERIMENT_RUNNER_REPORT.md")
+
+VERDICT_PRIORITY: dict[str, int] = {
+    "PROMISING": 0,
+    "CONTINUE_TESTING": 1,
+    "NEEDS_MORE_DATA": 2,
+    "REJECT": 3,
+}
 
 GII_JSON = Path("tae_growth_intelligence.json")
 SHADOW_JSON = Path("tae_profit_protection_shadow.json")
@@ -954,6 +965,167 @@ def _shadow_by_ticker(shadow: dict[str, Any] | None) -> dict[str, dict[str, Any]
     }
 
 
+def paper_decision_dedupe_key(decision: dict[str, Any]) -> str:
+    decision_id = _s(decision.get("decision_id")) or _s(decision.get("source_decision_id"))
+    if decision_id:
+        return f"id:{decision_id}"
+    ticker = (_s(decision.get("ticker")) or "").upper()
+    action = (_s(decision.get("action")) or "SKIP_PAPER").upper()
+    return f"ta:{ticker}:{action}"
+
+
+def dedupe_paper_decisions(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one record per decision_id or ticker+action; prefer latest timestamp."""
+    by_key: dict[str, dict[str, Any]] = {}
+    for record in records:
+        key = paper_decision_dedupe_key(record)
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = record
+            continue
+        existing_ts = _s(existing.get("created_at")) or _s(existing.get("timestamp")) or ""
+        record_ts = _s(record.get("created_at")) or _s(record.get("timestamp")) or ""
+        if record_ts >= existing_ts:
+            by_key[key] = record
+    return list(by_key.values())
+
+
+def load_paper_decisions(*, decisions_path: Path | None = None) -> tuple[list[dict[str, Any]], int]:
+    """Load PAPER decisions from jsonl (primary) and json, deduplicated once."""
+    jsonl_path = decisions_path or PAPER_DECISIONS_JSONL
+    raw: list[dict[str, Any]] = list(load_jsonl(jsonl_path))
+    raw_count = len(raw)
+
+    json_path = jsonl_path.parent / "paper_decisions.json"
+    if json_path.is_file():
+        doc = load_json(json_path)
+        if isinstance(doc, dict):
+            from_json = doc.get("decisions") or []
+        elif isinstance(doc, list):
+            from_json = doc
+        else:
+            from_json = []
+        if isinstance(from_json, list):
+            raw.extend(from_json)
+            raw_count = len(raw)
+
+    deduped = dedupe_paper_decisions(raw)
+    return deduped, raw_count
+
+
+def extract_source_hypothesis_id(decision: dict[str, Any]) -> str | None:
+    applied = decision.get("hypothesis_rules_applied") or []
+    for row in applied:
+        hyp_id = _s(row.get("hypothesis_id"))
+        if hyp_id:
+            return hyp_id
+    return None
+
+
+def build_evidence_summary(
+    decision: dict[str, Any],
+    *,
+    gii_row: dict[str, Any] | None,
+    shadow_row: dict[str, Any] | None,
+    validation: dict[str, Any] | None,
+    deltas: dict[str, float],
+) -> str:
+    parts: list[str] = []
+    evidence = _s(decision.get("evidence"))
+    if evidence:
+        parts.append(evidence[:220])
+    if gii_row:
+        parts.append(
+            f"GII missed_usd={_f(gii_row.get('missed_usd')):.2f} "
+            f"growth={_f(gii_row.get('growth_score')):.1f} "
+            f"cap_eff={_f(gii_row.get('capital_efficiency')):.1f}"
+        )
+    if shadow_row:
+        parts.append(f"shadow missed={_f(shadow_row.get('missed_opportunity_usd')):.2f}")
+    if validation:
+        gates = validation.get("gates") or {}
+        parts.append(f"protection_gates={'passed' if gates.get('gates_passed') else 'not_passed'}")
+        best = validation.get("best_strategy") or {}
+        if best.get("strategy_id"):
+            parts.append(f"best_strategy={best['strategy_id']}")
+    parts.append(
+        f"simulated profitΔ=${deltas['expected_profit_delta_usd']:.2f} "
+        f"riskΔ={deltas['expected_risk_delta']:.4f} cap_effΔ={deltas['capital_efficiency_delta']:.2f}"
+    )
+    return "; ".join(parts)[:600]
+
+
+def build_validation_reason(
+    verdict: str,
+    *,
+    action: str,
+    ticker: str,
+    deltas: dict[str, float],
+    confidence: float,
+    decision: dict[str, Any],
+    validation: dict[str, Any] | None,
+    gii_row: dict[str, Any] | None,
+) -> str:
+    profit = deltas["expected_profit_delta_usd"]
+    risk = deltas["expected_risk_delta"]
+    cap = deltas["capital_efficiency_delta"]
+    gates = (validation or {}).get("gates") or {}
+    gates_passed = bool(gates.get("gates_passed"))
+
+    if verdict == "PROMISING":
+        return (
+            f"PROMISING: {action} on {ticker} simulates +${profit:.2f} profit with "
+            f"riskΔ={risk:.4f} and cap-effΔ={cap:.2f} at confidence {confidence:.2f}; "
+            f"protection gates {'passed' if gates_passed else 'pending'}"
+        )
+    if verdict == "CONTINUE_TESTING":
+        return (
+            f"CONTINUE: {action} on {ticker} shows modest simulated gain +${profit:.2f} "
+            f"(riskΔ={risk:.4f}, cap-effΔ={cap:.2f}); extend 30-day validation before promotion review"
+        )
+    if verdict == "NEEDS_MORE_DATA":
+        missing: list[str] = []
+        if action == "SKIP_PAPER":
+            missing.append("action was SKIP — need stronger GII/PPG/shadow signal")
+        if confidence < 0.4:
+            missing.append(f"confidence {confidence:.2f} below 0.40 threshold")
+        if not gii_row:
+            missing.append(f"missing GII row for {ticker}")
+        if action == "PROTECT_PAPER" and not gates_passed:
+            missing.append("protection validation gates not passed")
+        if not missing:
+            missing.append("insufficient composite score for PROMISING/CONTINUE verdict")
+        return f"NEEDS_MORE_DATA: {action} on {ticker} — missing: " + "; ".join(missing)
+    if verdict == "REJECT":
+        reasons: list[str] = []
+        if profit < -1.0 and risk > 0:
+            reasons.append(f"negative profit (${profit:.2f}) with rising risk ({risk:.4f})")
+        elif profit < 0:
+            reasons.append(f"simulated profit delta negative (${profit:.2f})")
+        if decision.get("rejection_rule"):
+            reasons.append("hypothesis rejection rule applies")
+        if not reasons:
+            reasons.append("composite score below rejection threshold")
+        return f"REJECT: {action} on {ticker} — " + "; ".join(reasons)
+    return f"{verdict}: {action} on {ticker} simulated"
+
+
+def rank_validation_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranked = sorted(
+        results,
+        key=lambda row: (
+            VERDICT_PRIORITY.get(_s(row.get("verdict")) or "NEEDS_MORE_DATA", 99),
+            -_f(row.get("profit_delta")),
+            _f(row.get("risk_delta")),
+            -_f(row.get("capital_efficiency_delta")),
+            _s(row.get("ticker")) or "",
+        ),
+    )
+    for index, row in enumerate(ranked, start=1):
+        row["rank"] = index
+    return ranked
+
+
 def simulate_paper_decision_deltas(
     decision: dict[str, Any],
     *,
@@ -1060,9 +1232,33 @@ def score_paper_decision(
         action=action, deltas=deltas, confidence=confidence, validation=validation,
     )
     gates = (validation or {}).get("gates") or {}
+    profit_delta = deltas["expected_profit_delta_usd"]
+    risk_delta = deltas["expected_risk_delta"]
+    cap_delta = deltas["capital_efficiency_delta"]
+    source_decision_id = _s(decision.get("decision_id")) or _s(decision.get("source_decision_id"))
+    source_hypothesis_id = extract_source_hypothesis_id(decision)
+    evidence_summary = build_evidence_summary(
+        decision,
+        gii_row=gii_row,
+        shadow_row=shadow_row,
+        validation=validation,
+        deltas=deltas,
+    )
+    reason = build_validation_reason(
+        verdict,
+        action=action,
+        ticker=ticker,
+        deltas=deltas,
+        confidence=confidence,
+        decision=decision,
+        validation=validation,
+        gii_row=gii_row,
+    )
     return {
-        "validation_id": f"PDVAL-{decision.get('decision_id', ticker)}",
-        "decision_id": decision.get("decision_id"),
+        "validation_id": f"PDVAL-{source_decision_id or ticker}",
+        "decision_id": source_decision_id,
+        "source_decision_id": source_decision_id,
+        "source_hypothesis_id": source_hypothesis_id,
         "ticker": ticker,
         "paper_decision_consumed": True,
         "action": action,
@@ -1071,9 +1267,12 @@ def score_paper_decision(
         "verdict": verdict,
         "confidence": confidence,
         "deltas": deltas,
-        "profit_delta_usd": deltas["expected_profit_delta_usd"],
-        "risk_delta": deltas["expected_risk_delta"],
-        "capital_efficiency_delta": deltas["capital_efficiency_delta"],
+        "profit_delta": profit_delta,
+        "profit_delta_usd": profit_delta,
+        "risk_delta": risk_delta,
+        "capital_efficiency_delta": cap_delta,
+        "reason": reason,
+        "evidence_summary": evidence_summary,
         "protection_validation_used": validation is not None,
         "protection_gates_passed": bool(gates.get("gates_passed")),
         "best_strategy_id": _s((validation or {}).get("best_strategy", {}).get("strategy_id")),
@@ -1083,15 +1282,111 @@ def score_paper_decision(
     }
 
 
+def write_decision_validation_report(report: dict[str, Any]) -> Path:
+    vs = report.get("verdict_summary") or {}
+    lines = [
+        "# TAE Paper Decision Validation Report",
+        "",
+        f"**Generated:** {report.get('generated_at', '')}",
+        f"**Mode:** {MODE} — READ_ONLY — NO_BROKER — NO_LIVE_CHANGE",
+        f"**Live promotion allowed:** false",
+        "",
+        "> **PAPER_ONLY simulated validation — no broker execution**",
+        "",
+        "## Executive summary",
+        "",
+        f"- Decisions consumed (raw): **{report.get('decisions_consumed_raw', 0)}**",
+        f"- Unique decisions validated: **{report.get('decisions_unique', 0)}**",
+        f"- PROMISING: **{vs.get('PROMISING', 0)}**",
+        f"- CONTINUE_TESTING: **{vs.get('CONTINUE_TESTING', 0)}**",
+        f"- NEEDS_MORE_DATA: **{vs.get('NEEDS_MORE_DATA', 0)}**",
+        f"- REJECT: **{vs.get('REJECT', 0)}**",
+        "",
+        "## Ranked validated decisions (unique)",
+        "",
+        "| rank | ticker | action | verdict | profit Δ | risk Δ | cap eff Δ | reason |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in report.get("results") or []:
+        reason = (_s(row.get("reason")) or "")[:80].replace("|", "/")
+        lines.append(
+            f"| {row.get('rank')} | {row.get('ticker')} | {row.get('action')} | {row.get('verdict')} | "
+            f"{row.get('profit_delta')} | {row.get('risk_delta')} | {row.get('capital_efficiency_delta')} | {reason} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Safety confirmation",
+            "",
+            "| Rule | Status |",
+            "| --- | --- |",
+            "| PAPER_ONLY | ✅ |",
+            "| NO_BROKER | ✅ |",
+            "| NO_LIVE_CHANGE | ✅ |",
+            "| live_promotion_allowed | **false** |",
+        ]
+    )
+    DECISION_VALIDATION_REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return DECISION_VALIDATION_REPORT_MD
+
+
+def update_experiment_runner_validation_section(report: dict[str, Any]) -> None:
+    """Patch TAE_PAPER_EXPERIMENT_RUNNER_REPORT.md paper decision validation section."""
+    if not EXPERIMENT_RUNNER_REPORT_MD.is_file():
+        return
+    vs = report.get("verdict_summary") or {}
+    section_lines = [
+        "## Paper decision validation",
+        "",
+        "- Consumes: `runtime_outputs/paper_decisions/paper_decisions.jsonl` "
+        "(deduplicated with `paper_decisions.json`)",
+        "- Output: `runtime_outputs/paper_decisions/decision_validation_results.json`",
+        "- Detail report: `TAE_PAPER_DECISION_VALIDATION_REPORT.md`",
+        "",
+        f"- Unique decisions validated: **{report.get('decisions_unique', 0)}** "
+        f"(raw rows read: {report.get('decisions_consumed_raw', 0)})",
+        f"- PROMISING: **{vs.get('PROMISING', 0)}** | CONTINUE: **{vs.get('CONTINUE_TESTING', 0)}** | "
+        f"NEEDS_MORE_DATA: **{vs.get('NEEDS_MORE_DATA', 0)}** | REJECT: **{vs.get('REJECT', 0)}**",
+        "",
+        "### Top ranked validated decisions",
+        "",
+        "| rank | ticker | action | verdict | profit Δ | reason |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in (report.get("results") or [])[:10]:
+        reason = (_s(row.get("reason")) or "")[:70].replace("|", "/")
+        section_lines.append(
+            f"| {row.get('rank')} | {row.get('ticker')} | {row.get('action')} | {row.get('verdict')} | "
+            f"{row.get('profit_delta')} | {reason} |"
+        )
+    section_lines.append("")
+
+    text = EXPERIMENT_RUNNER_REPORT_MD.read_text(encoding="utf-8")
+    marker = "## Paper decision validation"
+    safety_marker = "## Safety confirmation"
+    if marker not in text:
+        return
+    before = text.split(marker)[0]
+    after_parts = text.split(marker, 1)[1]
+    if safety_marker in after_parts:
+        after = safety_marker + after_parts.split(safety_marker, 1)[1]
+    else:
+        after = ""
+    EXPERIMENT_RUNNER_REPORT_MD.write_text(
+        before + "\n".join(section_lines) + "\n" + after,
+        encoding="utf-8",
+    )
+
+
 def run_paper_decision_validation(
     *,
     decisions_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> tuple[dict[str, Any], int]:
     """Consume paper_decisions.jsonl and produce simulated validation results."""
-    decisions_path = decisions_path or PAPER_DECISIONS_JSONL
     output_dir = output_dir or PAPER_DECISION_VALIDATION_DIR
-    decisions = load_jsonl(decisions_path)
+    decisions, raw_count = load_paper_decisions(decisions_path=decisions_path)
     if not decisions:
         return {"error": "missing_or_empty_paper_decisions", "decisions_consumed": 0}, 1
 
@@ -1110,25 +1405,26 @@ def run_paper_decision_validation(
         )
         for decision in decisions
     ]
-    results.sort(key=lambda r: (_f(r.get("profit_delta_usd")), r.get("confidence", 0)), reverse=True)
-    for rank, row in enumerate(results, start=1):
-        row["rank"] = rank
+    results = rank_validation_results(results)
 
     verdict_counts: dict[str, int] = {}
     for row in results:
         v = row.get("verdict") or "NEEDS_MORE_DATA"
         verdict_counts[v] = verdict_counts.get(v, 0) + 1
 
+    source_path = decisions_path or PAPER_DECISIONS_JSONL
     report = {
         "schema": "tae_paper_decision_validation",
-        "schema_version": "v1",
+        "schema_version": "v1.1",
         "mode": MODE,
         "read_only": True,
         "no_broker": True,
         "no_live_execution": True,
         "live_promotion_allowed": False,
         "generated_at": _now(),
-        "source": str(decisions_path),
+        "source": str(source_path),
+        "decisions_consumed_raw": raw_count,
+        "decisions_unique": len(decisions),
         "decisions_consumed": len(decisions),
         "results_count": len(results),
         "verdict_summary": verdict_counts,
@@ -1152,9 +1448,12 @@ def run_paper_decision_validation(
         for row in results:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
+    write_decision_validation_report(report)
+    update_experiment_runner_validation_section(report)
+
     print("===== TAE PAPER DECISION VALIDATION (infra) =====")
     print("Mode: PAPER_ONLY — simulated scoring — no broker execution")
-    print("Decisions consumed:", len(decisions))
+    print("Unique decisions validated:", len(decisions), f"(raw rows: {raw_count})")
     print(
         "Verdicts: PROMISING={} CONTINUE={} REJECT={} NEEDS_DATA={}".format(
             verdict_counts.get("PROMISING", 0),
@@ -1163,5 +1462,10 @@ def run_paper_decision_validation(
             verdict_counts.get("NEEDS_MORE_DATA", 0),
         )
     )
-    print("Wrote:", out_json, out_jsonl)
+    for row in results[:5]:
+        print(
+            f"  #{row.get('rank')} {row.get('ticker')} [{row.get('verdict')}] "
+            f"{row.get('action')} profitΔ=${row.get('profit_delta')} — {(_s(row.get('reason')) or '')[:60]}"
+        )
+    print("Wrote:", out_json, out_jsonl, DECISION_VALIDATION_REPORT_MD)
     return report, 0

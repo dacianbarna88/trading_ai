@@ -144,43 +144,153 @@ class PaperExperimentRunnerTest(unittest.TestCase):
 
 
 class PaperDecisionValidationInfraTest(unittest.TestCase):
+    def _write_fixture(self, base: Path) -> Path:
+        pd_dir = base / "runtime_outputs" / "paper_decisions"
+        pd_dir.mkdir(parents=True)
+        dec_path = pd_dir / "paper_decisions.jsonl"
+        decision = {
+            "decision_id": "PDEC-TEST-001",
+            "ticker": "MRK",
+            "action": "HOLD_PAPER",
+            "confidence": 0.7,
+            "expected_profit_delta": 2.0,
+            "expected_risk_delta": 0.02,
+            "capital_efficiency_delta": 0.0,
+            "evidence": "healthy winner; GII growth strong",
+            "hypothesis_rules_applied": [{"hypothesis_id": "LTB-MRK-001"}],
+        }
+        dec_path.write_text(json.dumps(decision) + "\n", encoding="utf-8")
+        gii_path = base / "tae_growth_intelligence.json"
+        gii_path.write_text(
+            json.dumps(
+                {
+                    "tickers": [
+                        {
+                            "ticker": "MRK",
+                            "missed_usd": 12.0,
+                            "capital_efficiency": 90.0,
+                            "growth_score": 90.0,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return pd_dir, dec_path, gii_path
+
     def test_run_paper_decision_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            pd_dir = base / "runtime_outputs" / "paper_decisions"
-            pd_dir.mkdir(parents=True)
-            dec_path = pd_dir / "paper_decisions.jsonl"
-            dec_path.write_text(
-                json.dumps(
-                    {
-                        "decision_id": "PDEC-TEST-001",
-                        "ticker": "MRK",
-                        "action": "HOLD_PAPER",
-                        "confidence": 0.7,
-                        "expected_profit_delta": 2.0,
-                        "expected_risk_delta": 0.02,
-                        "capital_efficiency_delta": 0.0,
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            gii_path = base / "tae_growth_intelligence.json"
-            gii_path.write_text(
-                json.dumps({"tickers": [{"ticker": "MRK", "missed_usd": 2.0, "capital_efficiency": 90.0, "growth_score": 90.0}]}),
+            pd_dir, dec_path, gii_path = self._write_fixture(base)
+            with mock.patch("tae_dpe_paper_executor_infra.PAPER_DECISIONS_JSONL", dec_path), mock.patch(
+                "tae_dpe_paper_executor_infra.PAPER_DECISION_VALIDATION_DIR", pd_dir
+            ), mock.patch("tae_dpe_paper_executor_infra.GII_JSON", gii_path), mock.patch(
+                "tae_dpe_paper_executor_infra.SHADOW_JSON", base / "x.json"
+            ), mock.patch("tae_dpe_paper_executor_infra.PROTECTION_VALIDATION_JSON", base / "y.json"), mock.patch(
+                "tae_dpe_paper_executor_infra.DECISION_VALIDATION_REPORT_MD", base / "TAE_PAPER_DECISION_VALIDATION_REPORT.md"
+            ), mock.patch("tae_dpe_paper_executor_infra.EXPERIMENT_RUNNER_REPORT_MD", base / "TAE_PAPER_EXPERIMENT_RUNNER_REPORT.md"):
+                from tae_dpe_paper_executor_infra import run_paper_decision_validation
+
+                report, code = run_paper_decision_validation()
+                self.assertEqual(code, 0)
+                self.assertEqual(report["decisions_unique"], 1)
+                row = report["results"][0]
+                self.assertTrue(row["paper_decision_consumed"])
+                self.assertIsNotNone(row["profit_delta"])
+                self.assertIsNotNone(row["reason"])
+                self.assertEqual(row["source_decision_id"], "PDEC-TEST-001")
+                self.assertEqual(row["source_hypothesis_id"], "LTB-MRK-001")
+                self.assertEqual(row["mode"], "PAPER_ONLY")
+                self.assertFalse(row["live_promotion_allowed"])
+                self.assertTrue(row["evidence_summary"])
+
+    def test_dedupe_json_and_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            pd_dir, dec_path, gii_path = self._write_fixture(base)
+            decision = json.loads(dec_path.read_text(encoding="utf-8").strip())
+            (pd_dir / "paper_decisions.json").write_text(
+                json.dumps({"decisions": [decision, decision]}),
                 encoding="utf-8",
             )
             with mock.patch("tae_dpe_paper_executor_infra.PAPER_DECISIONS_JSONL", dec_path), mock.patch(
                 "tae_dpe_paper_executor_infra.PAPER_DECISION_VALIDATION_DIR", pd_dir
             ), mock.patch("tae_dpe_paper_executor_infra.GII_JSON", gii_path), mock.patch(
                 "tae_dpe_paper_executor_infra.SHADOW_JSON", base / "x.json"
-            ), mock.patch("tae_dpe_paper_executor_infra.PROTECTION_VALIDATION_JSON", base / "y.json"):
+            ), mock.patch("tae_dpe_paper_executor_infra.PROTECTION_VALIDATION_JSON", base / "y.json"), mock.patch(
+                "tae_dpe_paper_executor_infra.DECISION_VALIDATION_REPORT_MD", base / "TAE_PAPER_DECISION_VALIDATION_REPORT.md"
+            ), mock.patch("tae_dpe_paper_executor_infra.EXPERIMENT_RUNNER_REPORT_MD", base / "TAE_PAPER_EXPERIMENT_RUNNER_REPORT.md"):
                 from tae_dpe_paper_executor_infra import run_paper_decision_validation
 
                 report, code = run_paper_decision_validation()
                 self.assertEqual(code, 0)
-                self.assertEqual(report["decisions_consumed"], 1)
-                self.assertTrue(report["results"][0]["paper_decision_consumed"])
+                self.assertEqual(report["decisions_unique"], 1)
+                self.assertGreater(report["decisions_consumed_raw"], 1)
+
+    def test_ranking_and_reasons_for_verdicts(self) -> None:
+        from tae_dpe_paper_executor_infra import (
+            build_validation_reason,
+            rank_validation_results,
+            score_paper_decision,
+        )
+
+        gii_by = {"MRK": {"missed_usd": 20.0, "growth_score": 85.0, "capital_efficiency": 80.0}}
+        promising = score_paper_decision(
+            {
+                "decision_id": "PDEC-A",
+                "ticker": "MRK",
+                "action": "PROTECT_PAPER",
+                "confidence": 0.8,
+                "expected_profit_delta": 15.0,
+            },
+            gii_by=gii_by,
+            shadow_by={},
+            validation={"gates": {"gates_passed": True}},
+        )
+        continue_row = score_paper_decision(
+            {
+                "decision_id": "PDEC-B",
+                "ticker": "LLY",
+                "action": "HOLD_PAPER",
+                "confidence": 0.5,
+                "expected_profit_delta": 5.0,
+            },
+            gii_by={"LLY": {"missed_usd": 8.0, "growth_score": 70.0, "capital_efficiency": 75.0}},
+            shadow_by={},
+            validation=None,
+        )
+        self.assertIsNotNone(promising["profit_delta"])
+        self.assertIsNotNone(promising["reason"])
+        self.assertIsNotNone(continue_row["profit_delta"])
+        self.assertIsNotNone(continue_row["reason"])
+        ranked = rank_validation_results([continue_row, promising])
+        self.assertEqual(ranked[0]["decision_id"], promising["decision_id"])
+        self.assertEqual(ranked[0]["rank"], 1)
+
+        reject_reason = build_validation_reason(
+            "REJECT",
+            action="BUY_PAPER",
+            ticker="BAD",
+            deltas={"expected_profit_delta_usd": -2.0, "expected_risk_delta": 0.05, "capital_efficiency_delta": -1.0},
+            confidence=0.3,
+            decision={"rejection_rule": "fail fast"},
+            validation=None,
+            gii_row=None,
+        )
+        self.assertIn("REJECT", reject_reason)
+
+        needs_reason = build_validation_reason(
+            "NEEDS_MORE_DATA",
+            action="SKIP_PAPER",
+            ticker="X",
+            deltas={"expected_profit_delta_usd": 0.0, "expected_risk_delta": 0.0, "capital_efficiency_delta": 0.0},
+            confidence=0.2,
+            decision={},
+            validation=None,
+            gii_row=None,
+        )
+        self.assertIn("NEEDS_MORE_DATA", needs_reason)
+        self.assertIn("missing", needs_reason.lower())
 
 
 if __name__ == "__main__":

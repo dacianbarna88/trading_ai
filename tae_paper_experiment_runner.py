@@ -596,8 +596,11 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
             "",
             "## Paper decision validation",
             "",
-            "- Also consumes: `runtime_outputs/paper_decisions/paper_decisions.jsonl`",
+            "- Also consumes: `runtime_outputs/paper_decisions/paper_decisions.jsonl` "
+            "(deduplicated with `paper_decisions.json`)",
             "- Output: `runtime_outputs/paper_decisions/decision_validation_results.json`",
+            "- Detail report: `TAE_PAPER_DECISION_VALIDATION_REPORT.md`",
+            "- Each validated decision includes ranked verdict, profit/risk/cap-eff deltas, reason, and evidence summary.",
             "",
             "## Safety confirmation",
             "",
