@@ -214,6 +214,7 @@ def build_context() -> dict[str, Any]:
             "ppg": PPG_JSON.is_file(),
             "appe": APPE_JSON.is_file(),
             "shadow": SHADOW_JSON.is_file(),
+            "shadow_validation": SHADOW_VALIDATION_JSON.is_file(),
             "dpe_eval": DPE_EVAL_JSON.is_file(),
             "dpe_adaptive": DPE_ADAPTIVE_JSON.is_file(),
             "portfolio": PORTFOLIO_CSV.is_file(),
@@ -304,6 +305,81 @@ def estimate_deltas(ticker: str, action: str, ctx: dict[str, Any]) -> dict[str, 
             "capital_efficiency_delta": 0.0,
         }
     return {"expected_profit_delta": 0.0, "expected_risk_delta": 0.0, "capital_efficiency_delta": 0.0}
+
+
+def hypotheses_for_ticker(ticker: str, hypotheses_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
+    ticker = ticker.upper()
+    matched: list[dict[str, Any]] = []
+    for hyp in (hypotheses_doc or {}).get("hypotheses") or []:
+        tickers = [_s(t).upper() for t in (hyp.get("affected_tickers") or [])]
+        if not tickers or ticker in tickers:
+            matched.append(hyp)
+    return matched
+
+
+def protection_validation_bias(
+    ticker: str,
+    validation: dict[str, Any] | None,
+) -> tuple[float, float, float, bool]:
+    """Return (protect_boost, reduce_boost, sell_penalty, gates_passed)."""
+    if not validation:
+        return 0.0, 0.0, 0.0, False
+    gates = validation.get("gates") or {}
+    gates_passed = bool(gates.get("gates_passed"))
+    protect_boost = 15.0 if gates_passed else -5.0
+    reduce_boost = 8.0 if gates_passed else 0.0
+    sell_penalty = 0.0
+
+    best = validation.get("best_strategy") or {}
+    best_id = _s(best.get("strategy_id")).lower()
+    if "trailing" in best_id:
+        protect_boost += 12.0
+    if "partial" in best_id or "sell" in best_id:
+        reduce_boost += 10.0
+    if _f(best.get("delta_vs_hold_total")) <= 0:
+        sell_penalty += 6.0
+
+    for row in validation.get("ticker_breakdown") or []:
+        if _s(row.get("ticker")).upper() == ticker.upper():
+            if _f(row.get("delta_vs_hold")) > 0:
+                protect_boost += 8.0
+            elif _f(row.get("delta_vs_hold")) < 0:
+                sell_penalty += 5.0
+    return protect_boost, reduce_boost, sell_penalty, gates_passed
+
+
+def apply_hypothesis_rules(
+    ticker: str,
+    action: str,
+    confidence: float,
+    ctx: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]], str]:
+    """Apply hypothesis validation/rejection rules; may force SKIP_PAPER."""
+    hyps = hypotheses_for_ticker(ticker, ctx.get("hypotheses"))
+    applied: list[dict[str, Any]] = []
+    for hyp in hyps:
+        applied.append(
+            {
+                "hypothesis_id": hyp.get("hypothesis_id"),
+                "validation_rule": hyp.get("validation_rule"),
+                "rejection_rule": hyp.get("rejection_rule"),
+                "hypothesis_type": hyp.get("hypothesis_type"),
+            }
+        )
+
+    exps = (ctx.get("exp_by_ticker") or {}).get(ticker.upper(), [])
+    exps.extend((ctx.get("exp_by_ticker") or {}).get("_PORTFOLIO", []))
+    if any(e.get("verdict") == "REJECT" for e in exps):
+        return "SKIP_PAPER", applied, "hypothesis rejection_rule: linked experiment REJECT"
+
+    promising = any(e.get("verdict") == "PROMISING" for e in exps)
+    if action in {"BUY_PAPER", "ROTATE_PAPER"} and not promising and confidence < 0.5:
+        return "SKIP_PAPER", applied, "hypothesis rejection_rule: no PROMISING validation for aggressive action"
+
+    if action == "PROTECT_PAPER" and hyps and not promising and confidence < 0.42:
+        return "SKIP_PAPER", applied, "hypothesis rejection_rule: protect action lacks validation evidence"
+
+    return action, applied, ""
 
 
 def compute_risk_score(ticker: str, ctx: dict[str, Any]) -> float:
@@ -413,23 +489,42 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         scores["ROTATE_PAPER"] += 4.0
         scores["SELL_PAPER"] += 3.0
 
-    for action in scores:
-        scores[action] += exp_boost * (0.15 if action in {"HOLD_PAPER", "PROTECT_PAPER", "BUY_PAPER"} else 0.1)
+    prot_boost, reduce_boost, sell_penalty, gates_passed = protection_validation_bias(
+        ticker, ctx.get("shadow_validation"),
+    )
+    scores["PROTECT_PAPER"] += prot_boost
+    scores["REDUCE_PAPER"] += reduce_boost
+    scores["SELL_PAPER"] -= sell_penalty
+    if not gates_passed:
+        evidence.append("protection validation gates not passed")
+    else:
+        evidence.append("protection validation gates passed")
+
+    for action_key in scores:
+        scores[action_key] += exp_boost * (
+            0.15 if action_key in {"HOLD_PAPER", "PROTECT_PAPER", "BUY_PAPER"} else 0.1
+        )
     evidence.extend(exp_notes)
 
     best = max(scores, key=lambda a: scores[a])
     if scores[best] < 18.0:
         best = "SKIP_PAPER"
         evidence.append("no action met minimum confidence threshold")
-    return best, scores, evidence
+
+    confidence = round(min(0.95, max(0.25, scores[best] / 100.0)), 3)
+    best, applied_hyps, rule_note = apply_hypothesis_rules(ticker, best, confidence, ctx)
+    if rule_note:
+        evidence.append(rule_note)
+
+    return best, scores, evidence, applied_hyps, gates_passed
 
 
 def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, Any]:
-    action, scores, evidence_notes = score_actions_for_ticker(ticker, ctx)
+    action, scores, evidence_notes, applied_hypotheses, gates_passed = score_actions_for_ticker(ticker, ctx)
     gii = (ctx.get("gii_by") or {}).get(ticker.upper()) or {}
     deltas = estimate_deltas(ticker.upper(), action, ctx)
     risk_score = compute_risk_score(ticker.upper(), ctx)
-    confidence = round(min(0.95, max(0.25, scores[action] / 100.0)), 3)
+    confidence = round(min(0.95, max(0.25, scores.get(action, 18.0) / 100.0)), 3)
 
     sources: list[str] = []
     if gii:
@@ -442,6 +537,10 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("tae_adaptive_profit_policy_engine.json")
     if (ctx.get("exp_by_ticker") or {}).get(ticker.upper()):
         sources.append("runtime_outputs/learning_to_profit/experiment_results.json")
+    if applied_hypotheses:
+        sources.append("runtime_outputs/learning_to_profit/hypotheses.json")
+    if ctx.get("shadow_validation"):
+        sources.append("tae_profit_protection_validation.json")
     if ticker.upper() in (ctx.get("signals") or {}):
         sources.append("live_signals.csv")
     if ticker.upper() in (ctx.get("live_positions") or {}):
@@ -449,6 +548,13 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
 
     ts = _now()
     decision_id = f"PDEC-{ticker.upper()}-{seq:04d}"
+    hyp_validation = applied_hypotheses[0].get("validation_rule") if applied_hypotheses else (
+        "PAPER decision validated against GII/PPG/shadow evidence over validation_window."
+    )
+    hyp_rejection = applied_hypotheses[0].get("rejection_rule") if applied_hypotheses else (
+        "Reject PAPER decision if 30-day shadow metrics regress: profit_capture_rate down, "
+        "missed_usd up, or risk_score rises without offsetting profit gain."
+    )
 
     return {
         "decision_id": decision_id,
@@ -463,10 +569,8 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "expected_risk_delta": round(deltas["expected_risk_delta"], 4),
         "capital_efficiency_delta": round(deltas["capital_efficiency_delta"], 2),
         "validation_window": 30,
-        "rejection_rule": (
-            "Reject PAPER decision if 30-day shadow metrics regress: profit_capture_rate down, "
-            "missed_usd up, or risk_score rises without offsetting profit gain."
-        ),
+        "validation_rule": hyp_validation,
+        "rejection_rule": hyp_rejection,
         "promotion_rule": (
             "PAPER validation must show PROMISING experiment verdict + non-negative profit delta "
             "before any advisory review; live promotion remains blocked (live_promotion_allowed=false)."
@@ -474,6 +578,8 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "live_promotion_allowed": False,
         "mode": MODE,
         "action_scores": {k: round(v, 2) for k, v in scores.items() if v > 0},
+        "hypothesis_rules_applied": applied_hypotheses,
+        "protection_validation_gates_passed": gates_passed,
         "created_at": ts,
     }
 
@@ -582,6 +688,7 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
             "- Consumes: GII, PPG, APPE, profit protection, DPE adaptive/evaluation",
             "- Consumes: portfolio.csv + live_signals.csv (read-only)",
             "- Produces explicit PAPER BUY/SELL/HOLD/REDUCE/PROTECT/ROTATE/SKIP decisions",
+            "- Applies hypothesis validation/rejection rules and protection validation scoring",
             "",
             "## Safety confirmation",
             "",

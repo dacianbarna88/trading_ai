@@ -594,6 +594,11 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
             "- Output: `runtime_outputs/learning_to_profit/experiment_results.json`",
             "- Each hypothesis receives measurable baseline vs hypothesis deltas and a verdict.",
             "",
+            "## Paper decision validation",
+            "",
+            "- Also consumes: `runtime_outputs/paper_decisions/paper_decisions.jsonl`",
+            "- Output: `runtime_outputs/paper_decisions/decision_validation_results.json`",
+            "",
             "## Safety confirmation",
             "",
             "| Rule | Status |",
@@ -645,7 +650,11 @@ def main() -> int:
     paths = write_outputs(report)
     print_summary(report)
     print("Wrote:", *paths)
-    return 0
+
+    from tae_dpe_paper_executor_infra import run_paper_decision_validation
+
+    _, pd_code = run_paper_decision_validation()
+    return 0 if pd_code == 0 else pd_code
 
 
 if __name__ == "__main__":

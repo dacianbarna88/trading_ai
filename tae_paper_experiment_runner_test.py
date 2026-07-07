@@ -143,5 +143,45 @@ class PaperExperimentRunnerTest(unittest.TestCase):
                 self.assertEqual(data["experiments_run"], 1)
 
 
+class PaperDecisionValidationInfraTest(unittest.TestCase):
+    def test_run_paper_decision_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            pd_dir = base / "runtime_outputs" / "paper_decisions"
+            pd_dir.mkdir(parents=True)
+            dec_path = pd_dir / "paper_decisions.jsonl"
+            dec_path.write_text(
+                json.dumps(
+                    {
+                        "decision_id": "PDEC-TEST-001",
+                        "ticker": "MRK",
+                        "action": "HOLD_PAPER",
+                        "confidence": 0.7,
+                        "expected_profit_delta": 2.0,
+                        "expected_risk_delta": 0.02,
+                        "capital_efficiency_delta": 0.0,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            gii_path = base / "tae_growth_intelligence.json"
+            gii_path.write_text(
+                json.dumps({"tickers": [{"ticker": "MRK", "missed_usd": 2.0, "capital_efficiency": 90.0, "growth_score": 90.0}]}),
+                encoding="utf-8",
+            )
+            with mock.patch("tae_dpe_paper_executor_infra.PAPER_DECISIONS_JSONL", dec_path), mock.patch(
+                "tae_dpe_paper_executor_infra.PAPER_DECISION_VALIDATION_DIR", pd_dir
+            ), mock.patch("tae_dpe_paper_executor_infra.GII_JSON", gii_path), mock.patch(
+                "tae_dpe_paper_executor_infra.SHADOW_JSON", base / "x.json"
+            ), mock.patch("tae_dpe_paper_executor_infra.PROTECTION_VALIDATION_JSON", base / "y.json"):
+                from tae_dpe_paper_executor_infra import run_paper_decision_validation
+
+                report, code = run_paper_decision_validation()
+                self.assertEqual(code, 0)
+                self.assertEqual(report["decisions_consumed"], 1)
+                self.assertTrue(report["results"][0]["paper_decision_consumed"])
+
+
 if __name__ == "__main__":
     unittest.main()
