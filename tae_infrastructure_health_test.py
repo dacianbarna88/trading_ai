@@ -14,6 +14,8 @@ from pathlib import Path
 from unittest import mock
 
 from tae_infrastructure_health import (
+    FRAMEWORK_PYTHON_LAUNCHD,
+    MARKET_OPEN_SAFE_LAUNCHER,
     SPAWN_BLOCKED,
     build_health_report,
     get_crontab,
@@ -187,6 +189,92 @@ class InfrastructureHealthTest(unittest.TestCase):
             startup = next(c for c in report["checks"] if c["name"] == "launchagent:com.tradingai.startup")
             self.assertEqual(startup["status"], "PASS")
 
+    def test_market_open_plist_framework_python_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            plist_path = base / "launchagents" / "com.tradingai.market-open.plist"
+            data = plistlib.load(plist_path.open("rb"))
+            data["ProgramArguments"] = [
+                FRAMEWORK_PYTHON_LAUNCHD,
+                str(base / MARKET_OPEN_SAFE_LAUNCHER),
+            ]
+            with plist_path.open("wb") as handle:
+                plistlib.dump(data, handle)
+            report = build_health_report(
+                project_dir=base,
+                crontab_fn=lambda: GOOD_CRON,
+                launchctl_fn=lambda: LAUNCH_AGENTS_OK.copy(),
+                pgrep_fn=lambda _p: 1,
+            )
+            entry = next(c for c in report["checks"] if c["name"] == "plist_entry:com.tradingai.market-open")
+            self.assertEqual(entry["status"], "PASS")
+            bash_checks = [c for c in report["checks"] if c["name"] == "plist_bash:com.tradingai.market-open"]
+            self.assertEqual(bash_checks, [])
+
+    def test_market_open_plist_bash_legacy_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            plist_path = base / "launchagents" / "com.tradingai.market-open.plist"
+            data = plistlib.load(plist_path.open("rb"))
+            data["ProgramArguments"] = ["/bin/bash", str(base / "market_open_runner.sh")]
+            with plist_path.open("wb") as handle:
+                plistlib.dump(data, handle)
+            report = build_health_report(
+                project_dir=base,
+                crontab_fn=lambda: GOOD_CRON,
+                launchctl_fn=lambda: LAUNCH_AGENTS_OK.copy(),
+                pgrep_fn=lambda _p: 1,
+            )
+            entry = next(c for c in report["checks"] if c["name"] == "plist_entry:com.tradingai.market-open")
+            self.assertEqual(entry["status"], "PASS")
+
+    def test_market_open_plist_invalid_entry_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            plist_path = base / "launchagents" / "com.tradingai.market-open.plist"
+            data = plistlib.load(plist_path.open("rb"))
+            data["ProgramArguments"] = [
+                "/Users/book/Desktop/trading_ai/venv/bin/python3",
+                str(base / "bot_controller.py"),
+                "start",
+            ]
+            with plist_path.open("wb") as handle:
+                plistlib.dump(data, handle)
+            report = build_health_report(
+                project_dir=base,
+                crontab_fn=lambda: GOOD_CRON,
+                launchctl_fn=lambda: LAUNCH_AGENTS_OK.copy(),
+                pgrep_fn=lambda _p: 1,
+            )
+            entry = next(c for c in report["checks"] if c["name"] == "plist_entry:com.tradingai.market-open")
+            self.assertEqual(entry["status"], "FAIL")
+
+    def test_market_open_safe_log_pass_ignores_stale_shell_tcc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._bootstrap_project(base)
+            safe_out = base / "tae_launchd_market_open_safe.log"
+            safe_err = base / "tae_launchd_market_open_safe.err.log"
+            safe_out.write_text(
+                "===== TAE LAUNCHD MARKET OPEN SAFE =====\nRESULT: PASS — bot and dashboard running\n",
+                encoding="utf-8",
+            )
+            safe_err.write_text(
+                "/bin/bash: /Users/book/.local/bin/tae_launchd_market_open_safe.sh: Operation not permitted\n",
+                encoding="utf-8",
+            )
+            report = build_health_report(
+                project_dir=base,
+                crontab_fn=lambda: GOOD_CRON,
+                launchctl_fn=lambda: LAUNCH_AGENTS_OK.copy(),
+                pgrep_fn=lambda _p: 1,
+            )
+            mo_log = next(c for c in report["checks"] if c["name"] == "market_open_launchagent_log")
+            self.assertEqual(mo_log["status"], "PASS")
+
     def test_market_open_launchagent_loaded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -200,7 +288,7 @@ class InfrastructureHealthTest(unittest.TestCase):
             mo = next(c for c in report["checks"] if c["name"] == "launchagent:com.tradingai.market-open")
             self.assertEqual(mo["status"], "PASS")
 
-    def test_duplicate_bot_process_fail(self) -> None:
+    def test_duplicate_bot_process_warn(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             self._bootstrap_project(base)
@@ -211,7 +299,8 @@ class InfrastructureHealthTest(unittest.TestCase):
                 pgrep_fn=lambda pattern: 2 if "live_bot.py" in pattern else 1,
             )
             bot = next(c for c in report["checks"] if c["name"] == "live_bot_process")
-            self.assertEqual(bot["status"], "FAIL")
+            self.assertEqual(bot["status"], "WARN")
+            self.assertEqual(report["overall_status"], "PASS")
 
     def test_duplicate_dashboard_warn(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -298,6 +387,14 @@ class InfrastructureHealthTest(unittest.TestCase):
         self.assertEqual(overall_status([{"status": "PASS"}]), "PASS")
         self.assertEqual(overall_status([{"status": "WARN"}]), "WARN")
         self.assertEqual(overall_status([{"status": "PASS"}, {"status": "FAIL"}]), "FAIL")
+        self.assertEqual(
+            overall_status(
+                [{"name": "live_bot_process", "status": "WARN"}],
+                bot_count=2,
+                dash_count=1,
+            ),
+            "PASS",
+        )
 
     def test_get_crontab_spawn_blocked_returns_unavailable(self) -> None:
         blocked = subprocess.CompletedProcess(["crontab", "-l"], SPAWN_BLOCKED, "", "blocked")

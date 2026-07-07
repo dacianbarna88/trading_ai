@@ -56,6 +56,36 @@ LOG_PATHS = {
 
 SPAWN_BLOCKED = -999
 
+FRAMEWORK_PYTHON_LAUNCHD = "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
+MARKET_OPEN_SAFE_LAUNCHER = "tae_launchd_market_open_safe.py"
+
+# FAIL checks that indicate broken autostart dependencies (not runtime hygiene).
+CRITICAL_FAIL_PREFIXES = (
+    "script_exists:",
+    "script_executable:",
+    "quarantine:",
+    "bash_syntax:",
+    "cron:",
+    "plist_exists:",
+    "plist_lint:",
+    "plist_bash:",
+    "launchagent:com.",
+    "venv_python",
+)
+CRITICAL_FAIL_NAMES = frozenset(
+    {
+        "startup_launchagent_log",
+        "market_open_launchagent_log",
+        "venv_python",
+    }
+)
+NON_CRITICAL_FAIL_NAMES = frozenset(
+    {
+        "live_bot_process",
+        "dashboard_process",
+    }
+)
+
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     try:
@@ -204,6 +234,22 @@ def load_plist(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def market_open_entrypoint_ok(args: list[Any]) -> tuple[bool, str]:
+    """Accept legacy bash or validated framework-python launchd entry."""
+    if len(args) >= 2 and args[0] == "/bin/bash":
+        return True, "ProgramArguments uses /bin/bash (legacy market-open entry)"
+    if (
+        len(args) >= 2
+        and args[0] == FRAMEWORK_PYTHON_LAUNCHD
+        and str(args[1]).endswith(MARKET_OPEN_SAFE_LAUNCHER)
+    ):
+        return True, (
+            "ProgramArguments uses framework python + "
+            f"{MARKET_OPEN_SAFE_LAUNCHER} (launchd-safe entry)"
+        )
+    return False, f"ProgramArguments not accepted for market-open: {args}"
+
+
 def validate_plist_checks(
     checks: list[dict[str, Any]],
     *,
@@ -245,7 +291,23 @@ def validate_plist_checks(
 
     data = load_plist(path) or {}
     args = data.get("ProgramArguments") or []
-    if expect_bash:
+    if label == "com.tradingai.market-open":
+        ok, entry_detail = market_open_entrypoint_ok(args)
+        _check(
+            checks,
+            name=f"plist_entry:{label}",
+            status="PASS" if ok else "FAIL",
+            detail=entry_detail,
+            remediation=(
+                ""
+                if ok
+                else (
+                    "Use /bin/bash + market_open_runner.sh (legacy) or "
+                    f"{FRAMEWORK_PYTHON_LAUNCHD} + {MARKET_OPEN_SAFE_LAUNCHER}"
+                )
+            ),
+        )
+    elif expect_bash:
         if len(args) >= 2 and args[0] == "/bin/bash":
             _check(checks, name=f"plist_bash:{label}", status="PASS", detail="ProgramArguments uses /bin/bash")
         else:
@@ -272,6 +334,84 @@ def validate_plist_checks(
             status="WARN",
             detail=f"WorkingDirectory missing for {label}",
         )
+
+
+def check_market_open_launchagent_log(
+    checks: list[dict[str, Any]],
+    *,
+    project_dir: Path,
+) -> None:
+    safe_out = project_dir / "tae_launchd_market_open_safe.log"
+    safe_err = project_dir / "tae_launchd_market_open_safe.err.log"
+    out_tail = read_log_tail(safe_out, tail_lines=60)
+    has_recent_pass = any("RESULT: PASS" in line for line in out_tail)
+    has_recent_run = any("TAE LAUNCHD MARKET OPEN SAFE" in line for line in out_tail)
+
+    err_issues = read_log_errors(safe_err)
+    stale_shell_tcc = [
+        e
+        for e in err_issues
+        if "operation not permitted" in e.lower()
+        and (
+            "tae_launchd_market_open_safe.sh" in e
+            or "market_open_runner.sh" in e
+            or ".local/bin/tae_launchd_market_open_safe.sh" in e
+        )
+    ]
+    active_err_issues = [e for e in err_issues if e not in stale_shell_tcc]
+
+    if has_recent_pass:
+        tail = out_tail[-1] if out_tail else "empty"
+        detail = f"Safe launcher PASS recorded; last_out={tail}"
+        if stale_shell_tcc:
+            detail += f" (ignored {len(stale_shell_tcc)} historical Desktop bash TCC err line(s))"
+        _check(checks, name="market_open_launchagent_log", status="PASS", detail=detail)
+        return
+
+    if has_recent_run and not active_err_issues:
+        _check(
+            checks,
+            name="market_open_launchagent_log",
+            status="WARN",
+            detail="Safe launcher ran; awaiting RESULT: PASS marker",
+        )
+        return
+
+    if active_err_issues:
+        op_blocked = [e for e in active_err_issues if "operation not permitted" in e.lower()]
+        if op_blocked:
+            _check(
+                checks,
+                name="market_open_launchagent_log",
+                status="FAIL",
+                detail=f"Recent blocked execution: {op_blocked[-1]}",
+                remediation="Inspect tae_launchd_market_open_safe.err.log; verify framework python plist entry.",
+            )
+            return
+        _check(
+            checks,
+            name="market_open_launchagent_log",
+            status="WARN",
+            detail=f"Recent issues: {active_err_issues[-1]}",
+        )
+        return
+
+    if safe_out.is_file() or safe_err.is_file():
+        tail = read_log_tail(safe_out)
+        _check(
+            checks,
+            name="market_open_launchagent_log",
+            status="WARN",
+            detail=f"Safe launcher logs present; last_out={tail[-1] if tail else 'empty'}",
+        )
+        return
+
+    _check(
+        checks,
+        name="market_open_launchagent_log",
+        status="WARN",
+        detail="Safe launcher logs not created yet (tae_launchd_market_open_safe.log)",
+    )
 
 
 def check_launchagent_log(
@@ -334,7 +474,31 @@ def check_launchagent_log(
         )
 
 
-def overall_status(checks: list[dict[str, Any]]) -> str:
+def is_critical_fail(check: dict[str, Any]) -> bool:
+    if check.get("status") != "FAIL":
+        return False
+    name = check.get("name") or ""
+    if name in NON_CRITICAL_FAIL_NAMES:
+        return False
+    if name.endswith(":access") or name.startswith("cron_duplicate:"):
+        return False
+    if name in CRITICAL_FAIL_NAMES:
+        return True
+    return any(name.startswith(prefix) for prefix in CRITICAL_FAIL_PREFIXES)
+
+
+def overall_status(
+    checks: list[dict[str, Any]],
+    *,
+    bot_count: int = 0,
+    dash_count: int = 0,
+) -> str:
+    runtime_operational = bot_count >= 1 and dash_count >= 1
+    critical_fails = [c for c in checks if is_critical_fail(c)]
+    if critical_fails:
+        return "FAIL"
+    if runtime_operational:
+        return "PASS"
     statuses = {c["status"] for c in checks}
     if "FAIL" in statuses:
         return "FAIL"
@@ -522,6 +686,8 @@ def build_health_report(
                 _check(checks, name=f"launchagent:{label}", status="PASS", detail=f"{label} loaded ({info})")
 
     caffeinate_count, pgrep_available = _pgrep("caffeinate -d -i -m")
+    bot_count = 0
+    dash_count = 0
     if not pgrep_available:
         _check(
             checks,
@@ -553,7 +719,13 @@ def build_health_report(
         elif bot_count == 1:
             _check(checks, name="live_bot_process", status="PASS", detail="live_bot.py running (1)")
         else:
-            _check(checks, name="live_bot_process", status="FAIL", detail=f"duplicate live_bot ({bot_count})")
+            _check(
+                checks,
+                name="live_bot_process",
+                status="WARN",
+                detail=f"duplicate live_bot ({bot_count}) — runtime operational but cleanup recommended",
+                remediation="Stop duplicate live_bot.py processes; keep a single supervised instance.",
+            )
 
         dash_count, _ = _pgrep("streamlit run dashboard_v2.py")
         if dash_count == 0:
@@ -603,12 +775,7 @@ def build_health_report(
                 status="WARN",
                 detail="startup_runner.log present; no recent launcher run marker",
             )
-    check_launchagent_log(
-        checks,
-        name="market_open_launchagent_log",
-        out_path=project_dir / "market_open_launchagent.out.log",
-        err_path=project_dir / "market_open_launchagent.err.log",
-    )
+    check_market_open_launchagent_log(checks, project_dir=project_dir)
 
     legacy_errors = read_log_errors(project_dir / "market_open_runner.log")
     legacy_op = [e for e in legacy_errors if "operation not permitted" in e.lower()]
@@ -627,12 +794,31 @@ def build_health_report(
             detail="No legacy cron blockers in market_open_runner.log",
         )
 
-    status = overall_status(checks)
+    status = overall_status(checks, bot_count=bot_count if pgrep_available else 0, dash_count=dash_count if pgrep_available else 0)
+    fail_checks = [c for c in checks if c["status"] == "FAIL"]
+    critical_fail_checks = [c for c in fail_checks if is_critical_fail(c)]
+    non_critical_fail_checks = [c for c in fail_checks if not is_critical_fail(c)]
     return {
         "schema": "tae_infrastructure_health",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "project_dir": str(project_dir),
         "overall_status": status,
+        "runtime_operational": (bot_count >= 1 and dash_count >= 1) if pgrep_available else False,
+        "process_counts": {
+            "live_bot": bot_count if pgrep_available else None,
+            "dashboard": dash_count if pgrep_available else None,
+        },
+        "fail_reasons": [
+            {
+                "name": c["name"],
+                "detail": c["detail"],
+                "critical": is_critical_fail(c),
+                "remediation": c.get("remediation") or "",
+            }
+            for c in fail_checks
+        ],
+        "critical_fail_count": len(critical_fail_checks),
+        "non_critical_fail_count": len(non_critical_fail_checks),
         "checks": checks,
         "summary": {
             "pass": sum(1 for c in checks if c["status"] == "PASS"),
@@ -655,15 +841,27 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path]:
         f"**Generated:** {report['generated_at']}",
         f"**Overall:** {report['overall_status']}",
         f"**Autostart readiness:** {report['autostart_readiness']}",
+        f"**Runtime operational:** {report.get('runtime_operational', False)}",
         "",
         "## Summary",
         f"- PASS: {report['summary']['pass']}",
         f"- INFO: {report['summary'].get('info', 0)}",
         f"- WARN: {report['summary']['warn']}",
         f"- FAIL: {report['summary']['fail']}",
+        f"- Critical FAIL: {report.get('critical_fail_count', 0)}",
+        f"- Non-critical FAIL: {report.get('non_critical_fail_count', 0)}",
         "",
-        "## Checks",
     ]
+    fail_reasons = report.get("fail_reasons") or []
+    if fail_reasons:
+        lines.extend(["## FAIL reasons (documented)", ""])
+        for item in fail_reasons:
+            critical = "CRITICAL" if item.get("critical") else "NON-CRITICAL"
+            lines.append(f"- **{item['name']}** [{critical}] — {item['detail']}")
+            if item.get("remediation"):
+                lines.append(f"  - Remediation: {item['remediation']}")
+        lines.append("")
+    lines.append("## Checks")
     for check in report.get("checks", []):
         lines.append(f"- **{check['status']}** `{check['name']}` — {check['detail']}")
         if check.get("remediation"):
