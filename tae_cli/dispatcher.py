@@ -12,6 +12,7 @@ from tae_cli.commands import (
     dpe_learning,
     dpe_events,
     dpe_splitter,
+    full_paper_cycle,
     growth_analytics,
     growth_intelligence,
     health,
@@ -31,6 +32,7 @@ from tae_cli.commands import (
 )
 
 COMMANDS = {
+    "full-paper-cycle": full_paper_cycle.run,
     "health": health.run,
     "protect": protect.run,
     "portfolio-protect": portfolio_protect.run,

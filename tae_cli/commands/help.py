@@ -26,6 +26,7 @@ Available commands:
   learning-profit
   paper-experiments
   paper-decisions
+  full-paper-cycle
   morning-audit
   status
   help
@@ -49,6 +50,7 @@ Available commands:
   learning-profit — learning-to-profit bridge (ranked PAPER hypotheses + queue)
   paper-experiments — run PAPER scoring experiments from hypothesis queue
   paper-decisions — explicit PAPER BUY/SELL/HOLD/REDUCE/PROTECT/ROTATE/SKIP decisions
+  full-paper-cycle — run complete PAPER intelligence loop (health → LTP → PDE → DPE → summary)
   morning-audit — consolidated read-only morning operational brief
 ================================="""
 

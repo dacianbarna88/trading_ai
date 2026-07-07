@@ -34,6 +34,9 @@ SHADOW_VALIDATION_JSON = Path("tae_profit_protection_validation.json")
 DPE_EVAL_JSON = Path("runtime_outputs/dpe/result_evaluator/evaluation.json")
 DPE_ADAPTIVE_JSON = Path("runtime_outputs/dpe/adaptive/adaptive.json")
 ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
+CONFIDENCE_JSON = Path("tae_confidence_evolution.json")
+REPLAY_JSON = Path("tae_decision_replay.json")
+PATTERN_DISCOVERY_TXT = Path("pattern_discovery_summary.txt")
 PORTFOLIO_CSV = Path("portfolio.csv")
 SIGNALS_CSV = Path("live_signals.csv")
 
@@ -350,6 +353,32 @@ def build_horizon_context(ticker: str, ctx: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def apply_learning_evidence_bias(
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+) -> None:
+    confidence_doc = ctx.get("confidence_evolution") or {}
+    replay_doc = ctx.get("decision_replay") or {}
+
+    final_rec = _s(confidence_doc.get("final_recommendation")).upper()
+    if "DO_NOT_PROMOTE" in final_rec or "INSUFFICIENT" in final_rec:
+        scores["BUY_PAPER"] -= 12.0
+        scores["SKIP_PAPER"] += 10.0
+        evidence.append(f"confidence evolution: {final_rec or 'caution'}")
+
+    for rec in replay_doc.get("recommendations") or []:
+        if _s(rec) == "DO_NOT_PROMOTE_TO_LIVE":
+            scores["BUY_PAPER"] -= 10.0
+            scores["SKIP_PAPER"] += 8.0
+            evidence.append("decision replay: DO_NOT_PROMOTE_TO_LIVE")
+            break
+
+    if ctx.get("pattern_discovery_present"):
+        scores["ROTATE_PAPER"] += 3.0
+        evidence.append("pattern discovery summary available")
+
+
 def apply_horizon_action_bias(
     ticker: str,
     scores: dict[str, float],
@@ -426,6 +455,8 @@ def build_context() -> dict[str, Any]:
     accounting = load_json(ACCOUNTING_JSON)
     hypotheses = load_json(HYPOTHESES_JSON)
     experiments_doc = load_json(EXPERIMENTS_JSON)
+    confidence_evolution = load_json(CONFIDENCE_JSON)
+    decision_replay = load_json(REPLAY_JSON)
 
     portfolio_rows = read_csv_rows(PORTFOLIO_CSV) if PORTFOLIO_CSV.is_file() else []
     signal_rows = read_csv_rows(SIGNALS_CSV) if SIGNALS_CSV.is_file() else []
@@ -467,6 +498,9 @@ def build_context() -> dict[str, Any]:
         "hypotheses": hypotheses,
         "experiments": experiments,
         "exp_by_ticker": exp_by_ticker,
+        "confidence_evolution": confidence_evolution,
+        "decision_replay": decision_replay,
+        "pattern_discovery_present": PATTERN_DISCOVERY_TXT.is_file(),
         "live_positions": live_positions,
         "signals": signals,
         "top_growth": top_growth,
@@ -489,6 +523,9 @@ def build_context() -> dict[str, Any]:
             "horizon_vote": HORIZON_VOTE_TXT.is_file(),
             "intraday_fade": INTRADAY_FADE_JSON.is_file(),
             "cross_validation": CROSS_VALIDATION_JSON.is_file(),
+            "confidence_evolution": CONFIDENCE_JSON.is_file(),
+            "decision_replay": REPLAY_JSON.is_file(),
+            "pattern_discovery": PATTERN_DISCOVERY_TXT.is_file(),
         },
     }
 
@@ -760,6 +797,7 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         scores["SELL_PAPER"] += 3.0
 
     hz = apply_horizon_action_bias(ticker, scores, evidence, ctx, held=held)
+    apply_learning_evidence_bias(scores, evidence, ctx)
 
     prot_boost, reduce_boost, sell_penalty, gates_passed = protection_validation_bias(
         ticker, ctx.get("shadow_validation"),
@@ -817,6 +855,12 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("historical_intelligence.csv")
     if STRATEGIC_INTELLIGENCE_TXT.is_file():
         sources.append("strategic_intelligence_summary.txt")
+    if ctx.get("confidence_evolution"):
+        sources.append("tae_confidence_evolution.json")
+    if ctx.get("decision_replay"):
+        sources.append("tae_decision_replay.json")
+    if ctx.get("pattern_discovery_present"):
+        sources.append("pattern_discovery_summary.txt")
     if ticker.upper() in (ctx.get("signals") or {}):
         sources.append("live_signals.csv")
     if ticker.upper() in (ctx.get("live_positions") or {}):
