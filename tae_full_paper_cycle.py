@@ -30,6 +30,8 @@ INFRA_JSON = Path("tae_infrastructure_health.json")
 GII_JSON = Path("tae_growth_intelligence.json")
 LEDGER_JSON = Path("tae_opportunity_cost_ledger.json")
 PROMOTION_JSON = OUTPUT_DIR / "promotion_gate.json"
+VALIDATION_JSON = Path("runtime_outputs/paper_decisions/decision_validation_results.json")
+MEMORY_JSONL = Path("runtime_outputs/longitudinal_memory/decisions.jsonl")
 
 FORBIDDEN_SNAPSHOT = (
     "live_bot.py",
@@ -73,6 +75,40 @@ def _file_mtime(path: Path) -> float | None:
 
 def forbidden_files_unchanged(before: dict[str, float | None], after: dict[str, float | None]) -> bool:
     return before == after
+
+
+def feedback_artifacts_exist(root: Path) -> bool:
+    return (root / VALIDATION_JSON).is_file() or (root / MEMORY_JSONL).is_file()
+
+
+def run_pre_pde_feedback(root: Path, step_results: list[dict[str, Any]]) -> None:
+    if not feedback_artifacts_exist(root):
+        print("\n>>> [pre_pde_feedback] skipped — no prior validation/memory artifacts")
+        return
+    from tae_longitudinal_outcome_memory import run_longitudinal_memory
+    from tae_adaptive_paper_weights import run_adaptive_paper_weights
+
+    print("\n>>> [pre_pde_feedback] refreshing longitudinal memory + adaptive weights before paper-decisions")
+    mem_result = run_longitudinal_memory()
+    mem_idx = mem_result.get("index") or {}
+    weights_result = run_adaptive_paper_weights()
+    weights_doc = weights_result.get("document") or {}
+    step_results.append(
+        {
+            "step": "pre_pde_longitudinal_memory",
+            "ok": mem_result.get("ok", False),
+            "exit_code": 0,
+            "total_records": mem_idx.get("total_records"),
+        }
+    )
+    step_results.append(
+        {
+            "step": "pre_pde_adaptive_weights",
+            "ok": weights_result.get("ok", False),
+            "exit_code": 0,
+            "actions_weighted": len(weights_doc.get("weights") or {}),
+        }
+    )
 
 
 def run_step(name: str, cmd: list[str], *, cwd: Path) -> dict[str, Any]:
@@ -322,6 +358,8 @@ def main() -> int:
 
     exit_code = 0
     for name, cmd in CYCLE_STEPS:
+        if name == "paper_decisions":
+            run_pre_pde_feedback(root, step_results)
         result = run_step(name, cmd, cwd=root)
         step_results.append(result)
         if not result["ok"] and name in {"health", "learning_profit", "paper_decisions", "paper_experiments"}:

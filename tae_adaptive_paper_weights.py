@@ -28,6 +28,7 @@ ADAPTATION_HINTS_JSON = Path("runtime_outputs/longitudinal_memory/adaptation_hin
 CONFIDENCE_JSON = Path("tae_confidence_evolution.json")
 DPE_ADAPTIVE_JSON = Path("runtime_outputs/dpe/adaptive/adaptive.json")
 MEMORY_INDEX_JSON = Path("runtime_outputs/longitudinal_memory/memory_index.json")
+LONGITUDINAL_KNOWLEDGE_JSON = Path("runtime_outputs/longitudinal_memory/knowledge.json")
 
 PAPER_ACTIONS = (
     "BUY_PAPER",
@@ -162,12 +163,31 @@ def hints_action_delta(hints: dict[str, Any] | None, action: str) -> tuple[float
     return delta, f"longitudinal hint bias {bias:+.3f}"
 
 
+def longitudinal_knowledge_action_delta(action: str, knowledge_doc: dict[str, Any] | None) -> tuple[float, str]:
+    rules = (knowledge_doc or {}).get("rules") or []
+    raw = 0.0
+    matched: list[str] = []
+    action_token = action.replace("_PAPER", "")
+    for rule in rules:
+        rid = _s(rule.get("rule_id")).upper()
+        if action_token not in rid and not rid.endswith(action):
+            continue
+        conf = _f(rule.get("confidence"), 0.5)
+        raw += (conf - 0.5) * 0.02
+        matched.append(rid)
+    if not matched:
+        return 0.0, ""
+    delta = clamp_delta(raw)
+    return delta, f"longitudinal knowledge rules {','.join(matched[:3])}"
+
+
 def compute_action_weight(
     action: str,
     *,
     verdict_counts: dict[str, int],
     previous_weight: float,
     hints: dict[str, Any] | None,
+    knowledge_doc: dict[str, Any] | None,
     global_risk_adj: float,
     evidence_sources: list[str],
 ) -> dict[str, Any]:
@@ -190,6 +210,12 @@ def compute_action_weight(
         raw_delta += hint_delta
         reasons.append(hint_reason)
         evidence_sources.append(str(ADAPTATION_HINTS_JSON))
+
+    know_delta, know_reason = longitudinal_knowledge_action_delta(action, knowledge_doc)
+    if know_delta:
+        raw_delta += know_delta
+        reasons.append(know_reason)
+        evidence_sources.append(str(LONGITUDINAL_KNOWLEDGE_JSON))
 
     if action == "BUY_PAPER" and global_risk_adj:
         raw_delta += global_risk_adj
@@ -281,6 +307,7 @@ def write_report(doc: dict[str, Any]) -> None:
             "",
             f"- Validation: `{VALIDATION_JSON}`",
             f"- Longitudinal hints: `{ADAPTATION_HINTS_JSON}`",
+            f"- Longitudinal knowledge: `{LONGITUDINAL_KNOWLEDGE_JSON}`",
             f"- Confidence evolution: `{CONFIDENCE_JSON}`",
             f"- DPE adaptive: `{DPE_ADAPTIVE_JSON}`",
             "",
@@ -302,6 +329,7 @@ def run_adaptive_paper_weights(*, write_report_flag: bool = True) -> dict[str, A
     confidence = load_json(CONFIDENCE_JSON)
     dpe_adaptive = load_json(DPE_ADAPTIVE_JSON)
     memory_index = load_json(MEMORY_INDEX_JSON)
+    knowledge_doc = load_json(LONGITUDINAL_KNOWLEDGE_JSON)
 
     previous = load_previous_weights()
     by_action = aggregate_validation_by_action(validation)
@@ -322,6 +350,7 @@ def run_adaptive_paper_weights(*, write_report_flag: bool = True) -> dict[str, A
             verdict_counts=by_action.get(action) or {},
             previous_weight=_f(previous.get(action, {}).get("new_weight"), DEFAULT_WEIGHT),
             hints=hints,
+            knowledge_doc=knowledge_doc,
             global_risk_adj=global_risk_adj,
             evidence_sources=list(base_sources),
         )

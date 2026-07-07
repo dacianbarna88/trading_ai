@@ -11,6 +11,10 @@ from unittest import mock
 
 from tae_paper_decision_engine import (
     PAPER_ACTIONS,
+    apply_dpe_evaluator_bias,
+    apply_knowledge_base_bias,
+    apply_named_confidence_rules,
+    apply_named_rule,
     build_decision,
     build_decisions,
     build_horizon_context,
@@ -78,16 +82,16 @@ class PaperDecisionEngineTest(unittest.TestCase):
         }
 
     def test_hold_for_healthy_winner(self) -> None:
-        action, scores, _, _, _, _ = score_actions_for_ticker("MRK", self._ctx())
+        action, scores, _, _, _, _, _ = score_actions_for_ticker("MRK", self._ctx())
         self.assertEqual(action, "HOLD_PAPER")
         self.assertGreater(scores["HOLD_PAPER"], scores["SELL_PAPER"])
 
     def test_protect_or_rotate_for_risky(self) -> None:
-        action, _, _, _, _, _ = score_actions_for_ticker("HSBA.L", self._ctx())
+        action, _, _, _, _, _, _ = score_actions_for_ticker("HSBA.L", self._ctx())
         self.assertIn(action, {"PROTECT_PAPER", "ROTATE_PAPER", "REDUCE_PAPER", "SELL_PAPER"})
 
     def test_buy_for_strong_signal(self) -> None:
-        action, _, _, _, _, _ = score_actions_for_ticker("SPY", self._ctx())
+        action, _, _, _, _, _, _ = score_actions_for_ticker("SPY", self._ctx())
         self.assertIn(action, {"BUY_PAPER", "SKIP_PAPER"})
 
     def test_decision_fields_complete(self) -> None:
@@ -114,7 +118,7 @@ class PaperDecisionEngineTest(unittest.TestCase):
             "opportunity_category": "LATE_PROTECTION",
         }
         ctx["live_positions"]["AMAT"] = {"shares": 3}
-        action, _, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
+        action, _, _, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
         self.assertEqual(action, "REDUCE_PAPER")
 
     def test_hypothesis_reject_forces_skip(self) -> None:
@@ -130,9 +134,46 @@ class PaperDecisionEngineTest(unittest.TestCase):
             ]
         }
         ctx["exp_by_ticker"] = {"SPY": [{"verdict": "REJECT", "hypothesis_id": "LTB-TEST"}]}
-        action, _, _, applied, _, _ = score_actions_for_ticker("SPY", ctx)
+        action, _, _, applied, _, _, _ = score_actions_for_ticker("SPY", ctx)
         self.assertEqual(action, "SKIP_PAPER")
         self.assertTrue(applied)
+
+    def test_knowledge_consumption_evidence(self) -> None:
+        ctx = self._ctx()
+        ctx["knowledge_base"] = {
+            "entries": [
+                {
+                    "id": "kb_test",
+                    "pattern_type": "MISSED_PROFIT_PROTECTION",
+                    "recommendation": "TEST_TRAILING_SHADOW",
+                    "shadow_only": True,
+                    "subject": "MRK",
+                }
+            ]
+        }
+        ctx["longitudinal_knowledge"] = {
+            "rules": [{"rule_id": "KNOW-SELL_PAPER", "confidence": 0.8, "category": "action_reliability"}]
+        }
+        ctx["confidence_evolution"] = {
+            "confidence_evolution_entries": [
+                {"hypothesis": "STOP_REENTRY_CHURN", "recommendation": "TEST_15M_COOLDOWN_SHADOW"}
+            ],
+            "final_recommendation": {"DO_NOT_PROMOTE": ["DO_NOT_PROMOTE_TO_LIVE"]},
+        }
+        ctx["dpe_eval"] = {"overall": {"winner": "COLLABORATIVE", "confidence_pct": 70.0}}
+        ctx["ppg"] = {"portfolio_verdict": "PORTFOLIO_HIGH_RISK"}
+        decision = build_decision("MRK", ctx, seq=99)
+        self.assertIsNotNone(decision.get("knowledge_evidence"))
+        self.assertIsNotNone(decision.get("longitudinal_knowledge_evidence"))
+        self.assertIsNotNone(decision.get("dpe_evaluator_evidence"))
+        self.assertFalse(decision["live_promotion_allowed"])
+        self.assertIn("MISSED_PROFIT_PROTECTION", decision["knowledge_evidence"].get("rules_applied", []))
+
+    def test_named_rules_change_scores(self) -> None:
+        scores = {a: 50.0 for a in PAPER_ACTIONS}
+        before_buy = scores["BUY_PAPER"]
+        apply_named_rule(scores, "SCORE_DECAY_SHADOW")
+        self.assertLess(scores["BUY_PAPER"], before_buy)
 
     def test_decision_includes_horizon_fields(self) -> None:
         decision = build_decision("MRK", self._ctx(), seq=1)

@@ -32,6 +32,7 @@ class AdaptivePaperWeightsTest(unittest.TestCase):
             verdict_counts={"PROMISING": 2},
             previous_weight=1.0,
             hints=None,
+            knowledge_doc=None,
             global_risk_adj=0.0,
             evidence_sources=[],
         )
@@ -43,6 +44,7 @@ class AdaptivePaperWeightsTest(unittest.TestCase):
             verdict_counts={"REJECT": 2},
             previous_weight=1.0,
             hints=None,
+            knowledge_doc=None,
             global_risk_adj=0.0,
             evidence_sources=[],
         )
@@ -54,6 +56,7 @@ class AdaptivePaperWeightsTest(unittest.TestCase):
             verdict_counts={"NEEDS_MORE_DATA": 5},
             previous_weight=1.0,
             hints=None,
+            knowledge_doc=None,
             global_risk_adj=0.0,
             evidence_sources=[],
         )
@@ -92,7 +95,9 @@ class AdaptivePaperWeightsTest(unittest.TestCase):
                 "tae_adaptive_paper_weights.CONFIDENCE_JSON", base / "missing.json"
             ), mock.patch("tae_adaptive_paper_weights.DPE_ADAPTIVE_JSON", base / "missing.json"), mock.patch(
                 "tae_adaptive_paper_weights.MEMORY_INDEX_JSON", base / "missing.json"
-            ), mock.patch("tae_adaptive_paper_weights.REPORT_MD", base / "report.md"):
+            ), mock.patch("tae_adaptive_paper_weights.LONGITUDINAL_KNOWLEDGE_JSON", base / "missing.json"), mock.patch(
+                "tae_adaptive_paper_weights.REPORT_MD", base / "report.md"
+            ):
                 result = run_adaptive_paper_weights()
                 self.assertTrue(result["ok"])
                 self.assertIn("SELL_PAPER", result["document"]["weights"])

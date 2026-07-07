@@ -37,7 +37,9 @@ ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
 CONFIDENCE_JSON = Path("tae_confidence_evolution.json")
 REPLAY_JSON = Path("tae_decision_replay.json")
 ADAPTATION_HINTS_JSON = Path("runtime_outputs/longitudinal_memory/adaptation_hints.json")
+LONGITUDINAL_KNOWLEDGE_JSON = Path("runtime_outputs/longitudinal_memory/knowledge.json")
 ADAPTIVE_WEIGHTS_JSON = Path("runtime_outputs/adaptive_weights/paper_action_weights.json")
+KNOWLEDGE_JSON = Path("tae_knowledge_base.json")
 PATTERN_DISCOVERY_TXT = Path("pattern_discovery_summary.txt")
 PORTFOLIO_CSV = Path("portfolio.csv")
 SIGNALS_CSV = Path("live_signals.csv")
@@ -79,6 +81,31 @@ INTRADAY_FADE_JSON = Path("tae_intraday_fade_intelligence.json")
 CROSS_VALIDATION_JSON = Path("tae_cross_validation_report.json")
 HISTORICAL_RESULTS_JSON = Path("tae_historical_results_analysis.json")
 HORIZON_LABELS = ("7D", "1M", "1Y", "2Y", "5Y", "10Y", "20Y")
+
+PAPER_SAFE_KB_RECOMMENDATIONS = frozenset(
+    {
+        "CONTINUE_OBSERVATION",
+        "PRIORITIZE_TRACKING",
+        "TEST_TRAILING_SHADOW",
+        "TEST_PARTIAL_SELL_SHADOW",
+        "TEST_15M_COOLDOWN_SHADOW",
+        "SCORE_DECAY_SHADOW",
+        "INSUFFICIENT_DATA",
+        "DO_NOT_PROMOTE_TO_ADVISORY_YET",
+        "DO_NOT_PROMOTE_TO_LIVE",
+    }
+)
+FORBIDDEN_KB_RECOMMENDATIONS = frozenset({"BUY", "SELL", "STOP", "TAKE_PROFIT", "PROMOTE_TO_LIVE"})
+MAX_KNOWLEDGE_SCORE_DELTA = 8.0
+
+NAMED_RULE_SCORE_DELTAS: dict[str, dict[str, float]] = {
+    "SCORE_DECAY_SHADOW": {"BUY_PAPER": -8.0, "SKIP_PAPER": 5.0},
+    "STOP_REENTRY_CHURN": {"BUY_PAPER": -6.0, "SKIP_PAPER": 4.0},
+    "MISSED_PROFIT_PROTECTION": {"PROTECT_PAPER": 8.0, "SELL_PAPER": 4.0, "REDUCE_PAPER": 3.0},
+    "TRAILING_1_PROTECTION_HYPOTHESIS": {"PROTECT_PAPER": 6.0},
+    "DO_NOT_PROMOTE": {"BUY_PAPER": -10.0, "SKIP_PAPER": 8.0},
+    "DO_NOT_PROMOTE_TO_LIVE": {"BUY_PAPER": -10.0, "SKIP_PAPER": 8.0},
+}
 
 
 def _now() -> str:
@@ -406,26 +433,227 @@ def apply_stale_source_penalty(
     return penalty
 
 
+def parse_final_recommendation(confidence_doc: dict[str, Any] | None) -> dict[str, Any]:
+    raw = (confidence_doc or {}).get("final_recommendation")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.startswith("{"):
+        try:
+            parsed = json.loads(raw.replace("'", '"'))
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def is_paper_safe_kb_entry(entry: dict[str, Any]) -> bool:
+    if entry.get("shadow_only") is False and not entry.get("recommendation"):
+        return False
+    rec = _s(entry.get("recommendation")).upper()
+    if rec in FORBIDDEN_KB_RECOMMENDATIONS:
+        return False
+    if rec and rec not in PAPER_SAFE_KB_RECOMMENDATIONS and "SHADOW" not in rec and "DO_NOT_PROMOTE" not in rec:
+        return False
+    if "PROMOTE_TO_LIVE" in rec and "DO_NOT" not in rec:
+        return False
+    return True
+
+
+def apply_score_deltas(
+    scores: dict[str, float],
+    deltas: dict[str, float],
+    *,
+    cap: float = MAX_KNOWLEDGE_SCORE_DELTA,
+) -> float:
+    applied = 0.0
+    for action, delta in deltas.items():
+        if action not in scores or not delta:
+            continue
+        bounded = max(-cap, min(cap, delta))
+        scores[action] += bounded
+        applied += abs(bounded)
+    return applied
+
+
+def apply_named_rule(
+    scores: dict[str, float],
+    rule_key: str,
+    *,
+    cap: float = MAX_KNOWLEDGE_SCORE_DELTA,
+) -> list[str]:
+    deltas = NAMED_RULE_SCORE_DELTAS.get(rule_key.upper()) or NAMED_RULE_SCORE_DELTAS.get(rule_key)
+    if not deltas:
+        return []
+    apply_score_deltas(scores, deltas, cap=cap)
+    return [rule_key]
+
+
+def apply_knowledge_base_bias(
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+    ticker: str,
+) -> dict[str, Any]:
+    kb = ctx.get("knowledge_base") or {}
+    entries = kb.get("entries") or []
+    rules_applied: list[str] = []
+    matched_ids: list[str] = []
+    ticker_u = ticker.upper()
+
+    for entry in entries:
+        if not is_paper_safe_kb_entry(entry):
+            continue
+        subject = _s(entry.get("subject")).upper()
+        pattern = _s(entry.get("pattern_type")).upper()
+        if (
+            subject
+            and subject not in {ticker_u, "_PORTFOLIO", "PORTFOLIO", ""}
+            and subject not in NAMED_RULE_SCORE_DELTAS
+            and subject != pattern
+        ):
+            continue
+        rec = _s(entry.get("recommendation")).upper()
+        key = pattern or rec
+        if key in NAMED_RULE_SCORE_DELTAS:
+            rules_applied.extend(apply_named_rule(scores, key))
+            matched_ids.append(_s(entry.get("id")))
+        elif rec == "SCORE_DECAY_SHADOW" or pattern == "SCORE_DECAY_SHADOW":
+            rules_applied.extend(apply_named_rule(scores, "SCORE_DECAY_SHADOW"))
+            matched_ids.append(_s(entry.get("id")))
+        elif "TRAILING" in rec or "TRAILING" in pattern:
+            rules_applied.extend(apply_named_rule(scores, "TRAILING_1_PROTECTION_HYPOTHESIS"))
+            matched_ids.append(_s(entry.get("id")))
+
+    if rules_applied:
+        evidence.append(f"knowledge base rules: {', '.join(sorted(set(rules_applied)))}")
+    return {
+        "source": str(KNOWLEDGE_JSON),
+        "rules_applied": sorted(set(rules_applied)),
+        "entry_ids": matched_ids[:10],
+        "mode": MODE,
+        "live_promotion_allowed": False,
+    }
+
+
+def apply_named_confidence_rules(
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+) -> list[str]:
+    confidence_doc = ctx.get("confidence_evolution") or {}
+    replay_doc = ctx.get("decision_replay") or {}
+    rules_applied: list[str] = []
+
+    for entry in confidence_doc.get("confidence_evolution_entries") or []:
+        hyp = _s(entry.get("hypothesis")).upper()
+        rec = _s(entry.get("recommendation")).upper()
+        if hyp in NAMED_RULE_SCORE_DELTAS:
+            rules_applied.extend(apply_named_rule(scores, hyp))
+        elif rec == "SCORE_DECAY_SHADOW":
+            rules_applied.extend(apply_named_rule(scores, "SCORE_DECAY_SHADOW"))
+
+    final_rec = parse_final_recommendation(confidence_doc)
+    for item in final_rec.get("DO_NOT_PROMOTE") or []:
+        item_s = _s(item).upper()
+        if "DO_NOT_PROMOTE" in item_s:
+            rules_applied.extend(apply_named_rule(scores, "DO_NOT_PROMOTE"))
+            break
+
+    for rec in replay_doc.get("recommendations") or []:
+        if _s(rec) == "DO_NOT_PROMOTE_TO_LIVE":
+            rules_applied.extend(apply_named_rule(scores, "DO_NOT_PROMOTE_TO_LIVE"))
+            break
+
+    if rules_applied:
+        evidence.append(f"named confidence rules: {', '.join(sorted(set(rules_applied)))}")
+    return sorted(set(rules_applied))
+
+
+def apply_longitudinal_knowledge_bias(
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    doc = ctx.get("longitudinal_knowledge") or {}
+    rules_applied: list[str] = []
+    for rule in doc.get("rules") or []:
+        rid = _s(rule.get("rule_id")).upper()
+        conf = _f(rule.get("confidence"), 0.5)
+        delta = max(-4.0, min(4.0, (conf - 0.5) * 8.0))
+        action = None
+        for candidate in PAPER_ACTIONS:
+            if candidate.replace("_PAPER", "") in rid or rid.endswith(candidate):
+                action = candidate
+                break
+        if not action or abs(delta) < 0.01:
+            continue
+        scores[action] += delta
+        rules_applied.append(rid)
+    if rules_applied:
+        evidence.append(f"longitudinal knowledge: {len(rules_applied)} rules")
+    return {
+        "source": str(LONGITUDINAL_KNOWLEDGE_JSON),
+        "rules_applied": rules_applied,
+        "mode": MODE,
+        "live_promotion_allowed": False,
+    }
+
+
+def apply_dpe_evaluator_bias(
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+    *,
+    held: bool,
+) -> dict[str, Any] | None:
+    dpe = ctx.get("dpe_eval") or {}
+    overall = dpe.get("overall") or {}
+    winner = _s(overall.get("winner") or dpe.get("winner")).upper()
+    if not winner:
+        return None
+
+    ppg_verdict = _s((ctx.get("ppg") or {}).get("portfolio_verdict"))
+    high_risk = _s(ctx.get("policy_state")) == "HIGH_RISK" or "HIGH_RISK" in ppg_verdict
+    deltas: dict[str, float] = {}
+
+    if winner == "COLLABORATIVE":
+        if high_risk:
+            deltas = {
+                "PROTECT_PAPER": 5.0,
+                "HOLD_PAPER": 3.0,
+                "SELL_PAPER": 2.0,
+                "BUY_PAPER": -4.0,
+            }
+        else:
+            deltas = {"PROTECT_PAPER": 3.0, "HOLD_PAPER": 2.0, "BUY_PAPER": -2.0}
+    elif winner == "COMPETITIVE":
+        deltas = {"BUY_PAPER": 3.0, "HOLD_PAPER": 2.0, "ROTATE_PAPER": 2.0}
+        if high_risk and not held:
+            deltas["BUY_PAPER"] = 1.0
+
+    apply_score_deltas(scores, deltas, cap=6.0)
+    evidence.append(f"DPE evaluator winner={winner} high_risk={high_risk}")
+    return {
+        "winner": winner,
+        "high_risk_context": high_risk,
+        "deltas_applied": deltas,
+        "confidence_pct": overall.get("confidence_pct"),
+        "mode": MODE,
+        "live_promotion_allowed": False,
+    }
+
+
 def apply_learning_evidence_bias(
     scores: dict[str, float],
     evidence: list[str],
     ctx: dict[str, Any],
 ) -> None:
     confidence_doc = ctx.get("confidence_evolution") or {}
-    replay_doc = ctx.get("decision_replay") or {}
-
-    final_rec = _s(confidence_doc.get("final_recommendation")).upper()
-    if "DO_NOT_PROMOTE" in final_rec or "INSUFFICIENT" in final_rec:
-        scores["BUY_PAPER"] -= 12.0
-        scores["SKIP_PAPER"] += 10.0
-        evidence.append(f"confidence evolution: {final_rec or 'caution'}")
-
-    for rec in replay_doc.get("recommendations") or []:
-        if _s(rec) == "DO_NOT_PROMOTE_TO_LIVE":
-            scores["BUY_PAPER"] -= 10.0
-            scores["SKIP_PAPER"] += 8.0
-            evidence.append("decision replay: DO_NOT_PROMOTE_TO_LIVE")
-            break
+    final_rec = parse_final_recommendation(confidence_doc)
+    final_text = _s(confidence_doc.get("final_recommendation")).upper()
+    if final_rec.get("DO_NOT_PROMOTE") or "DO_NOT_PROMOTE" in final_text or "INSUFFICIENT" in final_text:
+        apply_named_rule(scores, "DO_NOT_PROMOTE")
+        evidence.append("confidence evolution aggregate: DO_NOT_PROMOTE caution")
 
     if ctx.get("pattern_discovery_present"):
         scores["ROTATE_PAPER"] += 3.0
@@ -541,6 +769,8 @@ def build_context() -> dict[str, Any]:
     decision_replay = load_json(REPLAY_JSON)
     adaptation_hints = load_json(ADAPTATION_HINTS_JSON)
     paper_action_weights = load_json(ADAPTIVE_WEIGHTS_JSON)
+    knowledge_base = load_json(KNOWLEDGE_JSON)
+    longitudinal_knowledge = load_json(LONGITUDINAL_KNOWLEDGE_JSON)
 
     portfolio_rows = read_csv_rows(PORTFOLIO_CSV) if PORTFOLIO_CSV.is_file() else []
     signal_rows = read_csv_rows(SIGNALS_CSV) if SIGNALS_CSV.is_file() else []
@@ -589,6 +819,8 @@ def build_context() -> dict[str, Any]:
         "decision_replay": decision_replay,
         "adaptation_hints": adaptation_hints,
         "paper_action_weights": paper_action_weights,
+        "knowledge_base": knowledge_base,
+        "longitudinal_knowledge": longitudinal_knowledge,
         "pattern_discovery_present": PATTERN_DISCOVERY_TXT.is_file(),
         "live_positions": live_positions,
         "signals": signals,
@@ -617,6 +849,8 @@ def build_context() -> dict[str, Any]:
             "confidence_evolution": CONFIDENCE_JSON.is_file(),
             "longitudinal_adaptation_hints": ADAPTATION_HINTS_JSON.is_file(),
             "adaptive_paper_weights": ADAPTIVE_WEIGHTS_JSON.is_file(),
+            "knowledge_base": KNOWLEDGE_JSON.is_file(),
+            "longitudinal_knowledge": LONGITUDINAL_KNOWLEDGE_JSON.is_file(),
             "decision_replay": REPLAY_JSON.is_file(),
             "pattern_discovery": PATTERN_DISCOVERY_TXT.is_file(),
         },
@@ -828,7 +1062,14 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         scores["SKIP_PAPER"] = 80.0
         evidence.append("insufficient intelligence for ticker")
         hz = build_horizon_context(ticker, ctx)
-        return "SKIP_PAPER", scores, evidence, [], False, hz, None
+        consumption = {
+            "knowledge_evidence": apply_knowledge_base_bias(scores, evidence, ctx, ticker),
+            "longitudinal_knowledge_evidence": apply_longitudinal_knowledge_bias(scores, evidence, ctx),
+            "dpe_evaluator_evidence": apply_dpe_evaluator_bias(scores, evidence, ctx, held=held),
+            "adaptive_weight_evidence": None,
+            "named_confidence_rules": apply_named_confidence_rules(scores, evidence, ctx),
+        }
+        return "SKIP_PAPER", scores, evidence, [], False, hz, consumption
 
     if held:
         if posture in {"PROTECT_SHADOW"} and current_pct > 2.0 and missed >= 15.0:
@@ -891,8 +1132,19 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
 
     hz = apply_horizon_action_bias(ticker, scores, evidence, ctx, held=held)
     apply_stale_source_penalty(scores, evidence, ctx)
+    knowledge_evidence = apply_knowledge_base_bias(scores, evidence, ctx, ticker)
+    named_rules = apply_named_confidence_rules(scores, evidence, ctx)
+    knowledge_evidence["named_confidence_rules"] = named_rules
+    longitudinal_knowledge_evidence = apply_longitudinal_knowledge_bias(scores, evidence, ctx)
+    dpe_evaluator_evidence = apply_dpe_evaluator_bias(scores, evidence, ctx, held=held)
     apply_learning_evidence_bias(scores, evidence, ctx)
     adaptive_weight_detail = apply_adaptive_paper_weights(scores, evidence, ctx, ticker)
+    consumption_evidence = {
+        "knowledge_evidence": knowledge_evidence,
+        "longitudinal_knowledge_evidence": longitudinal_knowledge_evidence,
+        "dpe_evaluator_evidence": dpe_evaluator_evidence,
+        "adaptive_weight_evidence": adaptive_weight_detail,
+    }
 
     prot_boost, reduce_boost, sell_penalty, gates_passed = protection_validation_bias(
         ticker, ctx.get("shadow_validation"),
@@ -921,11 +1173,12 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     if rule_note:
         evidence.append(rule_note)
 
-    return best, scores, evidence, applied_hyps, gates_passed, hz, adaptive_weight_detail
+    return best, scores, evidence, applied_hyps, gates_passed, hz, consumption_evidence
 
 
 def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, Any]:
-    action, scores, evidence_notes, applied_hypotheses, gates_passed, horizon, adaptive_weight_detail = score_actions_for_ticker(ticker, ctx)
+    action, scores, evidence_notes, applied_hypotheses, gates_passed, horizon, consumption_evidence = score_actions_for_ticker(ticker, ctx)
+    adaptive_weight_detail = consumption_evidence.get("adaptive_weight_evidence")
     gii = (ctx.get("gii_by") or {}).get(ticker.upper()) or {}
     deltas = estimate_deltas(ticker.upper(), action, ctx)
     risk_score = compute_risk_score(ticker.upper(), ctx)
@@ -965,6 +1218,12 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("runtime_outputs/longitudinal_memory/adaptation_hints.json")
     if ctx.get("paper_action_weights"):
         sources.append("runtime_outputs/adaptive_weights/paper_action_weights.json")
+    if ctx.get("knowledge_base"):
+        sources.append("tae_knowledge_base.json")
+    if ctx.get("longitudinal_knowledge"):
+        sources.append("runtime_outputs/longitudinal_memory/knowledge.json")
+    if ctx.get("dpe_eval"):
+        sources.append("runtime_outputs/dpe/result_evaluator/evaluation.json")
     if ctx.get("decision_replay"):
         sources.append("tae_decision_replay.json")
     if ctx.get("pattern_discovery_present"):
@@ -1018,6 +1277,9 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "horizon_reason": horizon.get("horizon_reason"),
         "historical_sources_stale": bool((ctx.get("historical_runtime") or {}).get("stale_sources")),
         "confidence_penalty_stale": stale_penalty,
+        "knowledge_evidence": consumption_evidence.get("knowledge_evidence"),
+        "longitudinal_knowledge_evidence": consumption_evidence.get("longitudinal_knowledge_evidence"),
+        "dpe_evaluator_evidence": consumption_evidence.get("dpe_evaluator_evidence"),
         "adaptive_weight_evidence": adaptive_weight_detail,
         "created_at": ts,
     }
