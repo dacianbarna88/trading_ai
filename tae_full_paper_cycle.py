@@ -30,7 +30,6 @@ INFRA_JSON = Path("tae_infrastructure_health.json")
 GII_JSON = Path("tae_growth_intelligence.json")
 LEDGER_JSON = Path("tae_opportunity_cost_ledger.json")
 PROMOTION_JSON = OUTPUT_DIR / "promotion_gate.json"
-VALIDATION_JSON = Path("runtime_outputs/paper_decisions/decision_validation_results.json")
 MEMORY_JSONL = Path("runtime_outputs/longitudinal_memory/decisions.jsonl")
 
 FORBIDDEN_SNAPSHOT = (
@@ -38,6 +37,11 @@ FORBIDDEN_SNAPSHOT = (
     "portfolio.csv",
     "live_signals.csv",
     "watchlist.txt",
+)
+
+FORBIDDEN_GIT_PATHS = FORBIDDEN_SNAPSHOT + (
+    "core/",
+    "research_core/",
 )
 
 CYCLE_STEPS: list[tuple[str, list[str]]] = [
@@ -74,7 +78,76 @@ def _file_mtime(path: Path) -> float | None:
 
 
 def forbidden_files_unchanged(before: dict[str, float | None], after: dict[str, float | None]) -> bool:
+    """Legacy mtime comparison — prefer check_forbidden_file_safety() for cycle gates."""
     return before == after
+
+
+def check_forbidden_file_safety(
+    root: Path,
+    *,
+    before_mtimes: dict[str, float | None] | None = None,
+) -> dict[str, Any]:
+    """Block only on real git content diff; report mtime drift separately."""
+    before_mtimes = before_mtimes or {}
+    after_mtimes = {name: _file_mtime(root / name) for name in FORBIDDEN_SNAPSHOT}
+    mtime_drift = bool(before_mtimes) and before_mtimes != after_mtimes
+
+    changed_files: list[str] = []
+    diff_text = ""
+    git_ok = True
+    git_detail = ""
+
+    try:
+        diff_result = subprocess.run(
+            ["git", "diff", "--", *FORBIDDEN_GIT_PATHS],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        names_result = subprocess.run(
+            ["git", "diff", "--name-only", "--", *FORBIDDEN_GIT_PATHS],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if diff_result.returncode != 0 and not (diff_result.stdout or diff_result.stderr):
+            git_ok = False
+            git_detail = (diff_result.stderr or "git diff failed").strip()
+        else:
+            diff_text = (diff_result.stdout or "").strip()
+            changed_files = [line.strip() for line in (names_result.stdout or "").splitlines() if line.strip()]
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        git_ok = False
+        git_detail = str(exc)
+
+    content_clean = git_ok and not diff_text and not changed_files
+    diff_summary = "0 diff lines" if content_clean else diff_text[:500] or f"{len(changed_files)} file(s) changed"
+
+    safety_block_reason = None
+    if not git_ok:
+        safety_block_reason = f"git diff unavailable: {git_detail}"
+    elif not content_clean:
+        safety_block_reason = f"forbidden content diff: {', '.join(changed_files) or 'see diff_summary'}"
+
+    note = None
+    if mtime_drift and content_clean:
+        note = "mtime drift ignored, content diff clean"
+
+    return {
+        "forbidden_content_diff_clean": content_clean,
+        "forbidden_mtime_drift_detected": mtime_drift,
+        "forbidden_files_unchanged": content_clean,
+        "safety_status": "PASS" if content_clean else "BLOCKED",
+        "safety_block_reason": safety_block_reason,
+        "changed_files": changed_files,
+        "diff_summary": diff_summary,
+        "note": note,
+        "git_check_ok": git_ok,
+    }
 
 
 def feedback_artifacts_exist(root: Path) -> bool:
@@ -169,7 +242,12 @@ def _f(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -> dict[str, Any]:
+def collect_summary(
+    step_results: list[dict[str, Any]],
+    *,
+    forbidden_ok: bool,
+    safety: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from tae_historical_runtime_refresh import load_runtime_state
 
     hist_runtime = load_runtime_state()
@@ -222,6 +300,9 @@ def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -
     PROMOTION_JSON.parent.mkdir(parents=True, exist_ok=True)
     PROMOTION_JSON.write_text(json.dumps(promotion_gate, indent=2) + "\n", encoding="utf-8")
 
+    safety = safety or {}
+    forbidden_ok = bool(safety.get("forbidden_content_diff_clean", forbidden_ok))
+
     if not forbidden_ok or infra_fail or blocking_failed:
         final_verdict = "BLOCKED_WITH_REASONS"
     elif failed_steps or hist_stale_list or stale_sources or not infra_pass:
@@ -241,6 +322,13 @@ def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -
         "generated_at": _now(),
         "step_results": step_results,
         "forbidden_files_unchanged": forbidden_ok,
+        "forbidden_content_diff_clean": safety.get("forbidden_content_diff_clean", forbidden_ok),
+        "forbidden_mtime_drift_detected": safety.get("forbidden_mtime_drift_detected", False),
+        "safety_status": safety.get("safety_status", "PASS" if forbidden_ok else "BLOCKED"),
+        "safety_block_reason": safety.get("safety_block_reason"),
+        "forbidden_changed_files": safety.get("changed_files") or [],
+        "forbidden_diff_summary": safety.get("diff_summary"),
+        "forbidden_safety_note": safety.get("note"),
         "portfolio_value": _f(accounting.get("account_value_corrected") or accounting.get("total_account_value")),
         "cash": _f(accounting.get("cash_available")),
         "open_positions": accounting.get("open_positions_count") or len(accounting.get("open_positions") or []),
@@ -311,7 +399,18 @@ def write_report(summary: dict[str, Any]) -> None:
         "## Infrastructure & safety",
         "",
         f"- Infrastructure: **{summary.get('infrastructure_status')}**",
-        f"- Forbidden files unchanged: **{summary.get('forbidden_files_unchanged')}**",
+        f"- Safety status: **{summary.get('safety_status')}**",
+        f"- Forbidden content diff clean: **{summary.get('forbidden_content_diff_clean')}**",
+        f"- Forbidden mtime drift detected: **{summary.get('forbidden_mtime_drift_detected')}**",
+        f"- Forbidden files unchanged (content): **{summary.get('forbidden_files_unchanged')}**",
+    ]
+    if summary.get("forbidden_safety_note"):
+        lines.append(f"- Note: {summary.get('forbidden_safety_note')}")
+    if summary.get("safety_block_reason"):
+        lines.append(f"- Safety block reason: **{summary.get('safety_block_reason')}**")
+        lines.append(f"- Changed files: `{summary.get('forbidden_changed_files')}`")
+    lines.extend(
+        [
         f"- Stale sources: {', '.join(summary.get('stale_sources') or []) or 'none flagged'}",
         f"- Failed steps: {', '.join(summary.get('failed_steps') or []) or 'none'}",
         "",
@@ -321,6 +420,7 @@ def write_report(summary: dict[str, Any]) -> None:
         "python3 tae.py full-paper-cycle",
         "```",
     ]
+    )
     REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -330,7 +430,7 @@ def main() -> int:
     print(f"Mode: {MODE} | READ_ONLY | NO_BROKER | NO_LIVE_CHANGE | NO_EXECUTION")
     print("")
 
-    before = {name: _file_mtime(root / name) for name in FORBIDDEN_SNAPSHOT}
+    before_mtimes = {name: _file_mtime(root / name) for name in FORBIDDEN_SNAPSHOT}
 
     # Phase P1: historical/strategic freshness before PAPER loop
     from tae_historical_runtime_refresh import run_historical_runtime_refresh
@@ -365,14 +465,18 @@ def main() -> int:
         if not result["ok"] and name in {"health", "learning_profit", "paper_decisions", "paper_experiments"}:
             exit_code = result["exit_code"] or 1
 
-    after = {name: _file_mtime(root / name) for name in FORBIDDEN_SNAPSHOT}
-    forbidden_ok = forbidden_files_unchanged(before, after)
+    safety = check_forbidden_file_safety(root, before_mtimes=before_mtimes)
+    forbidden_ok = bool(safety["forbidden_content_diff_clean"])
     if not forbidden_ok:
-        print("ERROR: forbidden file mutation detected", file=sys.stderr)
+        print(f"ERROR: forbidden file content diff detected: {safety.get('changed_files')}", file=sys.stderr)
+        if safety.get("diff_summary"):
+            print(f"  diff: {safety.get('diff_summary')[:200]}", file=sys.stderr)
         exit_code = 1
+    elif safety.get("note"):
+        print(f"NOTE: {safety['note']}")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    summary = collect_summary(step_results, forbidden_ok=forbidden_ok)
+    summary = collect_summary(step_results, forbidden_ok=forbidden_ok, safety=safety)
 
     from tae_longitudinal_outcome_memory import run_longitudinal_memory
 

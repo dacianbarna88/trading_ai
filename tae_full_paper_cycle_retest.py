@@ -14,15 +14,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tae_full_paper_cycle import FORBIDDEN_SNAPSHOT, check_forbidden_file_safety, _file_mtime
+
 REPORT_MD = Path("TAE_FULL_PAPER_CYCLE_RETEST_REPORT.md")
-FORBIDDEN = (
-    "live_bot.py",
-    "portfolio.csv",
-    "live_signals.csv",
-    "watchlist.txt",
-    "core/",
-    "research_core/",
-)
 
 COMMANDS: list[tuple[str, list[str]]] = [
     ("historical_refresh", [sys.executable, "tae.py", "historical-refresh"]),
@@ -54,28 +48,24 @@ def _load_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _mtime(path: Path) -> float | None:
-    return path.stat().st_mtime if path.is_file() else None
-
-
 def run_step(name: str, cmd: list[str], *, cwd: Path) -> dict[str, Any]:
     print(f"\n>>> [{name}] {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd, check=False)
     return {"step": name, "command": cmd, "exit_code": int(result.returncode), "ok": result.returncode == 0}
 
 
-def forbidden_diff(before: dict[str, float | None], after: dict[str, float | None]) -> bool:
-    return before == after
-
-
-def evaluate_verdict(results: list[dict[str, Any]], *, forbidden_ok: bool) -> tuple[str, list[str]]:
+def evaluate_verdict(
+    results: list[dict[str, Any]],
+    *,
+    safety: dict[str, Any],
+) -> tuple[str, list[str]]:
     blockers: list[str] = []
     summary = _load_json(Path("runtime_outputs/full_paper_cycle/summary.json")) or {}
     infra = _load_json(Path("tae_infrastructure_health.json")) or {}
     hist = _load_json(Path("runtime_outputs/historical_runtime/runtime_state.json")) or {}
 
-    if not forbidden_ok:
-        blockers.append("forbidden file mutation detected")
+    if not safety.get("forbidden_content_diff_clean", True):
+        blockers.append(safety.get("safety_block_reason") or "forbidden file content diff detected")
     if infra.get("overall_status") == "FAIL":
         blockers.append("infrastructure FAIL")
     if not (_load_json(Path("runtime_outputs/paper_decisions/decision_validation_results.json"))):
@@ -100,13 +90,14 @@ def evaluate_verdict(results: list[dict[str, Any]], *, forbidden_ok: bool) -> tu
         blockers.append(f"critical step failures: {critical_failed}")
 
     if blockers:
-        if any("infrastructure FAIL" in b or "forbidden" in b for b in blockers):
+        if any("infrastructure FAIL" in b or "forbidden" in b.lower() or "content diff" in b for b in blockers):
             return "BLOCKED_WITH_REASONS", blockers
         return "READY_WITH_WARNINGS", blockers
     return summary.get("final_verdict") or "READY_FOR_PAPER_DAY", blockers
 
 
 def write_report(payload: dict[str, Any]) -> None:
+    safety = payload.get("safety") or {}
     lines = [
         "# TAE Full PAPER Cycle Retest Report",
         "",
@@ -125,16 +116,21 @@ def write_report(payload: dict[str, Any]) -> None:
             "",
             "## Checks",
             "",
-            f"- Forbidden files unchanged: **{payload.get('forbidden_ok')}**",
+            f"- Safety status: **{safety.get('safety_status')}**",
+            f"- Forbidden content diff clean: **{safety.get('forbidden_content_diff_clean')}**",
+            f"- Forbidden mtime drift detected: **{safety.get('forbidden_mtime_drift_detected')}**",
             f"- Adaptive weights present: **{payload.get('adaptive_weights_present')}**",
             f"- Outcome memory records: **{payload.get('memory_records')}**",
             f"- Infrastructure: **{payload.get('infrastructure_status')}**",
             f"- Autostart: **{payload.get('autostart_readiness')}**",
-            "",
-            "## Blockers / warnings",
-            "",
         ]
     )
+    if safety.get("note"):
+        lines.append(f"- Note: {safety.get('note')}")
+    if safety.get("safety_block_reason"):
+        lines.append(f"- Safety block reason: **{safety.get('safety_block_reason')}**")
+        lines.append(f"- Changed files: `{safety.get('changed_files')}`")
+    lines.extend(["", "## Blockers / warnings", ""])
     blockers = payload.get("blockers") or []
     lines.extend(f"- {b}" for b in blockers) if blockers else lines.append("- none")
     REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -143,22 +139,22 @@ def write_report(payload: dict[str, Any]) -> None:
 def main() -> int:
     root = Path(".").resolve()
     print("===== TAE FULL PAPER CYCLE RETEST =====")
-    before = {name: _mtime(root / name) for name in FORBIDDEN if not name.endswith("/")}
+    before_mtimes = {name: _file_mtime(root / name) for name in FORBIDDEN_SNAPSHOT}
     results: list[dict[str, Any]] = []
     for name, cmd in COMMANDS:
         results.append(run_step(name, cmd, cwd=root))
-    after = {name: _mtime(root / name) for name in FORBIDDEN if not name.endswith("/")}
-    forbidden_ok = forbidden_diff(before, after)
+    safety = check_forbidden_file_safety(root, before_mtimes=before_mtimes)
 
     weights = _load_json(Path("runtime_outputs/adaptive_weights/paper_action_weights.json"))
     memory = _load_json(Path("runtime_outputs/longitudinal_memory/memory_index.json"))
     infra = _load_json(Path("tae_infrastructure_health.json")) or {}
-    verdict, blockers = evaluate_verdict(results, forbidden_ok=forbidden_ok)
+    verdict, blockers = evaluate_verdict(results, safety=safety)
 
     payload = {
         "generated_at": _now(),
         "step_results": results,
-        "forbidden_ok": forbidden_ok,
+        "safety": safety,
+        "forbidden_ok": safety.get("forbidden_content_diff_clean", False),
         "final_verdict": verdict,
         "blockers": blockers,
         "adaptive_weights_present": bool(weights),
@@ -168,6 +164,8 @@ def main() -> int:
     }
     write_report(payload)
     print("\nRetest verdict:", verdict)
+    if safety.get("note"):
+        print("Safety note:", safety["note"])
     print("Wrote:", REPORT_MD)
     return 0 if verdict in {"READY_FOR_PAPER_DAY", "READY_WITH_WARNINGS"} else 1
 

@@ -12,6 +12,7 @@ from unittest import mock
 from tae_full_implementation_audit import build_gap_backlog, build_inventory, build_logic_map
 from tae_full_paper_cycle import (
     build_promotion_gate,
+    check_forbidden_file_safety,
     collect_summary,
     forbidden_files_unchanged,
     map_validation_verdict,
@@ -57,6 +58,41 @@ class FullPaperCycleTest(unittest.TestCase):
     def test_forbidden_unchanged(self) -> None:
         self.assertTrue(forbidden_files_unchanged({"a": 1.0}, {"a": 1.0}))
         self.assertFalse(forbidden_files_unchanged({"a": 1.0}, {"a": 2.0}))
+
+    def test_check_forbidden_file_safety_clean(self) -> None:
+        with mock.patch("tae_full_paper_cycle.subprocess.run") as run:
+            run.side_effect = [
+                mock.Mock(returncode=0, stdout="", stderr=""),
+                mock.Mock(returncode=0, stdout="", stderr=""),
+            ]
+            safety = check_forbidden_file_safety(Path("."), before_mtimes={"live_bot.py": 1.0})
+            self.assertTrue(safety["forbidden_content_diff_clean"])
+            self.assertEqual(safety["safety_status"], "PASS")
+            self.assertIsNone(safety["safety_block_reason"])
+
+    def test_check_forbidden_file_safety_mtime_drift_only(self) -> None:
+        with mock.patch("tae_full_paper_cycle.subprocess.run") as run, mock.patch(
+            "tae_full_paper_cycle._file_mtime", side_effect=[1.0, 2.0, None, None, None, None]
+        ):
+            run.side_effect = [
+                mock.Mock(returncode=0, stdout="", stderr=""),
+                mock.Mock(returncode=0, stdout="", stderr=""),
+            ]
+            safety = check_forbidden_file_safety(Path("."), before_mtimes={"live_bot.py": 1.0})
+            self.assertTrue(safety["forbidden_content_diff_clean"])
+            self.assertTrue(safety["forbidden_mtime_drift_detected"])
+            self.assertIn("mtime drift ignored", safety.get("note") or "")
+
+    def test_check_forbidden_file_safety_content_diff(self) -> None:
+        with mock.patch("tae_full_paper_cycle.subprocess.run") as run:
+            run.side_effect = [
+                mock.Mock(returncode=0, stdout="--- a/live_bot.py\n+++ b/live_bot.py", stderr=""),
+                mock.Mock(returncode=0, stdout="live_bot.py\n", stderr=""),
+            ]
+            safety = check_forbidden_file_safety(Path("."))
+            self.assertFalse(safety["forbidden_content_diff_clean"])
+            self.assertEqual(safety["safety_status"], "BLOCKED")
+            self.assertIn("live_bot.py", safety["changed_files"])
 
     def test_collect_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
