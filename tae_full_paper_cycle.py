@@ -2,7 +2,8 @@
 """
 TAE Full PAPER Cycle — orchestrates existing intelligence into one closed loop.
 
-PAPER_ONLY | READ_ONLY | NO_BROKER | NO_LIVE_CHANGE | NO_EXECUTION
+PAPER_ONLY | NO_BROKER | NO_LIVE_PROMOTION
+PAPER decisions execute in runtime_outputs/paper_execution/ only.
 Does NOT modify live_bot.py, portfolio.csv, live_signals.csv, or watchlist.txt.
 """
 
@@ -31,6 +32,8 @@ GII_JSON = Path("tae_growth_intelligence.json")
 LEDGER_JSON = Path("tae_opportunity_cost_ledger.json")
 PROMOTION_JSON = OUTPUT_DIR / "promotion_gate.json"
 MEMORY_JSONL = Path("runtime_outputs/longitudinal_memory/decisions.jsonl")
+PAPER_EXEC_PORTFOLIO = Path("runtime_outputs/paper_execution/paper_portfolio.json")
+PAPER_EXEC_ATTRIBUTION = Path("runtime_outputs/paper_execution/rule_outcome_attribution.json")
 
 FORBIDDEN_SNAPSHOT = (
     "live_bot.py",
@@ -48,8 +51,11 @@ CYCLE_STEPS: list[tuple[str, list[str]]] = [
     ("health", [sys.executable, "tae.py", "health"]),
     ("morning_audit", [sys.executable, "tae.py", "morning-audit"]),
     ("learning_profit", [sys.executable, "tae.py", "learning-profit"]),
+    ("adaptive_weights", [sys.executable, "tae.py", "adaptive-weights"]),
     ("paper_decisions", [sys.executable, "tae.py", "paper-decisions"]),
+    ("paper_execution", [sys.executable, "tae.py", "paper-execution"]),
     ("paper_experiments", [sys.executable, "tae.py", "paper-experiments"]),
+    ("outcome_memory", [sys.executable, "tae.py", "outcome-memory"]),
     ("dpe_events", [sys.executable, "tae.py", "dpe-events"]),
     ("dpe_splitter", [sys.executable, "tae.py", "dpe-splitter"]),
     ("dpe_competitive", [sys.executable, "tae.py", "dpe-competitive"]),
@@ -260,6 +266,8 @@ def collect_summary(
     infra = _load_json(INFRA_JSON) or {}
     gii = _load_json(GII_JSON) or {}
     ledger = _load_json(LEDGER_JSON) or {}
+    paper_portfolio = _load_json(PAPER_EXEC_PORTFOLIO) or {}
+    paper_attribution = _load_json(PAPER_EXEC_ATTRIBUTION) or {}
 
     decisions = decisions_doc.get("decisions") or []
     by_action: dict[str, list[dict[str, Any]]] = {}
@@ -356,6 +364,11 @@ def collect_summary(
         "blocked_jobs": blocked_jobs,
         "infrastructure_status": infra_status,
         "promotion_gate": promotion_gate.get("recommendation_counts"),
+        "paper_execution_enabled": True,
+        "paper_portfolio_value": _f(paper_portfolio.get("total_value")),
+        "paper_portfolio_positions": len(paper_portfolio.get("positions") or {}),
+        "paper_execution_rules_tracked": len(paper_attribution.get("rules") or {}),
+        "paper_broker_executed": paper_portfolio.get("broker_executed", False),
         "final_verdict": final_verdict,
         "failed_steps": failed_steps,
     }
@@ -427,7 +440,7 @@ def write_report(summary: dict[str, Any]) -> None:
 def main() -> int:
     root = Path(".").resolve()
     print("===== TAE FULL PAPER CYCLE =====")
-    print(f"Mode: {MODE} | READ_ONLY | NO_BROKER | NO_LIVE_CHANGE | NO_EXECUTION")
+    print(f"Mode: {MODE} | NO_BROKER | PAPER_EXECUTION_ISOLATED | NO_LIVE_PROMOTION")
     print("")
 
     before_mtimes = {name: _file_mtime(root / name) for name in FORBIDDEN_SNAPSHOT}
@@ -458,11 +471,15 @@ def main() -> int:
 
     exit_code = 0
     for name, cmd in CYCLE_STEPS:
-        if name == "paper_decisions":
-            run_pre_pde_feedback(root, step_results)
         result = run_step(name, cmd, cwd=root)
         step_results.append(result)
-        if not result["ok"] and name in {"health", "learning_profit", "paper_decisions", "paper_experiments"}:
+        if not result["ok"] and name in {
+            "health",
+            "learning_profit",
+            "paper_decisions",
+            "paper_execution",
+            "paper_experiments",
+        }:
             exit_code = result["exit_code"] or 1
 
     safety = check_forbidden_file_safety(root, before_mtimes=before_mtimes)

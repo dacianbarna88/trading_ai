@@ -26,6 +26,7 @@ Available commands:
   learning-profit
   paper-experiments
   paper-decisions
+  paper-execution
   full-paper-cycle
   historical-refresh
   outcome-memory
@@ -59,6 +60,7 @@ Available commands:
   learning-profit — learning-to-profit bridge (ranked PAPER hypotheses + queue)
   paper-experiments — run PAPER scoring experiments from hypothesis queue
   paper-decisions — explicit PAPER BUY/SELL/HOLD/REDUCE/PROTECT/ROTATE/SKIP decisions
+  paper-execution — apply PDE decisions to isolated PAPER portfolio (no broker)
   full-paper-cycle — run complete PAPER intelligence loop (health → LTP → PDE → DPE → summary)
   historical-refresh — refresh stale historical/strategic SSOT before PAPER decisions
   outcome-memory — canonical longitudinal PAPER decision memory (ingest + checkpoints)
