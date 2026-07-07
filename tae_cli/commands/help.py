@@ -32,6 +32,10 @@ Available commands:
   strategy-survival
   long-term-learning
   philosophy-performance
+  adaptive-weights
+  paper-cycle-retest
+  30-day-paper-validation
+  promotion-lock
   morning-audit
   status
   help
@@ -61,6 +65,10 @@ Available commands:
   strategy-survival — strategy survival via automatic decision checkpoints
   long-term-learning — aggregate PAPER learning and adaptation hints
   philosophy-performance — COLLABORATIVE vs COMPETITIVE evidence from memory
+  adaptive-weights — evidence-driven PAPER action weights for PDE scoring
+  paper-cycle-retest — Phase 7 full command-chain validation report
+  30-day-paper-validation — Phase 8 plan, checklist, criteria, Day 0 baseline
+  promotion-lock — Phase 9 live promotion hard-lock audit
   morning-audit — consolidated read-only morning operational brief
 ================================="""
 

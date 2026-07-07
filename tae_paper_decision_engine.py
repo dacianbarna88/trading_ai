@@ -37,6 +37,7 @@ ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
 CONFIDENCE_JSON = Path("tae_confidence_evolution.json")
 REPLAY_JSON = Path("tae_decision_replay.json")
 ADAPTATION_HINTS_JSON = Path("runtime_outputs/longitudinal_memory/adaptation_hints.json")
+ADAPTIVE_WEIGHTS_JSON = Path("runtime_outputs/adaptive_weights/paper_action_weights.json")
 PATTERN_DISCOVERY_TXT = Path("pattern_discovery_summary.txt")
 PORTFOLIO_CSV = Path("portfolio.csv")
 SIGNALS_CSV = Path("live_signals.csv")
@@ -431,6 +432,35 @@ def apply_learning_evidence_bias(
         evidence.append("pattern discovery summary available")
 
 
+def apply_adaptive_paper_weights(
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+    ticker: str,
+) -> dict[str, Any] | None:
+    from tae_adaptive_paper_weights import effective_weight_for
+
+    weights_doc = ctx.get("paper_action_weights")
+    if not weights_doc:
+        return None
+    applied: dict[str, Any] = {}
+    for action in scores:
+        detail = effective_weight_for(action, ticker.upper(), weights_doc)
+        mult = _f(detail.get("effective_multiplier"), 1.0)
+        if mult != 1.0:
+            scores[action] *= mult
+            applied[action] = detail
+    if applied:
+        best_action = max(scores, key=lambda a: scores[a])
+        best = applied.get(best_action) or effective_weight_for(best_action, ticker.upper(), weights_doc)
+        evidence.append(
+            f"adaptive weight {best_action}={best.get('effective_multiplier')} "
+            f"(base={best.get('base_weight')}, ticker_adj={best.get('ticker_adjustment'):+.4f})"
+        )
+        return best
+    return None
+
+
 def apply_horizon_action_bias(
     ticker: str,
     scores: dict[str, float],
@@ -510,6 +540,7 @@ def build_context() -> dict[str, Any]:
     confidence_evolution = load_json(CONFIDENCE_JSON)
     decision_replay = load_json(REPLAY_JSON)
     adaptation_hints = load_json(ADAPTATION_HINTS_JSON)
+    paper_action_weights = load_json(ADAPTIVE_WEIGHTS_JSON)
 
     portfolio_rows = read_csv_rows(PORTFOLIO_CSV) if PORTFOLIO_CSV.is_file() else []
     signal_rows = read_csv_rows(SIGNALS_CSV) if SIGNALS_CSV.is_file() else []
@@ -557,6 +588,7 @@ def build_context() -> dict[str, Any]:
         "confidence_evolution": confidence_evolution,
         "decision_replay": decision_replay,
         "adaptation_hints": adaptation_hints,
+        "paper_action_weights": paper_action_weights,
         "pattern_discovery_present": PATTERN_DISCOVERY_TXT.is_file(),
         "live_positions": live_positions,
         "signals": signals,
@@ -584,6 +616,7 @@ def build_context() -> dict[str, Any]:
             "cross_validation": CROSS_VALIDATION_JSON.is_file(),
             "confidence_evolution": CONFIDENCE_JSON.is_file(),
             "longitudinal_adaptation_hints": ADAPTATION_HINTS_JSON.is_file(),
+            "adaptive_paper_weights": ADAPTIVE_WEIGHTS_JSON.is_file(),
             "decision_replay": REPLAY_JSON.is_file(),
             "pattern_discovery": PATTERN_DISCOVERY_TXT.is_file(),
         },
@@ -795,7 +828,7 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         scores["SKIP_PAPER"] = 80.0
         evidence.append("insufficient intelligence for ticker")
         hz = build_horizon_context(ticker, ctx)
-        return "SKIP_PAPER", scores, evidence, [], False, hz
+        return "SKIP_PAPER", scores, evidence, [], False, hz, None
 
     if held:
         if posture in {"PROTECT_SHADOW"} and current_pct > 2.0 and missed >= 15.0:
@@ -859,6 +892,7 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     hz = apply_horizon_action_bias(ticker, scores, evidence, ctx, held=held)
     apply_stale_source_penalty(scores, evidence, ctx)
     apply_learning_evidence_bias(scores, evidence, ctx)
+    adaptive_weight_detail = apply_adaptive_paper_weights(scores, evidence, ctx, ticker)
 
     prot_boost, reduce_boost, sell_penalty, gates_passed = protection_validation_bias(
         ticker, ctx.get("shadow_validation"),
@@ -887,11 +921,11 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     if rule_note:
         evidence.append(rule_note)
 
-    return best, scores, evidence, applied_hyps, gates_passed, hz
+    return best, scores, evidence, applied_hyps, gates_passed, hz, adaptive_weight_detail
 
 
 def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, Any]:
-    action, scores, evidence_notes, applied_hypotheses, gates_passed, horizon = score_actions_for_ticker(ticker, ctx)
+    action, scores, evidence_notes, applied_hypotheses, gates_passed, horizon, adaptive_weight_detail = score_actions_for_ticker(ticker, ctx)
     gii = (ctx.get("gii_by") or {}).get(ticker.upper()) or {}
     deltas = estimate_deltas(ticker.upper(), action, ctx)
     risk_score = compute_risk_score(ticker.upper(), ctx)
@@ -929,6 +963,8 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("tae_confidence_evolution.json")
     if ctx.get("adaptation_hints"):
         sources.append("runtime_outputs/longitudinal_memory/adaptation_hints.json")
+    if ctx.get("paper_action_weights"):
+        sources.append("runtime_outputs/adaptive_weights/paper_action_weights.json")
     if ctx.get("decision_replay"):
         sources.append("tae_decision_replay.json")
     if ctx.get("pattern_discovery_present"):
@@ -982,6 +1018,7 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "horizon_reason": horizon.get("horizon_reason"),
         "historical_sources_stale": bool((ctx.get("historical_runtime") or {}).get("stale_sources")),
         "confidence_penalty_stale": stale_penalty,
+        "adaptive_weight_evidence": adaptive_weight_detail,
         "created_at": ts,
     }
 

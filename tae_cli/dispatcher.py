@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 
 from tae_cli.commands import (
+    adaptive_weights,
     dpe_adaptive,
     dpe_collaborative,
     dpe_competitive,
@@ -25,11 +26,14 @@ from tae_cli.commands import (
     outcome_memory,
     paper_experiments,
     paper_decisions,
+    paper_cycle_retest,
+    paper_validation_30d,
     philosophy,
     philosophy_performance,
     policy,
     portfolio_protect,
     profit_targets,
+    promotion_lock,
     protect,
     status,
     strategy_survival,
@@ -43,6 +47,10 @@ COMMANDS = {
     "strategy-survival": strategy_survival.run,
     "long-term-learning": long_term_learning.run,
     "philosophy-performance": philosophy_performance.run,
+    "adaptive-weights": adaptive_weights.run,
+    "paper-cycle-retest": paper_cycle_retest.run,
+    "30-day-paper-validation": paper_validation_30d.run,
+    "promotion-lock": promotion_lock.run,
     "health": health.run,
     "protect": protect.run,
     "portfolio-protect": portfolio_protect.run,

@@ -169,19 +169,26 @@ def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -
                 stale_sources.append(f"{row.get('path')} ({row.get('age_hours')}h)")
 
     failed_steps = [s["step"] for s in step_results if not s.get("ok")]
-    infra_pass = (infra or {}).get("overall_status") == "PASS"
+    infra_status = (infra or {}).get("overall_status") or "UNKNOWN"
+    infra_pass = infra_status == "PASS"
+    infra_fail = infra_status == "FAIL"
+    blocking_steps = {"learning_profit", "paper_decisions", "paper_experiments"}
+    blocking_failed = [s for s in failed_steps if s in blocking_steps]
 
     blocked_jobs = _f((evaluation or {}).get("blocked_jobs_count"))
     if not blocked_jobs:
         blocked_jobs = _f((experiments or {}).get("blocked_jobs"))
 
     promotion_gate = build_promotion_gate(validation)
+    from tae_live_promotion_lock import enforce_promotion_gate
+
+    promotion_gate = enforce_promotion_gate(promotion_gate)
     PROMOTION_JSON.parent.mkdir(parents=True, exist_ok=True)
     PROMOTION_JSON.write_text(json.dumps(promotion_gate, indent=2) + "\n", encoding="utf-8")
 
-    if failed_steps or not forbidden_ok:
+    if not forbidden_ok or infra_fail or blocking_failed:
         final_verdict = "BLOCKED_WITH_REASONS"
-    elif hist_stale_list or stale_sources or not infra_pass:
+    elif failed_steps or hist_stale_list or stale_sources or not infra_pass:
         final_verdict = "READY_WITH_WARNINGS"
     else:
         final_verdict = "READY_FOR_PAPER_DAY"
@@ -223,7 +230,7 @@ def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -
         "historical_confidence_penalty": hist_runtime.get("confidence_penalty", 0),
         "stale_sources": stale_sources,
         "blocked_jobs": blocked_jobs,
-        "infrastructure_status": (infra or {}).get("overall_status") or "UNKNOWN",
+        "infrastructure_status": infra_status,
         "promotion_gate": promotion_gate.get("recommendation_counts"),
         "final_verdict": final_verdict,
         "failed_steps": failed_steps,
@@ -334,6 +341,13 @@ def main() -> int:
     print("\n>>> [longitudinal_memory] updating canonical PAPER outcome memory")
     mem_result = run_longitudinal_memory()
     mem_idx = mem_result.get("index") or {}
+
+    from tae_adaptive_paper_weights import run_adaptive_paper_weights
+
+    print("\n>>> [adaptive_weights] updating PAPER action weights from evidence")
+    weights_result = run_adaptive_paper_weights()
+    weights_doc = (weights_result.get("document") or {})
+
     step_results.append(
         {
             "step": "longitudinal_memory",
@@ -344,6 +358,14 @@ def main() -> int:
             "checkpoints_updated": mem_idx.get("checkpoints_updated"),
         }
     )
+    step_results.append(
+        {
+            "step": "adaptive_weights",
+            "ok": weights_result.get("ok", False),
+            "exit_code": 0,
+            "actions_weighted": len(weights_doc.get("weights") or {}),
+        }
+    )
     summary["step_results"] = step_results
     summary["longitudinal_memory"] = {
         "total_records": mem_idx.get("total_records"),
@@ -351,6 +373,17 @@ def main() -> int:
         "checkpoints_updated": mem_idx.get("checkpoints_updated"),
         "knowledge_count": mem_idx.get("knowledge_count"),
     }
+    summary["adaptive_weights"] = {
+        "actions_weighted": len(weights_doc.get("weights") or {}),
+        "ticker_adjustments": len(weights_doc.get("ticker_weights") or {}),
+        "path": "runtime_outputs/adaptive_weights/paper_action_weights.json",
+    }
+
+    from tae_live_promotion_lock import run_live_promotion_lock_audit
+
+    lock_report = run_live_promotion_lock_audit(rewrite_gate=True)
+    step_results.append({"step": "promotion_lock", "ok": lock_report.get("pass", False), "exit_code": 0})
+    summary["promotion_lock"] = {"pass": lock_report.get("pass"), "live_promotion_allowed": False}
 
     SUMMARY_JSON.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     write_report(summary)
