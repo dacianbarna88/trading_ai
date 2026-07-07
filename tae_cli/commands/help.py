@@ -28,6 +28,10 @@ Available commands:
   paper-decisions
   full-paper-cycle
   historical-refresh
+  outcome-memory
+  strategy-survival
+  long-term-learning
+  philosophy-performance
   morning-audit
   status
   help
@@ -53,6 +57,10 @@ Available commands:
   paper-decisions — explicit PAPER BUY/SELL/HOLD/REDUCE/PROTECT/ROTATE/SKIP decisions
   full-paper-cycle — run complete PAPER intelligence loop (health → LTP → PDE → DPE → summary)
   historical-refresh — refresh stale historical/strategic SSOT before PAPER decisions
+  outcome-memory — canonical longitudinal PAPER decision memory (ingest + checkpoints)
+  strategy-survival — strategy survival via automatic decision checkpoints
+  long-term-learning — aggregate PAPER learning and adaptation hints
+  philosophy-performance — COLLABORATIVE vs COMPETITIVE evidence from memory
   morning-audit — consolidated read-only morning operational brief
 ================================="""
 

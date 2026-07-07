@@ -36,6 +36,7 @@ DPE_ADAPTIVE_JSON = Path("runtime_outputs/dpe/adaptive/adaptive.json")
 ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
 CONFIDENCE_JSON = Path("tae_confidence_evolution.json")
 REPLAY_JSON = Path("tae_decision_replay.json")
+ADAPTATION_HINTS_JSON = Path("runtime_outputs/longitudinal_memory/adaptation_hints.json")
 PATTERN_DISCOVERY_TXT = Path("pattern_discovery_summary.txt")
 PORTFOLIO_CSV = Path("portfolio.csv")
 SIGNALS_CSV = Path("live_signals.csv")
@@ -508,6 +509,7 @@ def build_context() -> dict[str, Any]:
     experiments_doc = load_json(EXPERIMENTS_JSON)
     confidence_evolution = load_json(CONFIDENCE_JSON)
     decision_replay = load_json(REPLAY_JSON)
+    adaptation_hints = load_json(ADAPTATION_HINTS_JSON)
 
     portfolio_rows = read_csv_rows(PORTFOLIO_CSV) if PORTFOLIO_CSV.is_file() else []
     signal_rows = read_csv_rows(SIGNALS_CSV) if SIGNALS_CSV.is_file() else []
@@ -554,6 +556,7 @@ def build_context() -> dict[str, Any]:
         "exp_by_ticker": exp_by_ticker,
         "confidence_evolution": confidence_evolution,
         "decision_replay": decision_replay,
+        "adaptation_hints": adaptation_hints,
         "pattern_discovery_present": PATTERN_DISCOVERY_TXT.is_file(),
         "live_positions": live_positions,
         "signals": signals,
@@ -580,6 +583,7 @@ def build_context() -> dict[str, Any]:
             "intraday_fade": INTRADAY_FADE_JSON.is_file(),
             "cross_validation": CROSS_VALIDATION_JSON.is_file(),
             "confidence_evolution": CONFIDENCE_JSON.is_file(),
+            "longitudinal_adaptation_hints": ADAPTATION_HINTS_JSON.is_file(),
             "decision_replay": REPLAY_JSON.is_file(),
             "pattern_discovery": PATTERN_DISCOVERY_TXT.is_file(),
         },
@@ -896,6 +900,12 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
     if stale_penalty > 0:
         confidence = round(max(0.25, confidence * (1.0 - stale_penalty)), 3)
 
+    hints = ctx.get("adaptation_hints") or {}
+    action_bias = _f((hints.get("action_confidence_bias") or {}).get(action))
+    if action_bias:
+        confidence = round(min(0.95, max(0.25, confidence + action_bias * 0.05)), 3)
+        evidence_notes.append(f"longitudinal memory action bias {action_bias:+.3f}")
+
     sources: list[str] = []
     if gii:
         sources.append("tae_growth_intelligence.json")
@@ -917,6 +927,8 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("strategic_intelligence_summary.txt")
     if ctx.get("confidence_evolution"):
         sources.append("tae_confidence_evolution.json")
+    if ctx.get("adaptation_hints"):
+        sources.append("runtime_outputs/longitudinal_memory/adaptation_hints.json")
     if ctx.get("decision_replay"):
         sources.append("tae_decision_replay.json")
     if ctx.get("pattern_discovery_present"):

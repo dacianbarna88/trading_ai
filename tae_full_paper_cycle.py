@@ -328,6 +328,30 @@ def main() -> int:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     summary = collect_summary(step_results, forbidden_ok=forbidden_ok)
+
+    from tae_longitudinal_outcome_memory import run_longitudinal_memory
+
+    print("\n>>> [longitudinal_memory] updating canonical PAPER outcome memory")
+    mem_result = run_longitudinal_memory()
+    mem_idx = mem_result.get("index") or {}
+    step_results.append(
+        {
+            "step": "longitudinal_memory",
+            "ok": mem_result.get("ok", False),
+            "exit_code": 0,
+            "total_records": mem_idx.get("total_records"),
+            "new_records": mem_idx.get("new_records"),
+            "checkpoints_updated": mem_idx.get("checkpoints_updated"),
+        }
+    )
+    summary["step_results"] = step_results
+    summary["longitudinal_memory"] = {
+        "total_records": mem_idx.get("total_records"),
+        "new_records": mem_idx.get("new_records"),
+        "checkpoints_updated": mem_idx.get("checkpoints_updated"),
+        "knowledge_count": mem_idx.get("knowledge_count"),
+    }
+
     SUMMARY_JSON.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     write_report(summary)
 
