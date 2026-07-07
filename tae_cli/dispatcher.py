@@ -17,6 +17,7 @@ from tae_cli.commands import (
     growth_intelligence,
     health,
     help as help_cmd,
+    historical_refresh,
     learning_profit,
     morning_audit,
     opportunity,
@@ -33,6 +34,7 @@ from tae_cli.commands import (
 
 COMMANDS = {
     "full-paper-cycle": full_paper_cycle.run,
+    "historical-refresh": historical_refresh.run,
     "health": health.run,
     "protect": protect.run,
     "portfolio-protect": portfolio_protect.run,

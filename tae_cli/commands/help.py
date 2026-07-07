@@ -27,6 +27,7 @@ Available commands:
   paper-experiments
   paper-decisions
   full-paper-cycle
+  historical-refresh
   morning-audit
   status
   help
@@ -51,6 +52,7 @@ Available commands:
   paper-experiments — run PAPER scoring experiments from hypothesis queue
   paper-decisions — explicit PAPER BUY/SELL/HOLD/REDUCE/PROTECT/ROTATE/SKIP decisions
   full-paper-cycle — run complete PAPER intelligence loop (health → LTP → PDE → DPE → summary)
+  historical-refresh — refresh stale historical/strategic SSOT before PAPER decisions
   morning-audit — consolidated read-only morning operational brief
 ================================="""
 

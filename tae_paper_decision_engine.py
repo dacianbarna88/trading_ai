@@ -269,6 +269,9 @@ def load_horizon_ssot() -> dict[str, Any]:
 def build_horizon_context(ticker: str, ctx: dict[str, Any]) -> dict[str, Any]:
     ticker = ticker.upper()
     ssot = ctx.get("horizon_ssot") or {}
+    stale_paths = set(ctx.get("stale_source_paths") or [])
+    hist_stale = "historical_intelligence.csv" in stale_paths
+    strat_stale = "strategic_intelligence_summary.txt" in stale_paths
     gii = (ctx.get("gii_by") or {}).get(ticker) or {}
     intraday = (ssot.get("intraday_by_ticker") or {}).get(ticker) or {}
     hist = (ssot.get("historical_returns") or {}).get(ticker) or {}
@@ -278,12 +281,13 @@ def build_horizon_context(ticker: str, ctx: dict[str, Any]) -> dict[str, Any]:
     short_pct = _f(intraday.get("current_pct") or gii.get("current_pct"))
     short_drawdown = abs(_f(intraday.get("drawdown_from_high_pct") or gii.get("drawdown")))
 
-    ret_1m = strategic.get("1M")
-    ret_1y = strategic.get("1Y")
-    ret_2y = hist.get("2Y")
-    ret_5y = hist.get("5Y")
-    ret_10y = hist.get("10Y")
-    ret_20y = hist.get("20Y")
+    ret_2y = hist.get("2Y") if not hist_stale else None
+    ret_5y = hist.get("5Y") if not hist_stale else None
+    ret_10y = hist.get("10Y") if not hist_stale else None
+    ret_20y = hist.get("20Y") if not hist_stale else None
+
+    ret_1m = strategic.get("1M") if not strat_stale else None
+    ret_1y = strategic.get("1Y") if not strat_stale else None
 
     if ret_1y is None and ret_2y is not None:
         ret_1y = ret_2y / 2.0
@@ -296,18 +300,40 @@ def build_horizon_context(ticker: str, ctx: dict[str, Any]) -> dict[str, Any]:
         },
         "1M": {
             "return_pct": ret_1m,
-            "trend": classify_trend(ret_1m),
+            "trend": "UNKNOWN" if strat_stale else classify_trend(ret_1m),
             "source": f"strategic_intelligence_summary.txt via {proxy}",
+            "stale": strat_stale,
         },
         "1Y": {
             "return_pct": round(ret_1y, 2) if ret_1y is not None else None,
-            "trend": classify_trend(ret_1y),
+            "trend": "UNKNOWN" if strat_stale else classify_trend(ret_1y),
             "source": f"strategic_intelligence_summary.txt|historical_intelligence.csv via {proxy}",
+            "stale": strat_stale or hist_stale,
         },
-        "2Y": {"return_pct": ret_2y, "trend": classify_trend(ret_2y), "source": "historical_intelligence.csv"},
-        "5Y": {"return_pct": ret_5y, "trend": classify_trend(ret_5y), "source": "historical_intelligence.csv"},
-        "10Y": {"return_pct": ret_10y, "trend": classify_trend(ret_10y), "source": "historical_intelligence.csv"},
-        "20Y": {"return_pct": ret_20y, "trend": classify_trend(ret_20y), "source": "historical_intelligence.csv"},
+        "2Y": {
+            "return_pct": ret_2y,
+            "trend": "UNKNOWN" if hist_stale else classify_trend(ret_2y),
+            "source": "historical_intelligence.csv",
+            "stale": hist_stale,
+        },
+        "5Y": {
+            "return_pct": ret_5y,
+            "trend": "UNKNOWN" if hist_stale else classify_trend(ret_5y),
+            "source": "historical_intelligence.csv",
+            "stale": hist_stale,
+        },
+        "10Y": {
+            "return_pct": ret_10y,
+            "trend": "UNKNOWN" if hist_stale else classify_trend(ret_10y),
+            "source": "historical_intelligence.csv",
+            "stale": hist_stale,
+        },
+        "20Y": {
+            "return_pct": ret_20y,
+            "trend": "UNKNOWN" if hist_stale else classify_trend(ret_20y),
+            "source": "historical_intelligence.csv",
+            "stale": hist_stale,
+        },
     }
 
     short_term_trend_7d = horizon_context["7D"]["trend"]
@@ -336,6 +362,10 @@ def build_horizon_context(ticker: str, ctx: dict[str, Any]) -> dict[str, Any]:
         parts.append("short-vs-long CONFLICT")
     else:
         parts.append("horizons aligned")
+    if hist_stale:
+        parts.append("STALE historical_intelligence.csv — 2Y-20Y not used")
+    if strat_stale:
+        parts.append("STALE strategic_intelligence_summary.txt — 1M/1Y not used")
     horizon_reason = "; ".join(parts)
 
     return {
@@ -350,7 +380,28 @@ def build_horizon_context(ticker: str, ctx: dict[str, Any]) -> dict[str, Any]:
         "short_drawdown_pct": round(short_drawdown, 2),
         "market_proxy": proxy,
         "cross_horizon_consistency": ssot.get("cross_horizon_consistency"),
+        "historical_stale": hist_stale,
+        "strategic_stale": strat_stale,
     }
+
+
+def apply_stale_source_penalty(
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+) -> float:
+    penalty = _f((ctx.get("historical_runtime") or {}).get("confidence_penalty"))
+    stale = (ctx.get("historical_runtime") or {}).get("stale_sources") or []
+    if not stale and not penalty:
+        return 0.0
+    if stale:
+        evidence.append(f"STALE sources: {', '.join(stale)} — confidence reduced")
+    if penalty > 0:
+        for action in scores:
+            if action != "SKIP_PAPER":
+                scores[action] *= max(0.5, 1.0 - penalty)
+        scores["SKIP_PAPER"] += penalty * 40.0
+    return penalty
 
 
 def apply_learning_evidence_bias(
@@ -478,6 +529,9 @@ def build_context() -> dict[str, Any]:
     portfolio_gii = (gii or {}).get("portfolio") or {}
     acct_cash_hint = _f((accounting or {}).get("cash_available")) or _f((accounting or {}).get("account_value_corrected")) * 0.1
     horizon_ssot = load_horizon_ssot()
+    from tae_historical_runtime_refresh import load_runtime_state, stale_source_paths
+
+    hist_runtime = load_runtime_state()
 
     return {
         "gii": gii,
@@ -505,6 +559,8 @@ def build_context() -> dict[str, Any]:
         "signals": signals,
         "top_growth": top_growth,
         "horizon_ssot": horizon_ssot,
+        "historical_runtime": hist_runtime,
+        "stale_source_paths": sorted(stale_source_paths()),
         "sources_loaded": {
             "hypotheses": HYPOTHESES_JSON.is_file(),
             "experiments": EXPERIMENTS_JSON.is_file(),
@@ -797,6 +853,7 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         scores["SELL_PAPER"] += 3.0
 
     hz = apply_horizon_action_bias(ticker, scores, evidence, ctx, held=held)
+    apply_stale_source_penalty(scores, evidence, ctx)
     apply_learning_evidence_bias(scores, evidence, ctx)
 
     prot_boost, reduce_boost, sell_penalty, gates_passed = protection_validation_bias(
@@ -835,6 +892,9 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
     deltas = estimate_deltas(ticker.upper(), action, ctx)
     risk_score = compute_risk_score(ticker.upper(), ctx)
     confidence = round(min(0.95, max(0.25, scores.get(action, 18.0) / 100.0)), 3)
+    stale_penalty = _f((ctx.get("historical_runtime") or {}).get("confidence_penalty"))
+    if stale_penalty > 0:
+        confidence = round(max(0.25, confidence * (1.0 - stale_penalty)), 3)
 
     sources: list[str] = []
     if gii:
@@ -908,6 +968,8 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "horizon_alignment_score": horizon.get("horizon_alignment_score"),
         "horizon_conflict_flag": horizon.get("horizon_conflict_flag"),
         "horizon_reason": horizon.get("horizon_reason"),
+        "historical_sources_stale": bool((ctx.get("historical_runtime") or {}).get("stale_sources")),
+        "confidence_penalty_stale": stale_penalty,
         "created_at": ts,
     }
 

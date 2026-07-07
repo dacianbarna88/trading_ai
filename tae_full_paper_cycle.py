@@ -134,6 +134,9 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 
 def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -> dict[str, Any]:
+    from tae_historical_runtime_refresh import load_runtime_state
+
+    hist_runtime = load_runtime_state()
     accounting = _load_json(ACCOUNTING_JSON) or {}
     validation = _load_json(VALIDATION_JSON) or {}
     decisions_doc = _load_json(DECISIONS_JSON) or {}
@@ -158,15 +161,12 @@ def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -
 
     val_verdicts = validation.get("verdict_summary") or {}
     horizon_conflicts = sum(1 for r in (validation.get("results") or []) if r.get("horizon_conflict_flag"))
-    stale_sources: list[str] = []
-    for name, path in [
-        ("historical_intelligence.csv", Path("historical_intelligence.csv")),
-        ("strategic_intelligence_summary.txt", Path("strategic_intelligence_summary.txt")),
-    ]:
-        if path.is_file():
-            age_h = (datetime.now(timezone.utc).timestamp() - path.stat().st_mtime) / 3600
-            if age_h > 168:
-                stale_sources.append(f"{name} ({age_h:.0f}h)")
+    hist_stale_list = hist_runtime.get("stale_sources") or []
+    stale_sources: list[str] = list(hist_stale_list)
+    if not hist_runtime.get("all_fresh", True):
+        for row in (hist_runtime.get("audit_after") or {}).get("sources") or []:
+            if row.get("status") == "STALE":
+                stale_sources.append(f"{row.get('path')} ({row.get('age_hours')}h)")
 
     failed_steps = [s["step"] for s in step_results if not s.get("ok")]
     infra_pass = (infra or {}).get("overall_status") == "PASS"
@@ -181,7 +181,7 @@ def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -
 
     if failed_steps or not forbidden_ok:
         final_verdict = "BLOCKED_WITH_REASONS"
-    elif stale_sources or not infra_pass:
+    elif hist_stale_list or stale_sources or not infra_pass:
         final_verdict = "READY_WITH_WARNINGS"
     else:
         final_verdict = "READY_FOR_PAPER_DAY"
@@ -219,6 +219,8 @@ def collect_summary(step_results: list[dict[str, Any]], *, forbidden_ok: bool) -
         "capital_efficiency_findings": (gii.get("portfolio") or {}).get("capital_efficiency"),
         "opportunity_cost_total": _f((ledger or {}).get("opportunity_cost_total") or (gii.get("portfolio") or {}).get("opportunity_cost_total")),
         "horizon_conflicts": horizon_conflicts,
+        "historical_runtime_all_fresh": hist_runtime.get("critical_all_fresh", hist_runtime.get("all_fresh")),
+        "historical_confidence_penalty": hist_runtime.get("confidence_penalty", 0),
         "stale_sources": stale_sources,
         "blocked_jobs": blocked_jobs,
         "infrastructure_status": (infra or {}).get("overall_status") or "UNKNOWN",
@@ -250,6 +252,8 @@ def write_report(summary: dict[str, Any]) -> None:
         f"- REJECT: **{summary.get('reject_decisions', 0)}**",
         f"- NEEDS_MORE_DATA: **{summary.get('needs_more_data_decisions', 0)}**",
         f"- Horizon conflicts: **{summary.get('horizon_conflicts', 0)}**",
+        f"- Historical runtime all fresh: **{summary.get('historical_runtime_all_fresh')}**",
+        f"- Historical confidence penalty: **{summary.get('historical_confidence_penalty', 0)}**",
         "",
         "## DPE & adaptive",
         "",
@@ -285,10 +289,25 @@ def main() -> int:
 
     before = {name: _file_mtime(root / name) for name in FORBIDDEN_SNAPSHOT}
 
+    # Phase P1: historical/strategic freshness before PAPER loop
+    from tae_historical_runtime_refresh import run_historical_runtime_refresh
+
+    hist_state = run_historical_runtime_refresh(root=root)
+    step_results: list[dict[str, Any]] = [
+        {
+            "step": "historical_runtime_refresh",
+            "ok": hist_state.get("critical_all_fresh", hist_state.get("all_fresh", False)),
+            "exit_code": 0,
+            "all_fresh": hist_state.get("all_fresh"),
+            "critical_all_fresh": hist_state.get("critical_all_fresh", hist_state.get("all_fresh")),
+            "stale_sources": hist_state.get("stale_sources"),
+            "confidence_penalty": hist_state.get("confidence_penalty"),
+        }
+    ]
+
     # Regenerate audit artifacts (Phase 1–3)
     audit_code = subprocess.run([sys.executable, "tae_full_implementation_audit.py"], cwd=root, check=False).returncode
 
-    step_results: list[dict[str, Any]] = []
     if audit_code == 0:
         step_results.append({"step": "implementation_audit", "ok": True, "exit_code": 0})
     else:

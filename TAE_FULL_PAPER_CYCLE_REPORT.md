@@ -1,8 +1,8 @@
 # TAE Full PAPER Cycle Report
 
-**Generated:** 2026-07-07T14:31:47+00:00
+**Generated:** 2026-07-07T14:47:17+00:00
 **Mode:** PAPER_ONLY — READ_ONLY — NO_BROKER — NO_LIVE_CHANGE
-**Final verdict:** **READY_WITH_WARNINGS**
+**Final verdict:** **READY_FOR_PAPER_DAY**
 
 ## Portfolio snapshot (read-only accounting)
 
@@ -18,12 +18,14 @@
 - REJECT: **0**
 - NEEDS_MORE_DATA: **18**
 - Horizon conflicts: **0**
+- Historical runtime all fresh: **True**
+- Historical confidence penalty: **0.0**
 
 ## DPE & adaptive
 
 - DPE winner: **None**
 - Adaptive philosophy: **COLLABORATIVE**
-- Confidence: **79.7**
+- Confidence: **81.9**
 
 ## Promotion gate (live_promotion_allowed=false)
 
@@ -33,7 +35,7 @@
 
 - Infrastructure: **PASS**
 - Forbidden files unchanged: **True**
-- Stale sources: historical_intelligence.csv (335h)
+- Stale sources: none flagged
 - Failed steps: none
 
 ## Daily operator command
