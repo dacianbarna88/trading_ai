@@ -730,6 +730,36 @@ def generate_confidence_pattern_hypotheses(
     return hypotheses[:5]
 
 
+def enrich_hypotheses_with_horizon(hypotheses: list[dict[str, Any]]) -> None:
+    """Attach existing multi-horizon SSOT context to each hypothesis (read-only)."""
+    from tae_paper_decision_engine import build_horizon_context, load_horizon_ssot
+
+    ctx: dict[str, Any] = {
+        "horizon_ssot": load_horizon_ssot(),
+        "gii_by": {},
+        "live_positions": {},
+        "top_growth": [],
+        "exp_by_ticker": {},
+    }
+    for hyp in hypotheses:
+        tickers = hyp.get("affected_tickers") or []
+        ticker = _s(tickers[0]) if tickers else "SPY"
+        hz = build_horizon_context(ticker, ctx)
+        hyp["horizon_context"] = hz.get("horizon_context")
+        hyp["short_term_trend_7d"] = hz.get("short_term_trend_7d")
+        hyp["monthly_trend"] = hz.get("monthly_trend")
+        hyp["yearly_trend"] = hz.get("yearly_trend")
+        hyp["long_term_trend"] = hz.get("long_term_trend")
+        hyp["horizon_alignment_score"] = hz.get("horizon_alignment_score")
+        hyp["horizon_conflict_flag"] = hz.get("horizon_conflict_flag")
+        hyp["horizon_reason"] = hz.get("horizon_reason")
+        systems = list(hyp.get("source_systems") or [])
+        for src in ("historical_intelligence.csv", "strategic_intelligence_summary.txt", "horizon_vote_summary.txt"):
+            if src not in systems:
+                systems.append(src)
+        hyp["source_systems"] = systems
+
+
 def build_bridge_report(
     payloads: dict[str, dict[str, Any] | None],
     loaded: dict[str, bool],
@@ -789,6 +819,7 @@ def build_bridge_report(
     hypotheses.sort(key=lambda h: h.get("priority_score", 0), reverse=True)
     for rank, hyp in enumerate(hypotheses, start=1):
         hyp["rank"] = rank
+    enrich_hypotheses_with_horizon(hypotheses)
 
     by_type: dict[str, int] = {}
     for hyp in hypotheses:

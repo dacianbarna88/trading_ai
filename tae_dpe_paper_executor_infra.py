@@ -1048,6 +1048,9 @@ def build_evidence_summary(
         best = validation.get("best_strategy") or {}
         if best.get("strategy_id"):
             parts.append(f"best_strategy={best['strategy_id']}")
+    horizon_reason = _s(decision.get("horizon_reason"))
+    if horizon_reason:
+        parts.append(horizon_reason[:180])
     parts.append(
         f"simulated profitΔ=${deltas['expected_profit_delta_usd']:.2f} "
         f"riskΔ={deltas['expected_risk_delta']:.4f} cap_effΔ={deltas['capital_efficiency_delta']:.2f}"
@@ -1254,6 +1257,9 @@ def score_paper_decision(
         validation=validation,
         gii_row=gii_row,
     )
+    horizon_reason = _s(decision.get("horizon_reason"))
+    if horizon_reason:
+        reason = f"{reason} | horizon: {horizon_reason[:180]}"
     return {
         "validation_id": f"PDVAL-{source_decision_id or ticker}",
         "decision_id": source_decision_id,
@@ -1273,6 +1279,14 @@ def score_paper_decision(
         "capital_efficiency_delta": cap_delta,
         "reason": reason,
         "evidence_summary": evidence_summary,
+        "horizon_context": decision.get("horizon_context"),
+        "short_term_trend_7d": decision.get("short_term_trend_7d"),
+        "monthly_trend": decision.get("monthly_trend"),
+        "yearly_trend": decision.get("yearly_trend"),
+        "long_term_trend": decision.get("long_term_trend"),
+        "horizon_alignment_score": decision.get("horizon_alignment_score"),
+        "horizon_conflict_flag": decision.get("horizon_conflict_flag"),
+        "horizon_reason": horizon_reason,
         "protection_validation_used": validation is not None,
         "protection_gates_passed": bool(gates.get("gates_passed")),
         "best_strategy_id": _s((validation or {}).get("best_strategy", {}).get("strategy_id")),
@@ -1304,14 +1318,14 @@ def write_decision_validation_report(report: dict[str, Any]) -> Path:
         "",
         "## Ranked validated decisions (unique)",
         "",
-        "| rank | ticker | action | verdict | profit Δ | risk Δ | cap eff Δ | reason |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| rank | ticker | action | verdict | profit Δ | horizon align | horizon reason |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in report.get("results") or []:
-        reason = (_s(row.get("reason")) or "")[:80].replace("|", "/")
+        reason = (_s(row.get("horizon_reason")) or _s(row.get("reason")) or "")[:70].replace("|", "/")
         lines.append(
             f"| {row.get('rank')} | {row.get('ticker')} | {row.get('action')} | {row.get('verdict')} | "
-            f"{row.get('profit_delta')} | {row.get('risk_delta')} | {row.get('capital_efficiency_delta')} | {reason} |"
+            f"{row.get('profit_delta')} | {row.get('horizon_alignment_score')} | {reason} |"
         )
 
     lines.extend(
@@ -1351,14 +1365,15 @@ def update_experiment_runner_validation_section(report: dict[str, Any]) -> None:
         "",
         "### Top ranked validated decisions",
         "",
-        "| rank | ticker | action | verdict | profit Δ | reason |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| rank | ticker | action | verdict | profit Δ | horizon | reason |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in (report.get("results") or [])[:10]:
-        reason = (_s(row.get("reason")) or "")[:70].replace("|", "/")
+        hz = _s(row.get("horizon_reason")) or ""
+        reason = (_s(row.get("reason")) or "")[:50].replace("|", "/")
         section_lines.append(
             f"| {row.get('rank')} | {row.get('ticker')} | {row.get('action')} | {row.get('verdict')} | "
-            f"{row.get('profit_delta')} | {reason} |"
+            f"{row.get('profit_delta')} | {row.get('horizon_alignment_score')} | {hz[:40] or reason} |"
         )
     section_lines.append("")
 

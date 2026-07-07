@@ -13,6 +13,7 @@ from tae_paper_decision_engine import (
     PAPER_ACTIONS,
     build_decision,
     build_decisions,
+    build_horizon_context,
     score_actions_for_ticker,
 )
 
@@ -64,19 +65,29 @@ class PaperDecisionEngineTest(unittest.TestCase):
             "preferred_philosophy": "COLLABORATIVE",
             "cash_hint": 5000.0,
             "exp_by_ticker": {},
+            "horizon_ssot": {
+                "historical_returns": {
+                    "MRK": {"2Y": 20.0, "5Y": 50.0, "10Y": 100.0, "20Y": 200.0},
+                    "HSBA.L": {"2Y": -5.0, "5Y": 10.0, "10Y": 30.0, "20Y": 50.0},
+                    "SPY": {"2Y": 15.0, "5Y": 40.0, "10Y": 90.0, "20Y": 180.0},
+                },
+                "strategic_returns": {"SPY": {"1M": 2.0, "1Y": 8.0}, "EWU": {"1M": -1.0, "1Y": 3.0}},
+                "intraday_by_ticker": {},
+                "cross_horizon_consistency": 97.0,
+            },
         }
 
     def test_hold_for_healthy_winner(self) -> None:
-        action, scores, _, _, _ = score_actions_for_ticker("MRK", self._ctx())
+        action, scores, _, _, _, _ = score_actions_for_ticker("MRK", self._ctx())
         self.assertEqual(action, "HOLD_PAPER")
         self.assertGreater(scores["HOLD_PAPER"], scores["SELL_PAPER"])
 
     def test_protect_or_rotate_for_risky(self) -> None:
-        action, _, _, _, _ = score_actions_for_ticker("HSBA.L", self._ctx())
+        action, _, _, _, _, _ = score_actions_for_ticker("HSBA.L", self._ctx())
         self.assertIn(action, {"PROTECT_PAPER", "ROTATE_PAPER", "REDUCE_PAPER", "SELL_PAPER"})
 
     def test_buy_for_strong_signal(self) -> None:
-        action, _, _, _, _ = score_actions_for_ticker("SPY", self._ctx())
+        action, _, _, _, _, _ = score_actions_for_ticker("SPY", self._ctx())
         self.assertIn(action, {"BUY_PAPER", "SKIP_PAPER"})
 
     def test_decision_fields_complete(self) -> None:
@@ -103,7 +114,7 @@ class PaperDecisionEngineTest(unittest.TestCase):
             "opportunity_category": "LATE_PROTECTION",
         }
         ctx["live_positions"]["AMAT"] = {"shares": 3}
-        action, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
+        action, _, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
         self.assertEqual(action, "REDUCE_PAPER")
 
     def test_hypothesis_reject_forces_skip(self) -> None:
@@ -119,9 +130,32 @@ class PaperDecisionEngineTest(unittest.TestCase):
             ]
         }
         ctx["exp_by_ticker"] = {"SPY": [{"verdict": "REJECT", "hypothesis_id": "LTB-TEST"}]}
-        action, _, _, applied, _ = score_actions_for_ticker("SPY", ctx)
+        action, _, _, applied, _, _ = score_actions_for_ticker("SPY", ctx)
         self.assertEqual(action, "SKIP_PAPER")
         self.assertTrue(applied)
+
+    def test_decision_includes_horizon_fields(self) -> None:
+        decision = build_decision("MRK", self._ctx(), seq=1)
+        for field in (
+            "horizon_context",
+            "short_term_trend_7d",
+            "monthly_trend",
+            "yearly_trend",
+            "long_term_trend",
+            "horizon_alignment_score",
+            "horizon_conflict_flag",
+            "horizon_reason",
+        ):
+            self.assertIn(field, decision)
+        self.assertIn("7D", decision["horizon_context"])
+        self.assertIn("20Y", decision["horizon_context"])
+        self.assertIsNotNone(decision["horizon_reason"])
+
+    def test_horizon_context_structure(self) -> None:
+        hz = build_horizon_context("MRK", self._ctx())
+        self.assertIn("horizon_context", hz)
+        self.assertIsInstance(hz["horizon_conflict_flag"], bool)
+        self.assertGreaterEqual(hz["horizon_alignment_score"], 0.0)
 
     def test_write_outputs_safe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

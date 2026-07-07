@@ -8,7 +8,9 @@ Does NOT execute trades, modify live paths, or promote to live.
 
 from __future__ import annotations
 
+import csv
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -63,6 +65,15 @@ FORBIDDEN_WRITE_PREFIXES = (
 
 HEALTHY_LIFECYCLE = frozenset({"SURVIVED", "EARLY_WINNER", "MATURE_WINNER", "PEAK_WINNER"})
 WEAK_LIFECYCLE = frozenset({"PROFIT_DECAY", "COLLAPSED", "WEAKENING"})
+
+HISTORICAL_INTELLIGENCE_CSV = Path("historical_intelligence.csv")
+MULTI_HORIZON_BACKTEST_CSV = Path("multi_horizon_backtest.csv")
+STRATEGIC_INTELLIGENCE_TXT = Path("strategic_intelligence_summary.txt")
+HORIZON_VOTE_TXT = Path("horizon_vote_summary.txt")
+INTRADAY_FADE_JSON = Path("tae_intraday_fade_intelligence.json")
+CROSS_VALIDATION_JSON = Path("tae_cross_validation_report.json")
+HISTORICAL_RESULTS_JSON = Path("tae_historical_results_analysis.json")
+HORIZON_LABELS = ("7D", "1M", "1Y", "2Y", "5Y", "10Y", "20Y")
 
 
 def _now() -> str:
@@ -153,6 +164,257 @@ def experiments_by_ticker(experiments: list[dict[str, Any]]) -> dict[str, list[d
     return out
 
 
+def file_age_hours(path: Path) -> float | None:
+    if not path.is_file():
+        return None
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return round((datetime.now(timezone.utc) - mtime).total_seconds() / 3600, 1)
+
+
+def market_proxy_ticker(ticker: str) -> str:
+    ticker = ticker.upper()
+    if ticker.endswith(".L"):
+        return "EWU"
+    if ticker.endswith((".DE", ".PA", ".AS", ".MI", ".SW", ".MC", ".BR")):
+        return "VGK"
+    if ticker in {"SPY", "QQQ", "DIA", "IWM", "VGK", "EWU", "FEZ"}:
+        return ticker
+    return "SPY"
+
+
+def classify_trend(value: float | None, *, pos: float = 1.0, neg: float = -1.0) -> str:
+    if value is None:
+        return "UNKNOWN"
+    if value >= pos:
+        return "POSITIVE"
+    if value <= neg:
+        return "NEGATIVE"
+    return "NEUTRAL"
+
+
+def trend_polarity(trend: str) -> int:
+    return {"POSITIVE": 1, "NEUTRAL": 0, "NEGATIVE": -1, "UNKNOWN": 0}.get(trend, 0)
+
+
+def load_historical_horizon_returns(path: Path = HISTORICAL_INTELLIGENCE_CSV) -> dict[str, dict[str, float]]:
+    if not path.is_file():
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    with path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            ticker = _s(row.get("Ticker")).upper()
+            horizon = _s(row.get("Horizon"))
+            if not ticker or horizon not in {"2Y", "5Y", "10Y", "20Y"}:
+                continue
+            try:
+                out.setdefault(ticker, {})[horizon] = float(row.get("Return_%") or 0)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def parse_strategic_market_returns(path: Path = STRATEGIC_INTELLIGENCE_TXT) -> dict[str, dict[str, float]]:
+    if not path.is_file():
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    pattern = re.compile(
+        r"\|\s*([A-Z0-9._]+)\s*\|\s*1M\s*([-\d.]+)%?\s*\|\s*3M\s*([-\d.]+)%?\s*\|\s*6M\s*([-\d.]+)%?\s*\|\s*12M\s*([-\d.]+)%"
+    )
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = pattern.search(line)
+        if not match:
+            continue
+        proxy = match.group(1).upper()
+        out[proxy] = {
+            "1M": float(match.group(2)),
+            "1Y": float(match.group(5)),
+        }
+    return out
+
+
+def load_intraday_by_ticker(path: Path = INTRADAY_FADE_JSON) -> dict[str, dict[str, Any]]:
+    doc = load_json(path) or {}
+    return {
+        _s(p.get("ticker")).upper(): p
+        for p in (doc.get("positions") or [])
+        if p.get("ticker")
+    }
+
+
+def load_horizon_ssot() -> dict[str, Any]:
+    cross = load_json(CROSS_VALIDATION_JSON) or {}
+    hist_results = load_json(HISTORICAL_RESULTS_JSON) or {}
+    horizon_vote = HORIZON_VOTE_TXT.read_text(encoding="utf-8", errors="replace") if HORIZON_VOTE_TXT.is_file() else ""
+    return {
+        "historical_returns": load_historical_horizon_returns(),
+        "strategic_returns": parse_strategic_market_returns(),
+        "multi_horizon_backtest_present": MULTI_HORIZON_BACKTEST_CSV.is_file(),
+        "intraday_by_ticker": load_intraday_by_ticker(),
+        "cross_horizon_consistency": cross.get("cross_horizon_consistency_summary"),
+        "horizon_vote_text": horizon_vote,
+        "historical_results_horizons": list((hist_results.get("top_10_per_horizon") or {}).keys()),
+        "freshness_hours": {
+            "historical_intelligence.csv": file_age_hours(HISTORICAL_INTELLIGENCE_CSV),
+            "strategic_intelligence_summary.txt": file_age_hours(STRATEGIC_INTELLIGENCE_TXT),
+            "horizon_vote_summary.txt": file_age_hours(HORIZON_VOTE_TXT),
+            "tae_intraday_fade_intelligence.json": file_age_hours(INTRADAY_FADE_JSON),
+            "tae_cross_validation_report.json": file_age_hours(CROSS_VALIDATION_JSON),
+        },
+    }
+
+
+def build_horizon_context(ticker: str, ctx: dict[str, Any]) -> dict[str, Any]:
+    ticker = ticker.upper()
+    ssot = ctx.get("horizon_ssot") or {}
+    gii = (ctx.get("gii_by") or {}).get(ticker) or {}
+    intraday = (ssot.get("intraday_by_ticker") or {}).get(ticker) or {}
+    hist = (ssot.get("historical_returns") or {}).get(ticker) or {}
+    proxy = market_proxy_ticker(ticker)
+    strategic = (ssot.get("strategic_returns") or {}).get(proxy) or {}
+
+    short_pct = _f(intraday.get("current_pct") or gii.get("current_pct"))
+    short_drawdown = abs(_f(intraday.get("drawdown_from_high_pct") or gii.get("drawdown")))
+
+    ret_1m = strategic.get("1M")
+    ret_1y = strategic.get("1Y")
+    ret_2y = hist.get("2Y")
+    ret_5y = hist.get("5Y")
+    ret_10y = hist.get("10Y")
+    ret_20y = hist.get("20Y")
+
+    if ret_1y is None and ret_2y is not None:
+        ret_1y = ret_2y / 2.0
+
+    horizon_context: dict[str, dict[str, Any]] = {
+        "7D": {
+            "return_pct": round(short_pct, 2),
+            "trend": classify_trend(short_pct, pos=0.5, neg=-0.5),
+            "source": "tae_intraday_fade_intelligence.json|tae_growth_intelligence.json",
+        },
+        "1M": {
+            "return_pct": ret_1m,
+            "trend": classify_trend(ret_1m),
+            "source": f"strategic_intelligence_summary.txt via {proxy}",
+        },
+        "1Y": {
+            "return_pct": round(ret_1y, 2) if ret_1y is not None else None,
+            "trend": classify_trend(ret_1y),
+            "source": f"strategic_intelligence_summary.txt|historical_intelligence.csv via {proxy}",
+        },
+        "2Y": {"return_pct": ret_2y, "trend": classify_trend(ret_2y), "source": "historical_intelligence.csv"},
+        "5Y": {"return_pct": ret_5y, "trend": classify_trend(ret_5y), "source": "historical_intelligence.csv"},
+        "10Y": {"return_pct": ret_10y, "trend": classify_trend(ret_10y), "source": "historical_intelligence.csv"},
+        "20Y": {"return_pct": ret_20y, "trend": classify_trend(ret_20y), "source": "historical_intelligence.csv"},
+    }
+
+    short_term_trend_7d = horizon_context["7D"]["trend"]
+    monthly_trend = horizon_context["1M"]["trend"]
+    yearly_trend = horizon_context["1Y"]["trend"]
+    long_values = [ret_5y, ret_10y, ret_20y]
+    long_avg = sum(v for v in long_values if v is not None) / max(1, len([v for v in long_values if v is not None]))
+    long_term_trend = classify_trend(long_avg if long_values else None)
+
+    polarities = [trend_polarity(horizon_context[h]["trend"]) for h in HORIZON_LABELS]
+    alignment_score = round(50.0 + sum(polarities) * (50.0 / len(HORIZON_LABELS)), 1)
+    alignment_score = max(0.0, min(100.0, alignment_score))
+
+    short_pol = trend_polarity(short_term_trend_7d)
+    medium_pol = trend_polarity(monthly_trend)
+    long_pol = trend_polarity(long_term_trend)
+    conflict = (short_pol < 0 and long_pol > 0) or (short_pol > 0 and long_pol < 0)
+
+    parts: list[str] = []
+    for label in HORIZON_LABELS:
+        row = horizon_context[label]
+        ret = row.get("return_pct")
+        ret_txt = f"{ret:.1f}%" if isinstance(ret, (int, float)) else "n/a"
+        parts.append(f"{label}={row['trend']}({ret_txt})")
+    if conflict:
+        parts.append("short-vs-long CONFLICT")
+    else:
+        parts.append("horizons aligned")
+    horizon_reason = "; ".join(parts)
+
+    return {
+        "horizon_context": horizon_context,
+        "short_term_trend_7d": short_term_trend_7d,
+        "monthly_trend": monthly_trend,
+        "yearly_trend": yearly_trend,
+        "long_term_trend": long_term_trend,
+        "horizon_alignment_score": alignment_score,
+        "horizon_conflict_flag": conflict,
+        "horizon_reason": horizon_reason,
+        "short_drawdown_pct": round(short_drawdown, 2),
+        "market_proxy": proxy,
+        "cross_horizon_consistency": ssot.get("cross_horizon_consistency"),
+    }
+
+
+def apply_horizon_action_bias(
+    ticker: str,
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+    *,
+    held: bool,
+) -> dict[str, Any]:
+    hz = build_horizon_context(ticker, ctx)
+    short = trend_polarity(hz["short_term_trend_7d"])
+    medium = trend_polarity(hz["monthly_trend"])
+    long_t = trend_polarity(hz["long_term_trend"])
+    alignment = _f(hz["horizon_alignment_score"])
+    conflict = bool(hz["horizon_conflict_flag"])
+    drawdown = _f(hz.get("short_drawdown_pct"))
+
+    exps = (ctx.get("exp_by_ticker") or {}).get(ticker.upper(), [])
+    override = ticker in (ctx.get("top_growth") or []) or any(
+        e.get("verdict") == "PROMISING" for e in exps
+    )
+
+    if not override and (short < 0 or medium < 0):
+        scores["BUY_PAPER"] -= 28.0
+        scores["SKIP_PAPER"] += 18.0
+        evidence.append(f"horizon BUY gate: short/medium not aligned — {hz['horizon_reason'][:120]}")
+    elif short > 0 and medium > 0:
+        scores["BUY_PAPER"] += 10.0
+        evidence.append("horizon supports BUY (short+medium positive)")
+
+    if short < 0 and long_t > 0:
+        scores["SELL_PAPER"] += 14.0
+        scores["REDUCE_PAPER"] += 12.0
+        evidence.append("horizon: short weakness vs positive long-term trend")
+
+    if held and short <= 0 and long_t > 0 and not conflict:
+        scores["HOLD_PAPER"] += 16.0
+        evidence.append("horizon: long-term positive — treat short weakness as pullback")
+
+    if drawdown >= 2.5 and long_t > 0:
+        scores["PROTECT_PAPER"] += 18.0
+        evidence.append(f"horizon: short volatility elevated (drawdown {drawdown:.1f}%) with intact long trend")
+
+    if held and alignment >= 65.0:
+        scores["HOLD_PAPER"] += 6.0
+    elif alignment <= 35.0:
+        scores["ROTATE_PAPER"] += 10.0
+        scores["SELL_PAPER"] += 6.0
+
+    if ticker in (ctx.get("top_growth") or []):
+        held_alignments = [
+            _f(build_horizon_context(t, ctx).get("horizon_alignment_score"))
+            for t in (ctx.get("live_positions") or {})
+            if t != ticker
+        ]
+        if held_alignments and alignment > min(held_alignments) + 8.0:
+            scores["ROTATE_PAPER"] += 14.0
+            evidence.append("horizon: candidate alignment beats weakest held position")
+
+    if conflict:
+        scores["PROTECT_PAPER"] += 8.0
+        scores["SKIP_PAPER"] += 5.0
+
+    return hz
+
+
 def build_context() -> dict[str, Any]:
     gii = load_json(GII_JSON)
     ppg = load_json(PPG_JSON)
@@ -184,6 +446,7 @@ def build_context() -> dict[str, Any]:
     latest_appe = (appe or {}).get("latest_observation") or {}
     portfolio_gii = (gii or {}).get("portfolio") or {}
     acct_cash_hint = _f((accounting or {}).get("cash_available")) or _f((accounting or {}).get("account_value_corrected")) * 0.1
+    horizon_ssot = load_horizon_ssot()
 
     return {
         "gii": gii,
@@ -207,6 +470,7 @@ def build_context() -> dict[str, Any]:
         "live_positions": live_positions,
         "signals": signals,
         "top_growth": top_growth,
+        "horizon_ssot": horizon_ssot,
         "sources_loaded": {
             "hypotheses": HYPOTHESES_JSON.is_file(),
             "experiments": EXPERIMENTS_JSON.is_file(),
@@ -220,6 +484,11 @@ def build_context() -> dict[str, Any]:
             "portfolio": PORTFOLIO_CSV.is_file(),
             "signals": SIGNALS_CSV.is_file(),
             "accounting": ACCOUNTING_JSON.is_file(),
+            "historical_intelligence": HISTORICAL_INTELLIGENCE_CSV.is_file(),
+            "strategic_intelligence": STRATEGIC_INTELLIGENCE_TXT.is_file(),
+            "horizon_vote": HORIZON_VOTE_TXT.is_file(),
+            "intraday_fade": INTRADAY_FADE_JSON.is_file(),
+            "cross_validation": CROSS_VALIDATION_JSON.is_file(),
         },
     }
 
@@ -428,7 +697,8 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     if not gii and not shadow and not signal:
         scores["SKIP_PAPER"] = 80.0
         evidence.append("insufficient intelligence for ticker")
-        return "SKIP_PAPER", scores, evidence
+        hz = build_horizon_context(ticker, ctx)
+        return "SKIP_PAPER", scores, evidence, [], False, hz
 
     if held:
         if posture in {"PROTECT_SHADOW"} and current_pct > 2.0 and missed >= 15.0:
@@ -489,6 +759,8 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         scores["ROTATE_PAPER"] += 4.0
         scores["SELL_PAPER"] += 3.0
 
+    hz = apply_horizon_action_bias(ticker, scores, evidence, ctx, held=held)
+
     prot_boost, reduce_boost, sell_penalty, gates_passed = protection_validation_bias(
         ticker, ctx.get("shadow_validation"),
     )
@@ -516,11 +788,11 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     if rule_note:
         evidence.append(rule_note)
 
-    return best, scores, evidence, applied_hyps, gates_passed
+    return best, scores, evidence, applied_hyps, gates_passed, hz
 
 
 def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, Any]:
-    action, scores, evidence_notes, applied_hypotheses, gates_passed = score_actions_for_ticker(ticker, ctx)
+    action, scores, evidence_notes, applied_hypotheses, gates_passed, horizon = score_actions_for_ticker(ticker, ctx)
     gii = (ctx.get("gii_by") or {}).get(ticker.upper()) or {}
     deltas = estimate_deltas(ticker.upper(), action, ctx)
     risk_score = compute_risk_score(ticker.upper(), ctx)
@@ -541,6 +813,10 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("runtime_outputs/learning_to_profit/hypotheses.json")
     if ctx.get("shadow_validation"):
         sources.append("tae_profit_protection_validation.json")
+    if ctx.get("horizon_ssot", {}).get("historical_returns"):
+        sources.append("historical_intelligence.csv")
+    if STRATEGIC_INTELLIGENCE_TXT.is_file():
+        sources.append("strategic_intelligence_summary.txt")
     if ticker.upper() in (ctx.get("signals") or {}):
         sources.append("live_signals.csv")
     if ticker.upper() in (ctx.get("live_positions") or {}):
@@ -580,6 +856,14 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "action_scores": {k: round(v, 2) for k, v in scores.items() if v > 0},
         "hypothesis_rules_applied": applied_hypotheses,
         "protection_validation_gates_passed": gates_passed,
+        "horizon_context": horizon.get("horizon_context"),
+        "short_term_trend_7d": horizon.get("short_term_trend_7d"),
+        "monthly_trend": horizon.get("monthly_trend"),
+        "yearly_trend": horizon.get("yearly_trend"),
+        "long_term_trend": horizon.get("long_term_trend"),
+        "horizon_alignment_score": horizon.get("horizon_alignment_score"),
+        "horizon_conflict_flag": horizon.get("horizon_conflict_flag"),
+        "horizon_reason": horizon.get("horizon_reason"),
         "created_at": ts,
     }
 
@@ -689,6 +973,7 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
             "- Consumes: portfolio.csv + live_signals.csv (read-only)",
             "- Produces explicit PAPER BUY/SELL/HOLD/REDUCE/PROTECT/ROTATE/SKIP decisions",
             "- Applies hypothesis validation/rejection rules and protection validation scoring",
+            "- Applies multi-horizon context (7D/1M/1Y/2Y/5Y/10Y/20Y) from existing SSOT artifacts",
             "",
             "## Safety confirmation",
             "",
