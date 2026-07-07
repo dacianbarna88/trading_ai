@@ -5,11 +5,11 @@
     <key>Label</key>
     <string>com.tradingai.market-open</string>
     <key>Comment</key>
-    <string>TAE market open runner — Mon-Fri 09:50 local (replaces cron)</string>
+    <string>TAE market open — framework python safe launcher (Desktop bash .sh blocked by macOS TCC under launchd)</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>/Users/book/Desktop/trading_ai/market_open_runner.sh</string>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>/Users/book/Desktop/trading_ai/tae_launchd_market_open_safe.py</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/book/Desktop/trading_ai</string>
@@ -18,7 +18,7 @@
         <key>TAE_SCHEDULER_SOURCE</key>
         <string>launchd</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
     <key>StartCalendarInterval</key>
     <array>
@@ -66,8 +66,8 @@
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>/Users/book/Desktop/trading_ai/market_open_launchagent.out.log</string>
+    <string>/Users/book/Desktop/trading_ai/tae_launchd_market_open_safe.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/book/Desktop/trading_ai/market_open_launchagent.err.log</string>
+    <string>/Users/book/Desktop/trading_ai/tae_launchd_market_open_safe.err.log</string>
 </dict>
 </plist>
