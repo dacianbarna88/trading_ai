@@ -299,12 +299,8 @@ def _mark_to_market_status(mtm: dict[str, Any]) -> str:
     if live > 0:
         return "PARTIAL_STALE"
     if stale > 0:
-        return "STALE"
+        return "ALL_STALE"
     return "EMPTY"
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def collect_summary(
@@ -397,7 +393,15 @@ def collect_summary(
     safety = safety or {}
     forbidden_ok = bool(safety.get("forbidden_content_diff_clean", forbidden_ok))
 
-    if not forbidden_ok or infra_fail or blocking_failed:
+    from tae_paper_execution import validate_portfolio_reconciliation
+
+    paper_reconciliation = validate_portfolio_reconciliation(paper_portfolio) if paper_portfolio else {"ok": True, "status": "UNKNOWN"}
+    mtm_status = _mark_to_market_status(paper_mtm)
+    broker_flag = bool(paper_portfolio.get("broker_executed")) or bool(paper_portfolio.get("live_money"))
+    reconciliation_fail = not paper_reconciliation.get("ok")
+    mtm_all_stale = mtm_status == "ALL_STALE" and len(paper_portfolio.get("positions") or {}) > 0
+
+    if not forbidden_ok or infra_fail or blocking_failed or reconciliation_fail or broker_flag or mtm_all_stale:
         final_verdict = "BLOCKED_WITH_REASONS"
     elif failed_steps or hist_stale_list or stale_sources or not infra_pass:
         final_verdict = "READY_WITH_WARNINGS"
@@ -458,6 +462,9 @@ def collect_summary(
         "paper_cash": _f(paper_portfolio.get("cash")),
         "paper_realized_pnl": _f(paper_portfolio.get("realized_pnl")),
         "paper_unrealized_pnl": _f(paper_portfolio.get("unrealized_pnl")),
+        "paper_total_pnl": _f(paper_portfolio.get("total_pnl")),
+        "paper_reconciliation_status": paper_reconciliation.get("status"),
+        "paper_reconciliation_ok": paper_reconciliation.get("ok"),
         "paper_drawdown_pct": paper_portfolio.get("drawdown_pct"),
         "mark_to_market_stale_count": paper_mtm.get("stale_price_count"),
         "mark_to_market_live_count": paper_mtm.get("live_price_count"),
@@ -535,6 +542,8 @@ def write_report(summary: dict[str, Any]) -> None:
         f"- PAPER cash: **${summary.get('paper_cash', 0):,.2f}**",
         f"- PAPER unrealized PnL: **${summary.get('paper_unrealized_pnl', 0):,.2f}**",
         f"- PAPER realized PnL: **${summary.get('paper_realized_pnl', 0):,.2f}**",
+        f"- PAPER total PnL: **${summary.get('paper_total_pnl', 0):,.2f}**",
+        f"- PAPER reconciliation: **{summary.get('paper_reconciliation_status')}**",
         f"- Canonical vs PAPER value delta: **${summary.get('canonical_vs_paper_value_delta', 0):,.2f}**",
         f"- Mark-to-market status: **{summary.get('mark_to_market_status')}**",
         f"- Mark-to-market live prices: **{summary.get('mark_to_market_live_count')}**",
@@ -617,7 +626,6 @@ def main() -> int:
         result = run_step(name, cmd, cwd=root)
         step_results.append(result)
         if not result["ok"] and name in {
-            "health",
             "learning_profit",
             "paper_decisions",
             "paper_execution",

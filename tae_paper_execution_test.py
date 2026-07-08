@@ -71,6 +71,170 @@ class PaperExecutionTest(unittest.TestCase):
         self.assertEqual(order["mode"], "PAPER_ONLY")
         self.assertNotIn("AAPL", portfolio["positions"])
         self.assertGreater(order["simulated_pnl_impact"], 0)
+        self.assertGreater(order["realized_pnl"], 0)
+        self.assertGreater(order["gross_value"], 0)
+        self.assertGreater(order["cost_basis"], 0)
+        self.assertAlmostEqual(order["cash_after"], 2000.0, places=2)
+
+    def test_sell_realized_pnl_at_market_price(self) -> None:
+        portfolio = {
+            "cash": 5000.0,
+            "realized_pnl": 0.0,
+            "starting_value": 10000.0,
+            "positions": {
+                "MU": {
+                    "ticker": "MU",
+                    "shares": 2.0,
+                    "avg_price": 100.0,
+                    "current_price": 90.0,
+                    "status": "OPEN",
+                }
+            },
+        }
+        decision = {
+            "decision_id": "PDEC-MU-001",
+            "ticker": "MU",
+            "action": "SELL_PAPER",
+            "confidence": 0.9,
+            "evidence": "sell at market",
+        }
+        order = pe.execute_decision(decision, portfolio, accounting=None, all_decisions=[decision])
+        self.assertAlmostEqual(order["realized_pnl"], -20.0, places=2)
+        self.assertAlmostEqual(order["gross_value"], 180.0, places=2)
+        self.assertAlmostEqual(order["cost_basis"], 200.0, places=2)
+        self.assertAlmostEqual(portfolio["realized_pnl"], -20.0, places=2)
+        self.assertAlmostEqual(portfolio["cash"], 5180.0, places=2)
+
+    def test_reduce_realized_pnl(self) -> None:
+        portfolio = {
+            "cash": 1000.0,
+            "realized_pnl": 0.0,
+            "positions": {
+                "AAPL": {
+                    "ticker": "AAPL",
+                    "shares": 10.0,
+                    "avg_price": 100.0,
+                    "current_price": 110.0,
+                    "status": "OPEN",
+                }
+            },
+        }
+        decision = {
+            "decision_id": "PDEC-AAPL-RED",
+            "ticker": "AAPL",
+            "action": "REDUCE_PAPER",
+            "confidence": 0.8,
+            "evidence": "reduce",
+        }
+        order = pe.execute_decision(decision, portfolio, accounting=None, all_decisions=[decision])
+        self.assertAlmostEqual(order["fill_shares"], 2.0, places=2)
+        self.assertAlmostEqual(order["realized_pnl"], 20.0, places=2)
+        self.assertAlmostEqual(portfolio["positions"]["AAPL"]["shares"], 8.0, places=2)
+
+    def test_rotate_realized_pnl(self) -> None:
+        portfolio = {
+            "cash": 1000.0,
+            "realized_pnl": 0.0,
+            "positions": {
+                "OLD": {
+                    "ticker": "OLD",
+                    "shares": 5.0,
+                    "avg_price": 50.0,
+                    "current_price": 60.0,
+                    "status": "OPEN",
+                }
+            },
+        }
+        decisions = [
+            {
+                "decision_id": "PDEC-ROT-1",
+                "ticker": "OLD",
+                "action": "ROTATE_PAPER",
+                "confidence": 0.7,
+                "evidence": "rotate out",
+            },
+            {
+                "decision_id": "PDEC-BUY-NEW",
+                "ticker": "NEW",
+                "action": "BUY_PAPER",
+                "confidence": 0.9,
+                "expected_profit_delta": 50.0,
+                "evidence": "rotate in",
+            },
+        ]
+        order = pe.execute_decision(decisions[0], portfolio, accounting=None, all_decisions=decisions)
+        self.assertTrue(order["is_trade"])
+        self.assertAlmostEqual(order["realized_pnl"], 50.0, places=2)
+        self.assertNotIn("OLD", portfolio["positions"])
+
+    def test_portfolio_reconciliation(self) -> None:
+        portfolio = {
+            "cash": 5000.0,
+            "realized_pnl": 0.0,
+            "positions": {
+                "AAPL": {
+                    "ticker": "AAPL",
+                    "shares": 10.0,
+                    "avg_price": 100.0,
+                    "current_price": 110.0,
+                }
+            },
+        }
+        pe.recalc_portfolio(portfolio)
+        portfolio["starting_value"] = portfolio["total_value"]
+        portfolio["baseline_unrealized_pnl"] = portfolio["unrealized_pnl"]
+        recon = pe.validate_portfolio_reconciliation(portfolio)
+        self.assertTrue(recon["ok"])
+        self.assertEqual(recon["status"], "PASS")
+
+    def test_backfill_legacy_trades(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paper_trades.jsonl"
+            legacy = {
+                "decision_id": "PDEC-MU-0016",
+                "action": "SELL_PAPER",
+                "is_trade": True,
+                "record_type": "paper_trade",
+                "fill_shares": 2.0,
+                "price": 100.0,
+                "before_position": {"shares": 2.0, "avg_price": 100.0, "current_price": 90.0},
+                "simulated_pnl_impact": 0.0,
+            }
+            path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+            portfolio = {"cash": 1200.0, "realized_pnl": 0.0, "positions": {}}
+            changed = pe.backfill_portfolio_realized_from_trades(portfolio, path)
+            self.assertTrue(changed)
+            self.assertAlmostEqual(portfolio["realized_pnl"], -20.0, places=2)
+            self.assertAlmostEqual(portfolio["cash"], 1180.0, places=2)
+            rows = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertAlmostEqual(rows[0]["realized_pnl"], -20.0, places=2)
+
+    def test_trade_jsonl_counts_match_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "runtime_outputs/paper_execution"
+            out_dir.mkdir(parents=True)
+            trades_path = out_dir / "paper_trades.jsonl"
+            trades_path.write_text(
+                json.dumps(
+                    {
+                        "decision_id": "t1",
+                        "action": "SELL_PAPER",
+                        "is_trade": True,
+                        "record_type": "paper_trade",
+                        "fill_shares": 1.0,
+                        "fill_price": 110.0,
+                        "gross_value": 110.0,
+                        "cost_basis": 100.0,
+                        "realized_pnl": 10.0,
+                        "before_position": {"shares": 1.0, "avg_price": 100.0},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            errors = pe.validate_trades_file(trades_path)
+            self.assertEqual(errors, [])
+            self.assertEqual(pe._count_jsonl_lines(trades_path), 1)
 
     def test_sell_paper_skipped_without_position(self) -> None:
         portfolio = {
@@ -102,7 +266,9 @@ class PaperExecutionTest(unittest.TestCase):
                 "executed": True,
                 "is_trade": True,
                 "fill_shares": 5.0,
-                "before_position": {"shares": 5.0},
+                "realized_pnl": 10.0,
+                "gross_value": 50.0,
+                "before_position": {"shares": 5.0, "avg_price": 8.0},
             },
             {
                 "decision_id": "2",
@@ -114,14 +280,15 @@ class PaperExecutionTest(unittest.TestCase):
                 "before_position": {"shares": 0.0},
             },
         ]
-        portfolio = {"positions": {"AAPL": {"shares": 1.0}}}
+        portfolio = {"positions": {"AAPL": {"shares": 1.0, "avg_price": 100.0, "current_price": 100.0}}}
+        pe.recalc_portfolio(portfolio)
         validation = pe.validate_execution_run(
             orders,
             trades_written=1,
             trades_file_lines=1,
             portfolio=portfolio,
-            before_snapshot={"positions_count": 2, "cash": 100.0, "realized_pnl": 0.0},
-            after_snapshot={"positions_count": 1, "cash": 200.0, "realized_pnl": 10.0},
+            before_snapshot={"positions_count": 2, "cash": 100.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0, "total_pnl": 0.0, "total_value": 200.0, "open_positions_value": 100.0},
+            after_snapshot={"positions_count": 1, "cash": 200.0, "realized_pnl": 10.0, "unrealized_pnl": 0.0, "total_pnl": 10.0, "total_value": 300.0, "open_positions_value": 100.0},
         )
         self.assertTrue(validation["ok"])
         self.assertEqual(validation["orders_created"], 2)
@@ -266,7 +433,17 @@ class PaperExecutionTest(unittest.TestCase):
                 encoding="utf-8",
             )
             (out_dir / "paper_portfolio.json").write_text(
-                json.dumps({"cash": 400.0, "total_value": 1600.0, "realized_pnl": 50.0, "unrealized_pnl": 25.0, "positions": {"X": {}}}),
+                json.dumps(
+                    {
+                        "cash": 400.0,
+                        "open_positions_value": 1200.0,
+                        "total_value": 1600.0,
+                        "realized_pnl": 50.0,
+                        "unrealized_pnl": 25.0,
+                        "total_pnl": 75.0,
+                        "positions": {"X": {"shares": 1.0, "avg_price": 100.0, "current_price": 1200.0, "current_value": 1200.0, "pnl": 25.0}},
+                    }
+                ),
                 encoding="utf-8",
             )
             with mock.patch.object(pe, "ACCOUNTING_JSON", accounting), mock.patch.object(

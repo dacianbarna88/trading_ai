@@ -107,6 +107,9 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
         handle.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
 
 
+RECONCILE_EPS = 0.02
+
+
 def recalc_portfolio(portfolio: dict[str, Any]) -> None:
     positions = portfolio.get("positions") or {}
     open_value = 0.0
@@ -130,9 +133,14 @@ def recalc_portfolio(portfolio: dict[str, Any]) -> None:
         open_value += current_value
         unrealized += pnl
     cash = _f(portfolio.get("cash"))
+    realized = _f(portfolio.get("realized_pnl"))
     portfolio["open_positions_value"] = round(open_value, 4)
     portfolio["unrealized_pnl"] = round(unrealized, 4)
+    portfolio["total_pnl"] = round(realized + unrealized, 4)
     portfolio["total_value"] = round(cash + open_value, 4)
+    starting = _f(portfolio.get("starting_value"))
+    if starting > 0:
+        portfolio["value_delta"] = round(_f(portfolio.get("total_value")) - starting, 4)
     portfolio["updated_at"] = _now()
 
 
@@ -156,13 +164,35 @@ def price_for_ticker(ticker: str, accounting: dict[str, Any] | None, decision: d
             px = _f(row.get("current_price"))
             if px > 0:
                 return px
-    scores = decision.get("action_scores") or {}
-    if _f(decision.get("expected_profit_delta")) and _f(decision.get("confidence")):
-        pass
     pos = (decision.get("portfolio_snapshot") or {})
     px = _f(pos.get("current_price"))
     if px > 0:
         return px
+    return 100.0
+
+
+def fill_price_for_position(
+    pos: dict[str, Any] | None,
+    ticker: str,
+    accounting: dict[str, Any] | None,
+    decision: dict[str, Any],
+) -> float:
+    """MTM/current price for fills — never use avg_price as fill."""
+    if pos:
+        px = _f(pos.get("current_price"))
+        if px > 0:
+            return px
+    px = price_for_ticker(ticker, accounting, decision)
+    if px > 0 and pos:
+        avg = _f(pos.get("avg_price"))
+        if avg > 0 and abs(px - avg) < 0.0001:
+            px = 0.0
+    if px > 0:
+        return px
+    if pos:
+        avg = _f(pos.get("avg_price"))
+        if avg > 0:
+            return avg
     return 100.0
 
 
@@ -228,16 +258,21 @@ def bootstrap_portfolio(accounting: dict[str, Any] | None, existing: dict[str, A
         "source": str(ACCOUNTING_JSON),
         "created_at": _now(),
         "updated_at": _now(),
-        "starting_value": round(total, 2),
+        "starting_value": 0.0,
+        "baseline_unrealized_pnl": 0.0,
         "cash": round(cash, 2),
         "open_positions_value": 0.0,
         "realized_pnl": 0.0,
         "unrealized_pnl": 0.0,
+        "total_pnl": 0.0,
         "total_value": 0.0,
         "positions": positions,
         "processed_decision_ids": [],
     }
     recalc_portfolio(portfolio)
+    portfolio["starting_value"] = round(_f(portfolio.get("total_value")), 2)
+    portfolio["baseline_unrealized_pnl"] = round(_f(portfolio.get("unrealized_pnl")), 4)
+    portfolio["realized_pnl_at_baseline"] = round(_f(portfolio.get("realized_pnl")), 4)
     return portfolio
 
 
@@ -245,27 +280,30 @@ def _sell_shares(
     portfolio: dict[str, Any],
     ticker: str,
     shares_to_sell: float,
-    price: float,
-) -> tuple[float, dict[str, Any] | None]:
+    fill_price: float,
+) -> tuple[float, float, dict[str, Any] | None]:
+    """Returns (realized_pnl, gross_proceeds, after_position_or_none)."""
     positions = portfolio.setdefault("positions", {})
     pos = positions.get(ticker)
     if not pos:
-        return 0.0, None
+        return 0.0, 0.0, None
     shares_before = _f(pos.get("shares"))
     avg_price = _f(pos.get("avg_price"))
     shares_to_sell = min(shares_to_sell, shares_before)
     if shares_to_sell <= 0:
-        return 0.0, pos
-    realized = round((price - avg_price) * shares_to_sell, 4) if avg_price > 0 else 0.0
+        return 0.0, 0.0, pos
+    cost_basis = round(avg_price * shares_to_sell, 4) if avg_price > 0 else 0.0
+    gross_proceeds = round(shares_to_sell * fill_price, 4)
+    realized = round(gross_proceeds - cost_basis, 4) if avg_price > 0 else 0.0
     shares_after = round(shares_before - shares_to_sell, 6)
-    portfolio["cash"] = round(_f(portfolio.get("cash")) + shares_to_sell * price, 4)
+    portfolio["cash"] = round(_f(portfolio.get("cash")) + gross_proceeds, 4)
     portfolio["realized_pnl"] = round(_f(portfolio.get("realized_pnl")) + realized, 4)
     if shares_after <= 0.000001:
         positions.pop(ticker, None)
-        return realized, None
+        return realized, gross_proceeds, None
     pos["shares"] = shares_after
     pos["status"] = "OPEN"
-    return realized, pos
+    return realized, gross_proceeds, pos
 
 
 def _buy_shares(
@@ -328,8 +366,15 @@ def _portfolio_snapshot(portfolio: dict[str, Any]) -> dict[str, Any]:
         "cash": round(_f(portfolio.get("cash")), 4),
         "positions_count": len(positions),
         "realized_pnl": round(_f(portfolio.get("realized_pnl")), 4),
+        "unrealized_pnl": round(_f(portfolio.get("unrealized_pnl")), 4),
+        "total_pnl": round(_f(portfolio.get("total_pnl")), 4),
         "total_value": round(_f(portfolio.get("total_value")), 4),
+        "open_positions_value": round(_f(portfolio.get("open_positions_value")), 4),
     }
+
+
+def _action_changed_flag(execution_reason: str) -> bool:
+    return execution_reason.startswith("action_changed:")
 
 
 def execute_decision(
@@ -338,6 +383,7 @@ def execute_decision(
     *,
     accounting: dict[str, Any] | None,
     all_decisions: list[dict[str, Any]],
+    execution_reason: str = "new_decision",
 ) -> dict[str, Any]:
     action = _s(decision.get("action")).upper()
     ticker = _s(decision.get("ticker")).upper()
@@ -346,11 +392,17 @@ def execute_decision(
     risk_score = _f(decision.get("risk_score"))
     expected_delta = _f(decision.get("expected_profit_delta"))
     rule_sources = extract_rule_sources(decision)
-    price = price_for_ticker(ticker, accounting, decision)
 
     positions = portfolio.setdefault("positions", {})
+    pos_ref = positions.get(ticker)
+    fill_price = fill_price_for_position(pos_ref, ticker, accounting, decision)
+    price = fill_price
+
+    cash_before = round(_f(portfolio.get("cash")), 4)
     before = _position_snapshot(positions.get(ticker))
     realized_pnl = 0.0
+    cost_basis = 0.0
+    gross_value = 0.0
     capital_impact = 0.0
     risk_impact = _f(decision.get("expected_risk_delta"))
     reason = _s(decision.get("evidence"))[:240] or action
@@ -370,9 +422,11 @@ def execute_decision(
         status = "NO_CHANGE"
     elif action == "SELL_PAPER":
         sell_shares = _f(before.get("shares"))
-        realized_pnl, after_pos = _sell_shares(portfolio, ticker, sell_shares, price)
+        avg = _f(before.get("avg_price"))
+        cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
+        realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, sell_shares, fill_price)
         fill_shares = sell_shares
-        capital_impact = round(realized_pnl + _f(before.get("current_value")), 4)
+        capital_impact = round(gross_value, 4)
         after = _position_snapshot(after_pos)
         status = "EXECUTED"
         executed = True
@@ -380,9 +434,11 @@ def execute_decision(
     elif action == "REDUCE_PAPER":
         trim_pct = 30.0 if confidence < 0.7 else 20.0
         trim_shares = _f(before.get("shares")) * (trim_pct / 100.0)
-        realized_pnl, after_pos = _sell_shares(portfolio, ticker, trim_shares, price)
+        avg = _f(before.get("avg_price"))
+        cost_basis = round(avg * trim_shares, 4) if avg > 0 else 0.0
+        realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, trim_shares, fill_price)
         fill_shares = trim_shares
-        capital_impact = round(trim_shares * price, 4)
+        capital_impact = round(gross_value, 4)
         after = _position_snapshot(after_pos)
         reason = f"REDUCE_PAPER trim {trim_pct:.0f}% — {reason}"
         status = "EXECUTED"
@@ -394,7 +450,9 @@ def execute_decision(
         pos["protect_mode"] = "TRAIL_SHADOW"
         if risk_score >= 80 and _f(pos.get("shares")) > 0:
             trim_shares = _f(pos.get("shares")) * 0.1
-            realized_pnl, after_pos = _sell_shares(portfolio, ticker, trim_shares, price)
+            avg = _f(before.get("avg_price"))
+            cost_basis = round(avg * trim_shares, 4) if avg > 0 else 0.0
+            realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, trim_shares, fill_price)
             fill_shares = trim_shares
             after = _position_snapshot(after_pos)
             reason = f"PROTECT_PAPER urgency trim 10% — {reason}"
@@ -410,9 +468,10 @@ def execute_decision(
     elif action == "BUY_PAPER":
         cash = _f(portfolio.get("cash"))
         notional = min(cash * max(0.05, confidence * 0.12), cash * 0.15)
-        bought, after_pos = _buy_shares(portfolio, ticker, notional, price)
+        bought, after_pos = _buy_shares(portfolio, ticker, notional, fill_price)
         fill_shares = bought
         if fill_shares > 0:
+            gross_value = round(notional, 4)
             capital_impact = round(-notional, 4)
             after = _position_snapshot(after_pos)
             status = "EXECUTED"
@@ -423,13 +482,20 @@ def execute_decision(
             reason = f"BUY_PAPER skipped — insufficient cash for {ticker}"
     elif action == "ROTATE_PAPER":
         sell_shares = _f(before.get("shares"))
-        realized_pnl, _ = _sell_shares(portfolio, ticker, sell_shares, price)
-        rotate_notional = _f(before.get("current_value")) or _f(portfolio.get("cash")) * 0.1
+        avg = _f(before.get("avg_price"))
+        cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
+        realized_pnl, gross_value, _ = _sell_shares(portfolio, ticker, sell_shares, fill_price)
+        rotate_notional = gross_value or _f(before.get("current_value")) or _f(portfolio.get("cash")) * 0.1
         target = best_rotate_target(all_decisions, ticker)
         buy_fill = 0.0
         if target and rotate_notional > 0:
             tgt_ticker = _s(target.get("ticker")).upper()
-            tgt_price = price_for_ticker(tgt_ticker, accounting, target)
+            tgt_price = fill_price_for_position(
+                (portfolio.get("positions") or {}).get(tgt_ticker),
+                tgt_ticker,
+                accounting,
+                target,
+            )
             buy_fill, after_pos = _buy_shares(portfolio, tgt_ticker, rotate_notional, tgt_price)
             after = _position_snapshot(after_pos)
             reason = f"ROTATE_PAPER {ticker}→{tgt_ticker} — {reason}"
@@ -437,7 +503,7 @@ def execute_decision(
             after = _position_snapshot(None)
             reason = f"ROTATE_PAPER sell-only (no BUY target) — {reason}"
         fill_shares = sell_shares if sell_shares > 0 else buy_fill
-        capital_impact = round(rotate_notional - _f(before.get("current_value")), 4)
+        capital_impact = round(rotate_notional - gross_value, 4)
         status = "EXECUTED"
         executed = sell_shares > 0 or buy_fill > 0
         is_trade = sell_shares > 0 or buy_fill > 0
@@ -446,6 +512,8 @@ def execute_decision(
 
     if status != "SKIPPED_NO_POSITION":
         recalc_portfolio(portfolio)
+
+    cash_after = round(_f(portfolio.get("cash")), 4)
 
     order = {
         "timestamp": _now(),
@@ -456,6 +524,16 @@ def execute_decision(
         "executed": executed,
         "is_trade": is_trade,
         "fill_shares": round(fill_shares, 6),
+        "fill_price": round(fill_price, 6),
+        "gross_value": round(gross_value, 4),
+        "cost_basis": round(cost_basis, 4),
+        "realized_pnl": round(realized_pnl, 4),
+        "cash_before": cash_before,
+        "cash_after": cash_after,
+        "position_before": before,
+        "position_after": after,
+        "action_changed": _action_changed_flag(execution_reason),
+        "execution_reason": execution_reason,
         "rule_sources": rule_sources,
         "before_position": before,
         "after_position": after,
@@ -463,7 +541,7 @@ def execute_decision(
         "expected_profit_delta": expected_delta,
         "capital_impact": capital_impact,
         "risk_impact": risk_impact,
-        "price": price,
+        "price": round(fill_price, 6),
         "confidence": confidence,
         "reason": reason,
         "mode": MODE,
@@ -481,7 +559,7 @@ def build_rule_attribution(
     for order in orders:
         if not order.get("executed"):
             continue
-        pnl = _f(order.get("simulated_pnl_impact"))
+        pnl = _f(order.get("realized_pnl")) or _f(order.get("simulated_pnl_impact"))
         expected = _f(order.get("expected_profit_delta"))
         outcome = pnl if pnl != 0 else (expected * 0.1)
         positive = outcome >= 0
@@ -571,8 +649,196 @@ def validate_trades_file(path: Path) -> list[str]:
         except json.JSONDecodeError as exc:
             errors.append(f"invalid jsonl line: {exc}")
             continue
+        if row.get("is_trade") or row.get("record_type") == "paper_trade":
+            enrich_trade_record(row)
         errors.extend(validate_trade_record(row))
     return errors
+
+
+def trade_realized_from_record(trade: dict[str, Any]) -> float:
+    if trade.get("realized_pnl") is not None and _f(trade.get("realized_pnl")) != 0:
+        return _f(trade.get("realized_pnl"))
+    before = trade.get("before_position") or trade.get("position_before") or {}
+    shares = _f(trade.get("fill_shares") or trade.get("shares"))
+    avg = _f(before.get("avg_price"))
+    fill = _f(trade.get("fill_price"))
+    legacy_price = _f(trade.get("price"))
+    current = _f(before.get("current_price"))
+    if fill <= 0:
+        fill = legacy_price
+    if current > 0 and (fill <= 0 or (avg > 0 and abs(fill - avg) < 0.0001 and abs(current - avg) > 0.0001)):
+        fill = current
+    if fill <= 0:
+        fill = avg
+    if shares > 0 and avg > 0 and fill > 0:
+        return round((fill - avg) * shares, 4)
+    simulated = _f(trade.get("simulated_pnl_impact"))
+    if simulated != 0:
+        return simulated
+    return 0.0
+
+
+def enrich_trade_record(trade: dict[str, Any]) -> dict[str, Any]:
+    """Backfill ledger fields on legacy trade rows."""
+    before = trade.get("before_position") or trade.get("position_before") or {}
+    after = trade.get("after_position") or trade.get("position_after") or {}
+    shares = _f(trade.get("fill_shares") or trade.get("shares"))
+    avg = _f(before.get("avg_price"))
+    fill = _f(trade.get("fill_price"))
+    legacy_price = _f(trade.get("price"))
+    current = _f(before.get("current_price"))
+    if fill <= 0:
+        fill = legacy_price
+    if current > 0 and (fill <= 0 or (avg > 0 and abs(fill - avg) < 0.0001 and abs(current - avg) > 0.0001)):
+        fill = current
+    if fill <= 0:
+        fill = avg
+    gross = _f(trade.get("gross_value"))
+    if gross <= 0 and shares > 0 and fill > 0:
+        gross = round(shares * fill, 4)
+    cost = _f(trade.get("cost_basis"))
+    if cost <= 0 and shares > 0 and avg > 0:
+        cost = round(shares * avg, 4)
+    trade.setdefault("fill_price", round(fill, 6) if fill > 0 else 0.0)
+    trade.setdefault("gross_value", gross)
+    trade.setdefault("cost_basis", cost)
+    trade.setdefault("position_before", before)
+    trade.setdefault("position_after", after)
+    trade.setdefault("before_position", before)
+    trade.setdefault("after_position", after)
+    trade.setdefault("action_changed", bool(trade.get("action_changed") or _action_changed_flag(_s(trade.get("execution_reason")))))
+    trade.setdefault("broker_executed", False)
+    trade.setdefault("live_money", False)
+    realized = round((fill - avg) * shares, 4) if shares > 0 and avg > 0 and fill > 0 else trade_realized_from_record(trade)
+    if trade.get("realized_pnl") is None or (
+        _f(trade.get("realized_pnl")) == 0 and realized != 0
+    ):
+        trade["realized_pnl"] = realized
+    trade["simulated_pnl_impact"] = round(_f(trade.get("realized_pnl")), 4)
+    return trade
+
+
+def ensure_accounting_baseline(portfolio: dict[str, Any]) -> bool:
+    """One-time baseline for value_delta reconciliation after accounting hardening."""
+    if portfolio.get("accounting_baseline_v1"):
+        return False
+    recalc_portfolio(portfolio)
+    portfolio["starting_value"] = round(_f(portfolio.get("total_value")), 2)
+    portfolio["baseline_unrealized_pnl"] = round(_f(portfolio.get("unrealized_pnl")), 4)
+    portfolio["realized_pnl_at_baseline"] = round(_f(portfolio.get("realized_pnl")), 4)
+    portfolio["accounting_baseline_v1"] = _now()
+    return True
+
+
+def backfill_portfolio_realized_from_trades(portfolio: dict[str, Any], trades_path: Path | None = None) -> bool:
+    """Recompute cumulative realized_pnl and cash from trade ledger if stale."""
+    path = trades_path or TRADES_JSONL
+    trades = load_jsonl(path)
+    if not trades:
+        return False
+    total_realized = 0.0
+    cash_delta = 0.0
+    changed_trades = False
+    enriched: list[str] = []
+    sell_actions = {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER", "PROTECT_PAPER"}
+
+    for trade in trades:
+        is_trade = trade.get("record_type") == "paper_trade" or trade.get("is_trade")
+        if not is_trade:
+            enriched.append(json.dumps(trade, separators=(",", ":"), ensure_ascii=False))
+            continue
+        action = _s(trade.get("action")).upper()
+        before = trade.get("before_position") or trade.get("position_before") or {}
+        old_fill = _f(trade.get("fill_price") or trade.get("price"))
+        old_gross = _f(trade.get("gross_value"))
+        if old_gross <= 0 and _f(trade.get("fill_shares")) > 0 and old_fill > 0:
+            old_gross = round(_f(trade.get("fill_shares")) * old_fill, 4)
+        prior_realized = trade.get("realized_pnl")
+        enrich_trade_record(trade)
+        if (
+            prior_realized != trade.get("realized_pnl")
+            or abs(old_fill - _f(trade.get("fill_price"))) > RECONCILE_EPS
+            or abs(old_gross - _f(trade.get("gross_value"))) > RECONCILE_EPS
+        ):
+            changed_trades = True
+        if action in sell_actions:
+            rp = trade_realized_from_record(trade)
+            if action == "PROTECT_PAPER" and rp == 0:
+                enriched.append(json.dumps(trade, separators=(",", ":"), ensure_ascii=False))
+                continue
+            new_gross = _f(trade.get("gross_value"))
+            if old_gross > 0 and new_gross > 0:
+                cash_delta += new_gross - old_gross
+            total_realized += rp
+        enriched.append(json.dumps(trade, separators=(",", ":"), ensure_ascii=False))
+
+    current = _f(portfolio.get("realized_pnl"))
+    needs_update = abs(current - total_realized) > RECONCILE_EPS or abs(cash_delta) > RECONCILE_EPS
+    if needs_update or changed_trades:
+        if abs(cash_delta) > RECONCILE_EPS:
+            portfolio["cash"] = round(_f(portfolio.get("cash")) + cash_delta, 4)
+        portfolio["realized_pnl"] = round(total_realized, 4)
+        recalc_portfolio(portfolio)
+        if changed_trades or needs_update:
+            if path.resolve() == TRADES_JSONL.resolve() or TRADES_JSONL.resolve() in path.resolve().parents:
+                assert_safe_path(path)
+            path.write_text("\n".join(enriched) + ("\n" if enriched else ""), encoding="utf-8")
+        return True
+    return changed_trades
+
+
+def validate_portfolio_reconciliation(portfolio: dict[str, Any]) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    cash = _f(portfolio.get("cash"))
+    open_val = _f(portfolio.get("open_positions_value"))
+    total_val = _f(portfolio.get("total_value"))
+    realized = _f(portfolio.get("realized_pnl"))
+    unrealized = _f(portfolio.get("unrealized_pnl"))
+    total_pnl = _f(portfolio.get("total_pnl"))
+    starting = _f(portfolio.get("starting_value"))
+
+    positions = portfolio.get("positions") or {}
+    computed_open = sum(_f(p.get("current_value")) for p in positions.values())
+    computed_unrealized = sum(_f(p.get("pnl")) for p in positions.values())
+
+    def add_check(name: str, expected: float, actual: float, formula: str) -> None:
+        ok = abs(expected - actual) <= RECONCILE_EPS
+        checks.append({"name": name, "expected": round(expected, 4), "actual": round(actual, 4), "ok": ok, "formula": formula})
+        if not ok:
+            errors.append(f"{name}: expected {expected:.4f} actual {actual:.4f} ({formula})")
+
+    add_check("total_value", cash + open_val, total_val, "cash + open_positions_value")
+    add_check("open_positions_value", computed_open, open_val, "sum(position.current_value)")
+    add_check("unrealized_pnl", computed_unrealized, unrealized, "sum(position.pnl)")
+    add_check("total_pnl", realized + unrealized, total_pnl, "realized_pnl + unrealized_pnl")
+    # value_delta vs total_pnl only when bootstrap baseline is consistent
+    if starting > 0 and portfolio.get("baseline_unrealized_pnl") is not None:
+        baseline_unreal = _f(portfolio.get("baseline_unrealized_pnl"))
+        realized_at_baseline = _f(portfolio.get("realized_pnl_at_baseline"))
+        expected_delta = (realized - realized_at_baseline) + (unrealized - baseline_unreal)
+        value_delta = _f(portfolio.get("value_delta"))
+        add_check(
+            "value_delta",
+            expected_delta,
+            value_delta,
+            "(realized_pnl - realized_at_baseline) + (unrealized_pnl - baseline_unrealized_pnl)",
+        )
+
+    return {
+        "ok": not errors,
+        "status": "PASS" if not errors else "FAIL",
+        "errors": errors,
+        "checks": checks,
+        "cash": cash,
+        "open_positions_value": open_val,
+        "total_value": total_val,
+        "realized_pnl": realized,
+        "unrealized_pnl": unrealized,
+        "total_pnl": total_pnl,
+        "positions_count": len(positions),
+    }
 
 
 def validate_trade_record(trade: dict[str, Any]) -> list[str]:
@@ -582,11 +848,24 @@ def validate_trade_record(trade: dict[str, Any]) -> list[str]:
         return errors
     shares = _f(trade.get("fill_shares") or trade.get("shares"))
     action = _s(trade.get("action")).upper()
-    before = trade.get("before_position") or {}
+    before = trade.get("before_position") or trade.get("position_before") or {}
     if shares <= 0:
         errors.append(f"{trade.get('decision_id')}: trade fill_shares must be > 0")
     if action in {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"} and _f(before.get("shares")) <= 0:
         errors.append(f"{trade.get('decision_id')}: {action} trade requires existing position")
+    if action in {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"}:
+        rp = trade.get("realized_pnl")
+        if rp is None:
+            errors.append(f"{trade.get('decision_id')}: {action} trade missing realized_pnl")
+        cash_before = trade.get("cash_before")
+        cash_after = trade.get("cash_after")
+        gross = _f(trade.get("gross_value"))
+        if cash_before is not None and cash_after is not None and gross > 0 and action in {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"}:
+            expected_cash = round(_f(cash_before) + gross, 4)
+            if abs(expected_cash - _f(cash_after)) > RECONCILE_EPS:
+                errors.append(
+                    f"{trade.get('decision_id')}: cash_after {cash_after} != cash_before + gross_value ({expected_cash})"
+                )
     return errors
 
 
@@ -619,9 +898,14 @@ def validate_execution_run(
     if len(positions) != after_snapshot.get("positions_count"):
         errors.append("positions count does not reconcile with portfolio state")
 
+    reconciliation = validate_portfolio_reconciliation(portfolio)
+    if not reconciliation.get("ok"):
+        errors.extend(reconciliation.get("errors") or [])
+
     return {
         "ok": not errors,
         "errors": errors,
+        "reconciliation": reconciliation,
         "orders_created": len(orders),
         "orders_executed": sum(1 for o in orders if o.get("executed")),
         "orders_skipped": sum(1 for o in orders if str(o.get("status", "")).startswith("SKIPPED")),
@@ -632,6 +916,9 @@ def validate_execution_run(
         "cash_before": before_snapshot.get("cash"),
         "cash_after": after_snapshot.get("cash"),
         "realized_pnl": after_snapshot.get("realized_pnl"),
+        "unrealized_pnl": after_snapshot.get("unrealized_pnl"),
+        "total_pnl": after_snapshot.get("total_pnl"),
+        "total_value": after_snapshot.get("total_value"),
     }
 
 
@@ -639,6 +926,7 @@ def write_report(payload: dict[str, Any]) -> None:
     portfolio = payload.get("portfolio") or {}
     stats = payload.get("stats") or {}
     validation = payload.get("validation") or {}
+    reconciliation = validation.get("reconciliation") or {}
     action_counts = payload.get("action_counts") or {}
     lines = [
         "# TAE PAPER Execution Report",
@@ -652,6 +940,8 @@ def write_report(payload: dict[str, Any]) -> None:
         f"- Orders created (this run): **{stats.get('orders_created', 0)}**",
         f"- Orders executed (this run): **{stats.get('orders_executed', 0)}**",
         f"- Orders skipped (this run): **{stats.get('orders_skipped', 0)}**",
+        f"- Skipped same action: **{stats.get('skipped_same_action', 0)}**",
+        f"- Re-executed on action change: **{stats.get('reexecuted_on_action_change', 0)}**",
         f"- Trades written (this run): **{stats.get('trades_written', 0)}**",
         f"- Trades file total lines: **{stats.get('trades_file_lines', 0)}**",
         "",
@@ -661,14 +951,28 @@ def write_report(payload: dict[str, Any]) -> None:
         f"- Positions after: **{stats.get('positions_after', 0)}**",
         f"- Cash before: **${ _f(stats.get('cash_before')):,.2f}**",
         f"- Cash after: **${ _f(stats.get('cash_after')):,.2f}**",
-        f"- Realized PnL: **${ _f(stats.get('realized_pnl')):,.2f}**",
-        f"- Portfolio value: **${ _f(portfolio.get('total_value')):,.2f}**",
+        f"- Total value: **${ _f(portfolio.get('total_value')):,.2f}**",
+        "",
+        "## PnL accounting",
+        "",
+        f"- Realized PnL: **${ _f(portfolio.get('realized_pnl')):,.2f}**",
         f"- Unrealized PnL: **${ _f(portfolio.get('unrealized_pnl')):,.2f}**",
+        f"- Total PnL: **${ _f(portfolio.get('total_pnl')):,.2f}**",
+        f"- Value delta vs starting: **${ _f(portfolio.get('value_delta')):,.2f}**",
         "",
-        "## Validation",
+        "## Reconciliation",
         "",
-        f"- Validation OK: **{validation.get('ok', False)}**",
+        f"- Status: **{reconciliation.get('status', 'UNKNOWN')}**",
+        f"- Formula: `total_value = cash + open_positions_value`",
+        f"- Formula: `total_pnl = realized_pnl + unrealized_pnl`",
+        f"- Formula: `value_delta = total_value - starting_value`",
     ]
+    for check in reconciliation.get("checks") or []:
+        mark = "PASS" if check.get("ok") else "FAIL"
+        lines.append(
+            f"- {check.get('name')}: **{mark}** expected={check.get('expected')} actual={check.get('actual')}"
+        )
+    lines.extend(["", "## Validation", "", f"- Validation OK: **{validation.get('ok', False)}**"])
     for err in validation.get("errors") or []:
         lines.append(f"- Error: {err}")
     if not validation.get("errors"):
@@ -734,6 +1038,16 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     accounting = load_json(ACCOUNTING_JSON)
     existing = load_json(PORTFOLIO_JSON)
     portfolio = bootstrap_portfolio(accounting, existing)
+    if portfolio.get("baseline_unrealized_pnl") is None:
+        portfolio["baseline_unrealized_pnl"] = round(_f(portfolio.get("unrealized_pnl")), 4)
+    if portfolio.get("realized_pnl_at_baseline") is None:
+        portfolio["realized_pnl_at_baseline"] = round(_f(portfolio.get("realized_pnl")), 4)
+    if _f(portfolio.get("starting_value")) <= 0:
+        portfolio["starting_value"] = round(_f(portfolio.get("total_value")), 2)
+    backfill_portfolio_realized_from_trades(portfolio, TRADES_JSONL)
+    baseline_reset = ensure_accounting_baseline(portfolio) if existing else False
+    if not baseline_reset:
+        recalc_portfolio(portfolio)
     processed = set(portfolio.get("processed_decision_ids") or [])
     last_orders = load_orders_by_decision(ORDERS_JSONL)
 
@@ -764,6 +1078,7 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
             portfolio,
             accounting=accounting,
             all_decisions=decisions,
+            execution_reason=reason,
         )
         order["execution_reason"] = reason
         orders.append(order)
@@ -812,6 +1127,10 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         "cash_before": validation["cash_before"],
         "cash_after": validation["cash_after"],
         "realized_pnl": validation["realized_pnl"],
+        "unrealized_pnl": validation["unrealized_pnl"],
+        "total_pnl": validation["total_pnl"],
+        "total_value": validation["total_value"],
+        "reconciliation_status": (validation.get("reconciliation") or {}).get("status"),
         "legacy_trades_removed": removed_legacy_trades,
         "reexecuted_on_action_change": reexecuted,
         "skipped_same_action": skipped_same_action,
@@ -895,7 +1214,7 @@ def _actual_pnl_for_order(order: dict[str, Any], portfolio: dict[str, Any]) -> f
     pos = (portfolio.get("positions") or {}).get(ticker) or {}
     if _f(pos.get("shares")) > 0:
         return _f(pos.get("pnl"))
-    simulated = _f(order.get("simulated_pnl_impact"))
+    simulated = _f(order.get("realized_pnl")) or _f(order.get("simulated_pnl_impact"))
     if simulated != 0:
         return simulated
     before = order.get("before_position") or {}
@@ -1077,6 +1396,7 @@ def run_paper_mark_to_market(*, write_report_flag: bool = True) -> dict[str, Any
 
     recalc_portfolio(portfolio)
     total_value = _f(portfolio.get("total_value"))
+    reconciliation = validate_portfolio_reconciliation(portfolio)
     peak_value = max(peak_value, total_value)
     portfolio["peak_value"] = round(peak_value, 4)
     drawdown_pct = round(((peak_value - total_value) / peak_value) * 100, 4) if peak_value > 0 else 0.0
@@ -1103,8 +1423,10 @@ def run_paper_mark_to_market(*, write_report_flag: bool = True) -> dict[str, Any
         "cash": _f(portfolio.get("cash")),
         "realized_pnl": _f(portfolio.get("realized_pnl")),
         "unrealized_pnl": _f(portfolio.get("unrealized_pnl")),
+        "total_pnl": _f(portfolio.get("total_pnl")),
         "drawdown_pct": drawdown_pct,
         "capital_efficiency": portfolio.get("capital_efficiency"),
+        "reconciliation_status": reconciliation.get("status"),
         "positions": position_rows,
     }
     save_json(MTM_JSON, mtm_doc)
@@ -1120,16 +1442,37 @@ def run_paper_mark_to_market(*, write_report_flag: bool = True) -> dict[str, Any
             f"- Live prices: **{live_count}**",
             f"- Stale/fallback prices: **{stale_count}**",
             f"- Total value: **${total_value:,.2f}**",
-            f"- Unrealized PnL: **${_f(portfolio.get('unrealized_pnl')):,.2f}**",
+            f"- Cash: **${_f(portfolio.get('cash')):,.2f}**",
+            f"- Open positions value: **${_f(portfolio.get('open_positions_value')):,.2f}**",
+            "",
+            "## PnL accounting",
+            "",
             f"- Realized PnL: **${_f(portfolio.get('realized_pnl')):,.2f}**",
+            f"- Unrealized PnL: **${_f(portfolio.get('unrealized_pnl')):,.2f}**",
+            f"- Total PnL: **${_f(portfolio.get('total_pnl')):,.2f}**",
             f"- Drawdown: **{drawdown_pct}%**",
             f"- Capital efficiency: **{portfolio.get('capital_efficiency')}**",
             "",
-            "## Positions",
+            "## Reconciliation",
             "",
-            "| ticker | price | source | unrealized | run-up |",
-            "| --- | --- | --- | --- | --- |",
+            f"- Status: **{reconciliation.get('status', 'UNKNOWN')}**",
+            f"- Formula: `total_value = cash + open_positions_value`",
+            f"- Formula: `total_pnl = realized_pnl + unrealized_pnl`",
         ]
+        for check in reconciliation.get("checks") or []:
+            mark = "PASS" if check.get("ok") else "FAIL"
+            lines.append(
+                f"- {check.get('name')}: **{mark}** expected={check.get('expected')} actual={check.get('actual')}"
+            )
+        lines.extend(
+            [
+                "",
+                "## Positions",
+                "",
+                "| ticker | price | source | unrealized | run-up |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
         for row in position_rows[:30]:
             lines.append(
                 f"| {row['ticker']} | {row['current_price']} | {row['mark_source']} | "
@@ -1138,11 +1481,13 @@ def run_paper_mark_to_market(*, write_report_flag: bool = True) -> dict[str, Any
         MTM_REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     return {
-        "ok": True,
+        "ok": reconciliation.get("ok", True),
         "mtm": mtm_doc,
         "portfolio": portfolio,
         "attribution_rules": len(attribution.get("rules") or {}),
         "stale_price_count": stale_count,
+        "live_price_count": live_count,
+        "reconciliation": reconciliation,
     }
 
 
@@ -1164,15 +1509,19 @@ def compare_canonical_vs_paper(*, write_report_flag: bool = True) -> dict[str, A
     paper_realized = _f(paper.get("realized_pnl"))
     paper_unrealized = _f(paper.get("unrealized_pnl"))
     paper_total_pnl = paper_realized + paper_unrealized
+    reconciliation = validate_portfolio_reconciliation(paper)
 
     delta_value = round(paper_value - canonical_value, 4)
     delta_cash = round(paper_cash - canonical_cash, 4)
     delta_positions = paper_positions - int(canonical_positions)
     delta_pnl = round(paper_total_pnl - canonical_total_pnl, 4)
+    delta_realized = round(paper_realized - canonical_realized, 4)
+    delta_unrealized = round(paper_unrealized - canonical_unrealized, 4)
 
     explanation = (
         f"PAPER portfolio diverges by ${delta_value:,.2f} total value "
-        f"({delta_positions:+d} positions, ${delta_cash:,.2f} cash delta) "
+        f"({delta_positions:+d} positions, ${delta_cash:,.2f} cash delta, "
+        f"${delta_realized:,.2f} realized delta, ${delta_unrealized:,.2f} unrealized delta) "
         f"after isolated PAPER execution and mark-to-market."
     )
 
@@ -1197,13 +1546,17 @@ def compare_canonical_vs_paper(*, write_report_flag: bool = True) -> dict[str, A
             "total_pnl": paper_total_pnl,
             "drawdown_pct": paper.get("drawdown_pct"),
             "mark_to_market_stale_count": mtm.get("stale_price_count"),
+            "reconciliation_status": reconciliation.get("status"),
         },
         "delta": {
             "total_value": delta_value,
             "cash": delta_cash,
             "open_positions": delta_positions,
             "total_pnl": delta_pnl,
+            "realized_pnl": delta_realized,
+            "unrealized_pnl": delta_unrealized,
         },
+        "reconciliation": reconciliation,
         "explanation": explanation,
     }
 
@@ -1219,13 +1572,23 @@ def compare_canonical_vs_paper(*, write_report_flag: bool = True) -> dict[str, A
             f"| total value | ${canonical_value:,.2f} | ${paper_value:,.2f} | ${delta_value:,.2f} |",
             f"| cash | ${canonical_cash:,.2f} | ${paper_cash:,.2f} | ${delta_cash:,.2f} |",
             f"| open positions | {canonical_positions} | {paper_positions} | {delta_positions:+d} |",
+            f"| realized PnL | ${canonical_realized:,.2f} | ${paper_realized:,.2f} | ${delta_realized:,.2f} |",
+            f"| unrealized PnL | ${canonical_unrealized:,.2f} | ${paper_unrealized:,.2f} | ${delta_unrealized:,.2f} |",
             f"| total PnL | ${canonical_total_pnl:,.2f} | ${paper_total_pnl:,.2f} | ${delta_pnl:,.2f} |",
             "",
-            f"**Explanation:** {explanation}",
+            "## PAPER reconciliation",
+            "",
+            f"- Status: **{reconciliation.get('status', 'UNKNOWN')}**",
         ]
+        for check in reconciliation.get("checks") or []:
+            mark = "PASS" if check.get("ok") else "FAIL"
+            lines.append(
+                f"- {check.get('name')}: **{mark}** expected={check.get('expected')} actual={check.get('actual')}"
+            )
+        lines.extend(["", f"**Explanation:** {explanation}"])
         CANONICAL_VS_PAPER_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    return {"ok": True, **payload}
+    return {"ok": reconciliation.get("ok", True), **payload}
 
 
 def run_rule_outcome_attribution(*, write_report_flag: bool = False) -> dict[str, Any]:
