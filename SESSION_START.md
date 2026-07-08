@@ -8,67 +8,92 @@
 
 | Item | Value |
 |------|--------|
-| **Last completed sprint** | **X.9** — Connected Shadow Validation Runtime Ledger |
+| **Current approved milestone** | **PAPER Stabilization** — decision state wiring `59982ee` + final audit |
+| **Last completed sprint line** | Decision state anti-churn wiring + stabilization validation (2026-07-08) |
 | **Canonical live runtime** | `live_bot.py` |
 | **TAE live integration** | X.8 advisory **risk gate** + X.9 **BUY observability ledger** |
-| **Mode** | PAPER_ONLY · NO_BROKER · NO_AUTO_EXECUTION |
+| **TAE PAPER integration** | Structural governance 19-step hierarchy → `full-paper-cycle` |
+| **TAE shadow integration** | Market-open intelligence runner → decision governor VIEW (no live execution) |
+| **Mode** | PAPER_ONLY · ADVISORY_ONLY · NO_BROKER · NO_LIVE_PROMOTION |
 
 ---
 
-## Current state (2026-06-29)
+## PAPER operator command (disciplined run)
 
+Run **once per market session**:
+
+```bash
+cd /Users/book/Desktop/trading_ai
+python3 tae.py full-paper-cycle
+```
+
+Expected verdict: `READY_FOR_PAPER_DAY` · reconciliation `PASS` · `live_promotion_allowed=false`
+
+Audit reference: `TAE_FINAL_PAPER_STABILIZATION_AUDIT.md` · `tae_final_paper_stabilization_audit.json`
+
+**Do not** run multiple full cycles in rapid succession — high-EV tickers (AMAT/HD) may oscillate with **authorized** switches during stress testing.
+
+---
+
+## Current state (2026-07-08)
+
+- **Decision state wired** — `59982ee`: active decisions → PDE → conflict resolution → execution → longitudinal memory
+- **Anti-churn gates active** — unauthorized BUY→SELL blocked (AIR.PA/DIA/GE → HOLD + `SKIPPED_SWITCH_NOT_AUTHORIZED`)
+- **STOP_REENTRY_CHURN enforced** — 30m cooldown after SELL; strong EV bypass only
+- **Hard -3% SELL bypass** — AMAT hard stop SELL when breach active
 - **X.8 risk gate connected** — `live_bot.py` reads `tae_live_advisory.json`; `RISK_ADVISORY` blocks **new BUY only**
-- **X.9 shadow validation ledger connected** — BUY path logs to `tae_shadow_validation_events.csv` via `shadow_validation_ledger.py`
-- **BUY path observability active** — event types: `BUY_ALLOWED`, `BUY_BLOCKED_BY_TAE`, `BUY_SKIPPED_OTHER_REASON`
-- **SELL logic untouched** — STOP / TAKE PROFIT / SELL branch not modified by X.8 or X.9
-- **Outcome tracking** — `PENDING_NEXT_PHASE` (no forward PnL on blocked BUYs yet)
+- **X.9 shadow validation ledger connected** — BUY path logs to `tae_shadow_validation_events.csv`
+- **Governor live blocking** — **NOT wired** (by design)
+- **Live promotion** — **LOCKED false** (`tae_live_promotion_lock.py`)
 
 ---
 
 ## What is already done (do not repeat)
 
 - Full TAE ecosystem pipeline (orchestrator, evidence, evolution, ranking, registry, gates)
+- **Structural governance** — `tae_structural_governance.py` single PAPER hierarchy
+- **Decision state builder** — `tae_decision_state.py` (not a decision engine)
+- **Conflict resolution EV evidence** — `tae_conflict_resolution.py`
+- **PAPER decision engine + execution** — isolated portfolio under `runtime_outputs/paper_execution/`
 - Phase X: discovery, simulation, historical execution/analysis, meta intelligence
-- Event memory **scaffold** (0 events) — not ingestion
 - Dashboard TAE Intelligence Reports + Advisory Index (X.7A/B)
-- `tae_advisory_index.json` aggregator (X.7B)
-- `tae_live_advisory.json` bridge (X.7C)
 - **Live bot reads advisory** — `RISK_ADVISORY` blocks **new BUY only** (X.8)
 - **Shadow validation ledger** — structured BUY evaluation events (X.9)
-- Connectivity audits X.7 + indirect audit X.7 fix
+- Decision replay composer, knowledge base VIEW, decision governor VIEW
 
 ---
 
 ## What we do NOT have (do not assume)
 
-- TAE forcing BUY or SELL
-- TAE changing sizing, scores, trailing stop, or `config/settings.py`
-- Event memory ingestion / live news models
-- **Outcome attribution** for blocked BUYs (planned X.10 — after ledger accumulates events)
+- TAE forcing BUY or SELL on **live** portfolio
+- TAE changing live sizing, scores, trailing stop, or `config/settings.py`
+- Decision governor controlling live blocking
+- **Live promotion** — always false until explicit architect unlock
+- Master Decision Authority module (explicitly rejected)
 - Automatic commit/push in checkpoint script
 
 ---
 
 ## What is connected vs report-only
 
-| Connected to LIVE | Report-only |
-|-------------------|-------------|
-| `live_bot.py` → CSV writes | All other `tae_*.json` |
-| `live_bot.py` → `tae_live_advisory.json` (BUY gate) | Meta evolution recommendations |
-| `live_bot.py` → `tae_shadow_validation_events.csv` (BUY log) | Ranking → live watchlist |
-| `tae_shadow_validation_report.py` → summary JSON | Implementation patches |
-| Dashboard → display + start/stop bot | |
-| TAE read-only → `portfolio.csv`, `live_signals.csv` | |
+| Connected to PAPER cycle | Report-only / shadow |
+|--------------------------|----------------------|
+| `tae.py full-paper-cycle` → structural governance | Decision governor VIEW |
+| PDE → conflict resolution → decision state → execution | Knowledge base VIEW |
+| Longitudinal outcome memory | Meta evolution recommendations |
+| DPE competitive/collaborative (isolated) | Ranking → live watchlist |
+| Investment Council synthesis | Canonical vs paper delta (report) |
+| Promotion lock (hard false) | |
 
-**Legacy / not canonical:** `live_bot_v5_1.py`, `telegram_bot.py`, `signal_to_decision_engine.py`, `daily_intelligence_runner.py`
+**Legacy / not canonical:** `live_bot_v5_1.py`, `telegram_bot.py`, `signal_to_decision_engine.py`
 
 ---
 
 ## Next allowed sprint
 
-**X.10 — Outcome Tracking / Attribution for Blocked BUYs**
+**Disciplined 30-day PAPER validation** — daily `full-paper-cycle`, track `TAE_FULL_PAPER_CYCLE_REPORT.md`
 
-Start only after `tae_shadow_validation_events.csv` has accumulated real events from live bot cycles.
+Do **not** wire governor to live blocking or enable live promotion without explicit architect approval.
 
 ---
 
@@ -77,34 +102,29 @@ Start only after `tae_shadow_validation_events.csv` has accumulated real events 
 ```bash
 cd /Users/book/Desktop/trading_ai
 
-# Full checkpoint (recommended)
-bash tae_checkpoint.sh
-
-# Or minimal
-git status
+python3 tae.py full-paper-cycle    # expect READY_FOR_PAPER_DAY
+git diff -- live_bot.py portfolio.csv live_signals.csv watchlist.txt core/ research_core/  # expect empty
 python3 tae_quick_health_check.py
-python3 tae_live_advisory_demo.py
-python3 tae_shadow_validation_report.py
-cat bot_status.txt 2>/dev/null || echo "bot_status missing"
-python3 -c "import json; d=json.load(open('tae_live_advisory.json')); print(d['advisory']['action'])"
 ```
 
 ---
 
 ## Canonical docs
 
-1. **`PROJECT_BOOK.md`** — full journal (what exists, what not to rebuild)
-2. **`TAE_DEVELOPMENT_PROTOCOL.md`** — rules of engagement
-3. Latest sprint summary: **`TAE_X9_SHADOW_VALIDATION_SUMMARY.md`**
+1. **`SESSION_START.md`** — this file
+2. **`TAE_FINAL_PAPER_STABILIZATION_AUDIT.md`** — PAPER stabilization verdict
+3. **`PROJECT_BOOK.md`** — full journal (what exists, what not to rebuild)
+4. **`TAE_STRUCTURAL_GOVERNANCE.md`** — 19-step PAPER hierarchy
+5. **`TAE_DECISION_STATE_REPORT.md`** — active decision state snapshot
 
 ---
 
 ## Before writing new code
 
 1. Open `PROJECT_BOOK.md` §11 — **What Must NOT Be Rebuilt**
-2. Grep `research_core/` for existing module
-3. Confirm sprint mode: AUDIT / REPORT_ONLY / CONTROLLED_INTEGRATION / CONNECTED_OBSERVABILITY
-4. Do **not** modify `live_bot.py` trading logic unless sprint explicitly says so
+2. **NO_NEW_MODULES** — extend existing files only
+3. Confirm sprint mode: PAPER_ONLY · ADVISORY_ONLY
+4. Do **not** modify `live_bot.py` / `portfolio.csv` / `core/` without explicit sprint
 
 ---
 
@@ -113,9 +133,10 @@ python3 -c "import json; d=json.load(open('tae_live_advisory.json')); print(d['a
 ```bash
 bash tae_checkpoint.sh
 # Update PROJECT_BOOK.md §1 / §12 / sprint history
+# Regenerate TAE_MASTER_CONTEXT.md if canonical docs changed
 # git add … && git commit && git push  (manual)
 ```
 
 ---
 
-*Last journal update: 2026-06-29 — Sprint X.9 closed*
+*Last journal update: 2026-07-08 — PAPER stabilization audit (`READY_FOR_DISCIPLINED_PAPER_RUN`)*

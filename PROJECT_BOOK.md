@@ -1,11 +1,13 @@
 # Trading AI — PROJECT BOOK (Canonical Journal)
 
-**Last updated:** 2026-06-29  
-**Latest sprint:** X.9 — Connected Shadow Validation Runtime Ledger  
-**Governance mode:** ANALYSIS_ONLY | PAPER_ONLY | NO_BROKER | NO_EXECUTION  
+**Last updated:** 2026-07-08  
+**Latest sprint:** **PAPER Stabilization** — Decision state wiring + final stabilization audit (`59982ee` + stabilization commit)  
+**Previous milestone closed:** X.Decision checkpoint — Governor advisory VIEW + infra health hardening (`50ebc0b`)  
+**Governance mode:** PAPER_ONLY · ADVISORY_ONLY · NO_BROKER · NO_LIVE_PROMOTION  
 **Canonical runtime:** `live_bot.py` (not `live_bot_v5_1.py`)
 
-> **Read first each session:** `SESSION_START.md`  
+> **Read first each session:** `SESSION_START.md` → `TAE_MASTER_CONTEXT.md` (generated session bootstrap)  
+> **PAPER daily operator command:** `python3 tae.py full-paper-cycle` (once per session — see `TAE_FINAL_PAPER_STABILIZATION_AUDIT.md`)  
 > **End each sprint:** `bash tae_checkpoint.sh` then update this file + commit
 
 ---
@@ -19,6 +21,11 @@
 | Autostart | Active | `startup_runner.sh` → `market_session_guard.py` |
 | Session gate | Per-ticker | `markets/market_hours.py` |
 | Quick health | TAE official | `python3 tae_quick_health_check.py` |
+| **PAPER full cycle** | **Active (PAPER_ONLY)** | `python3 tae.py full-paper-cycle` |
+| **Decision state** | **Active (PAPER_ONLY)** | `python3 tae.py decision-state-refresh` |
+| Market-open shadow stack | **Active (SHADOW_ONLY)** | `python3 tae_market_open_intelligence_runner.py` |
+| Decision governor VIEW | **Active (SHADOW_ONLY)** | `python3 tae_decision_governor.py` |
+| Infrastructure health | **Active (audit)** | `python3 tae_infrastructure_health.py` |
 | TAE stable label | V9.6 | See `TAE_IX_6_V96_STABLE_RELEASE_REPORT.md` |
 
 **Live bot decision spine:** `watchlist.txt` → yfinance → score (RSI/SMA50) → `live_signals.csv` → `manage_portfolio()` → `portfolio.csv`
@@ -55,14 +62,25 @@ OBSERVABILITY (UI)
 
 GOVERNANCE (X.7B–X.9)
   advisory_index.py → tae_advisory_index.json
-  live_advisory_bridge.py → tae_live_advisory.json
+  live_advisory_bridge.py → tae_live_advisory.json (+ governor_enrichment read-only)
   live_advisory_runtime.py → live_bot BUY risk filter
   shadow_validation_ledger.py → BUY evaluation event ledger (CONNECTED_SHADOW_VALIDATION)
+
+SHADOW / DECISION (X.REPLAY → X.Decision — report-only, no live execution)
+  tae_market_open_intelligence_runner.py → 11-step market-open stack (SHADOW_ONLY)
+    → intraday fade → protect → cooldown → decision_replay → confidence_evolution
+    → knowledge_base → decision_governor
+  tae_decision_governor.json ← materialized VIEW (reads upstream JSON only)
+  tae_infrastructure_health.py → autostart / cron / LaunchAgent audit
 ```
 
-**Flow after X.9:**
+**Flow after X.Decision checkpoint:**
 
-`LIVE → portfolio/live_signals → TAE reports → advisory index → live advisory → live_bot risk gate (BUY only) → shadow validation ledger (BUY observability)`
+`LIVE → portfolio/live_signals → TAE reports → advisory index → live advisory (+ governor enrichment informational) → live_bot risk gate (BUY only) → shadow validation ledger (BUY observability)`
+
+**Parallel shadow flow (market open):**
+
+`tae_market_open_intelligence_runner.py → shadow stack → tae_decision_governor.json` (does **not** control live_bot)
 
 ---
 
@@ -74,6 +92,8 @@ GOVERNANCE (X.7B–X.9)
 
 ### TAE core (`research_core/`)
 - **Governance:** daily intelligence, advisory index, live advisory bridge/runtime, **shadow validation ledger (X.9)**
+- **Shadow / decision (X.REPLAY–X.Decision):** decision replay composer, confidence evolution, knowledge base VIEW, decision governor VIEW, market-open intelligence runner
+- **Infrastructure:** `tae_infrastructure_health.py` (autostart audit; permission-safe subprocess checks)
 - **Orchestrator:** ecosystem orchestrator, full ecosystem run
 - **Evidence:** evidence engine, integration gate, gap registration
 - **Strategy evolution:** daily runner, candidate registry, parallel paper validator, continuous ranking, promotion gate, paper tracking
@@ -88,11 +108,14 @@ GOVERNANCE (X.7B–X.9)
 - `tae_full_ecosystem_run.py` — full pipeline
 - `tae_advisory_index_demo.py`, `tae_live_advisory_demo.py` — governance artifacts
 - `tae_shadow_validation_report.py` — aggregates shadow ledger → summary JSON (X.9)
+- `tae_market_open_intelligence_runner.py` — market-open shadow stack orchestrator
+- `tae_decision_governor.py` — decision governor VIEW materializer
+- `tae_infrastructure_health.py` — infrastructure health audit
 - 77+ `tae_phase*_demo.py` scripts (see glob; most superseded by full ecosystem for daily ops)
 
 ### Reports
 - **~87** `tae_*.json` files in project root (gitignored)
-- Sprint summaries: `TAE_X7A` … `TAE_X9`, connectivity audits X.7
+- Sprint summaries: `TAE_X7A` … `TAE_X9`, connectivity audits X.7, **X.REPLAY / X.KNOWLEDGE / X.DECISION / X.INFRA-HEALTH** reports
 
 ### X.9 — Connected Shadow Validation Ledger (COMPLETED)
 
@@ -150,6 +173,9 @@ Key report-only modules:
 - Evidence engine & integration gate
 - Full ecosystem run, quick health, daily intelligence
 - Dashboard TAE tab (read-only display)
+- **Decision governor VIEW** (`tae_decision_governor.json`) — SHADOW_ONLY; does **not** block live BUY/SELL
+- **Knowledge base VIEW** (`tae_knowledge_base.json`) — consolidated learning; not SSOT
+- **Market-open intelligence stack** — shadow orchestration only
 
 **No automatic path:** `tae_*.json` → `watchlist.txt` / scoring thresholds / `config/settings.py`
 
@@ -197,8 +223,16 @@ Key report-only modules:
 - `tae_advisory_index_demo.py`, `tae_live_advisory_demo.py`
 - `tae_shadow_validation_report.py` (X.9)
 
-### TAE constitution
+### TAE shadow / decision (X.REPLAY–X.Decision)
+- `tae_decision_replay_composer.py`, `tae_confidence_evolution.py`, `tae_knowledge_base.py`
+- `tae_decision_governor.py`, `tae_market_open_intelligence_runner.py`
+- `tae_infrastructure_health.py`
+- `tae_profit_protection_shadow.py`, `tae_profit_protection_validation.py`, `tae_stop_reentry_cooldown_audit.py`
+- Intraday fade stack: `tae_intraday_fade_intelligence.py`, `tae_intraday_fade_history.py`, `tae_intraday_discovery_engine.py`
+
+### TAE constitution & session context
 - `TAE_DEVELOPMENT_PROTOCOL.md`, `TAE_GIT_GOVERNANCE.md`, `TAE_ARCHITECTURE.md`
+- `TAE_MASTER_CONTEXT.md` (generated session bootstrap — not SSOT)
 
 ### Session / checkpoint
 - `PROJECT_BOOK.md` (this file), `SESSION_START.md`, `tae_checkpoint.sh`
@@ -210,9 +244,14 @@ Key report-only modules:
 | Artifact | Producer | Consumer |
 |----------|----------|----------|
 | `tae_advisory_index.json` | `tae_advisory_index_demo.py` | Dashboard, live advisory bridge |
-| `tae_live_advisory.json` | `tae_live_advisory_demo.py` | `live_bot.py` (risk gate), dashboard potential |
+| `tae_live_advisory.json` | `tae_live_advisory_demo.py` | `live_bot.py` (risk gate), dashboard; includes `governor_enrichment` (informational) |
 | `tae_shadow_validation_events.csv` | `live_bot.py` via ledger (X.9) | Report script, ops review |
 | `tae_shadow_validation_summary.json` | `tae_shadow_validation_report.py` (X.9) | Dashboard potential, ops |
+| `tae_decision_governor.json` | `tae_decision_governor.py` | Bridge enrichment (read-only), dashboard, human review |
+| `tae_knowledge_base.json` | `tae_knowledge_base.py` | Knowledge VIEW; governor input |
+| `tae_decision_replay.json` | `tae_decision_replay_composer.py` | Governor, knowledge base |
+| `tae_market_open_intelligence_runner.json` | `tae_market_open_intelligence_runner.py` | Ops audit of shadow stack |
+| `tae_infrastructure_health.json` | `tae_infrastructure_health.py` | Autostart readiness audit |
 | `tae_quick_health_check.json` | `tae_quick_health_check.py` | Health monitoring |
 | `tae_full_ecosystem_run.json` | `tae_full_ecosystem_run.py` | Orchestration audit |
 | 85+ other `tae_*.json` | Phase demos / ecosystem | Dashboard, meta, audits |
@@ -228,10 +267,16 @@ All `*.json` in root are **gitignored** — regenerate via demos; do not commit 
 | `live_bot.py` inline rules | Yes | Yes | Yes | Yes (hardcoded in file) |
 | TAE advisory (X.8) | **Block new only on RISK** | No | No | No |
 | TAE shadow ledger (X.9) | **Log only** | No | No | No |
+| TAE decision governor (X.Decision) | **No** (VIEW only) | No | No | No |
 | TAE reports | No | No | No | No |
 | Dashboard | No | No | No | No |
 
-**Classification:** TAE = **CONTROLLED_RUNTIME_INTEGRATION** (X.8 advisory risk gate) + **CONNECTED_OBSERVABILITY** (X.9 shadow ledger; no execution impact).
+**Classification:** TAE = **CONTROLLED_RUNTIME_INTEGRATION** (X.8 advisory risk gate) + **CONNECTED_OBSERVABILITY** (X.9 shadow ledger) + **SHADOW_DECISION_VIEWS** (X.Decision governor/knowledge — no execution impact).
+
+**X.Decision rules (mandatory):**
+- Decision governor is **SHADOW_ONLY** — materializes from existing JSON; does **not** re-run engines
+- Governor does **not** control live blocking (X.8 `RISK_ADVISORY` rule unchanged)
+- `governor_enrichment` in `tae_live_advisory.json` is **informational only** (X.DECISION-2B)
 
 ---
 
@@ -255,12 +300,31 @@ Do **not** recreate under new names — reuse canonical modules:
 | Dashboard TAE tab (X.7A) | Separate JSON viewer |
 | X.8 live bot gate | Second BUY blocker |
 | X.9 shadow ledger | Rebuild BUY observability under new name |
+| `tae_decision_governor.py` | Second governor / live decision engine |
+| `tae_market_open_intelligence_runner.py` | Parallel market-open orchestrator |
+| `tae_knowledge_base.py` | Greenfield knowledge SSOT |
+| `tae_decision_replay_composer.py` | Second replay pipeline |
 
 **Before any new module:** grep `research_core/`, read `TAE_CONNECTIVITY_AUDIT_X7.md`, check `tae_ecosystem_inventory.json`.
 
 ---
 
-## 12. Next Allowed Sprint
+## 12. Current & Next Approved Sprint
+
+### Current approved milestone (accepted checkpoint)
+
+**X.Decision checkpoint — COMPLETED** (`50ebc0b`, 2026-07-05)
+
+Includes:
+- X.KNOWLEDGE-1C — confidence evolution ingest into knowledge base VIEW
+- X.DECISION-1 — decision governor materialized VIEW
+- X.DECISION-2A — governor wired as step 11 in market-open intelligence runner
+- X.DECISION-2B — governor enrichment in live advisory JSON (informational only)
+- X.INFRA-HEALTH-1/2 — permission-safe subprocess handling in infrastructure health
+
+Validation report: `TAE_XDECISION_CHECKPOINT_VALIDATION_REPORT.md`
+
+### Next allowed sprint
 
 **Recommended:** **X.10 — Outcome Tracking / Attribution for Blocked BUYs**
 
@@ -277,6 +341,7 @@ Scope (allowed):
 - Auto-execution from meta evolution / ranking
 - Rewriting `live_bot.py` scoring engine
 - Rebuilding orchestrator, evidence SOT, advisory stack, or shadow ledger (X.9)
+- Wiring decision governor to live blocking without explicit architect approval
 
 ---
 
@@ -316,6 +381,16 @@ Scope (allowed):
 | X.8 | `TAE_X8_LIVE_BOT_ADVISORY_INTEGRATION_SUMMARY.md` | Live BUY risk gate |
 | X.9 | `TAE_X9_SHADOW_VALIDATION_SUMMARY.md` | Connected shadow validation ledger |
 | **Governance reset** | `TAE_GOVERNANCE_RESET_SUMMARY.md` | PROJECT_BOOK + checkpoint |
+| X.REPLAY-1 | `TAE_XREPLAY1_DECISION_REPLAY_COMPOSER_REPORT.md` | `tae_decision_replay.json` composer VIEW |
+| X.KNOWLEDGE-1A | `TAE_XKNOWLEDGE1A_AGGREGATOR_REPORT.md` | Knowledge base VIEW |
+| X.KNOWLEDGE-1B | `TAE_XKNOWLEDGE1B_CONFIDENCE_EVOLUTION_REPORT.md` | Confidence evolution VIEW |
+| X.KNOWLEDGE-1C | `TAE_XKNOWLEDGE1C_CONFIDENCE_INGEST_REPORT.md` | Confidence ingest into knowledge base |
+| X.DECISION-1 | `TAE_XDECISION1_DECISION_GOVERNOR_REPORT.md` | Decision governor VIEW |
+| X.DECISION-2A | `TAE_XDECISION2A_GOVERNOR_WIRING_REPORT.md` | Governor in market-open runner |
+| X.DECISION-2B | `TAE_XDECISION2B_LIVE_ADVISORY_ENRICHMENT_REPORT.md` | Governor enrichment in live advisory |
+| X.INFRA-HEALTH-1 | `TAE_INFRA_HEALTH_PERMISSION_FIX_REPORT.md` | Crontab spawn-safe handling |
+| X.INFRA-HEALTH-2 | `TAE_INFRA_HEALTH_RESTRICTED_SUBPROCESS_FIX_REPORT.md` | launchctl/pgrep spawn-safe handling |
+| **X.Decision checkpoint** | `TAE_XDECISION_CHECKPOINT_VALIDATION_REPORT.md` | **`50ebc0b`** — focused commit |
 
 ---
 
@@ -330,9 +405,12 @@ Scope (allowed):
 | `TAE_CONNECTIVITY_AUDIT_X7.md` | Direct connectivity audit |
 | `TAE_INDIRECT_INTEGRATION_AUDIT_X7_FIX.md` | Indirect artifact audit |
 | `TAE_X7A` … `TAE_X9` | Sprint summaries |
+| `TAE_XREPLAY1` … `TAE_XDECISION2B`, `TAE_XKNOWLEDGE1C` | Shadow/decision sprint reports |
+| `TAE_XDECISION_CHECKPOINT_VALIDATION_REPORT.md` | Accepted checkpoint validation |
+| `TAE_MASTER_CONTEXT.md` | Generated session bootstrap (not SSOT) |
 | `TAE_PROJECT_STATUS.md` | TAE-specific status snapshot |
 | `PROJECT_STATUS.md` | Combined project + TAE checkpoint notes |
-| `PROJECT_MAP.md` | Legacy V32 map (partially stale) |
+| `PROJECT_MAP.md` | Legacy V32 map + Phase X shadow pointer |
 
 ---
 

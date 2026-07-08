@@ -1,0 +1,64 @@
+{
+  "schema": "tae.final_paper_stabilization_audit.v1",
+  "generated_at": "2026-07-08T19:35:00+00:00",
+  "base_commit": "59982ee",
+  "final_verdict": "READY_FOR_DISCIPLINED_PAPER_RUN",
+  "governance_verdict": "READY_FOR_PAPER_DAY",
+  "validation_runs": [
+    "python3 tae.py decision-state-refresh",
+    "python3 tae.py full-paper-cycle",
+    "python3 tae.py decision-state-refresh",
+    "python3 tae.py full-paper-cycle",
+    "python3 tae.py full-paper-cycle",
+    "python3 tae.py full-paper-cycle"
+  ],
+  "cycle_summary": {
+    "final_verdict": "READY_FOR_PAPER_DAY",
+    "reconciliation_status": "PASS",
+    "reconciliation_ok": true,
+    "decision_switch_accepted": 4,
+    "decision_switch_blocked": 3,
+    "execution_skipped_switch": 3
+  },
+  "promotion_lock": {
+    "live_promotion_allowed": false,
+    "broker_executed": false,
+    "live_money": false
+  },
+  "churn_status": {
+    "unauthorized_patterns_blocked": true,
+    "blocked_tickers": ["AIR.PA", "DIA", "GE"],
+    "blocked_mechanism": "PDE_HOLD + SKIPPED_SWITCH_NOT_AUTHORIZED",
+    "high_churn_tickers_authorized_only": ["AMAT", "HD"],
+    "historical_pre_wiring_chains_in_ledger": true,
+    "note": "Historical BUY-SELL-BUY in ledger from pre-19:29 session; post-gate policy tickers blocked"
+  },
+  "stop_reentry_churn": {
+    "status": "ENFORCED",
+    "cooldown_minutes_default": 30,
+    "cooldown_active_tickers": ["AMAT", "HD", "MU"],
+    "enforcement_reasons": ["STOP_REENTRY_CHURN_ENFORCED", "strong_ev_cooldown_exception"]
+  },
+  "hard_risk": {
+    "hard_minus_3_sell_bypass_verified": true,
+    "evidence": "AMAT SELL executed with hard_risk override when breach active (19:30:08, 19:33:38)"
+  },
+  "checks": {
+    "decision_state_refreshed_and_consumed": true,
+    "no_unauthorized_buy_sell_buy_churn": true,
+    "stop_reentry_churn_executable": true,
+    "cooldown_hysteresis_switch_auth_effective": true,
+    "hard_sell_bypass_works": true,
+    "conflict_resolution_switch_gating": true,
+    "execution_rejects_unauthorized_action_changed": true,
+    "longitudinal_memory_action_change": true,
+    "portfolio_mutates_authorized_only": true,
+    "reconciliation_pass": true,
+    "forbidden_paths_diff_zero": true,
+    "live_promotion_allowed_false": true,
+    "reports_expose_switch_stats": true,
+    "canonical_runtime_paths": true
+  },
+  "defects": [],
+  "code_patches_required": false
+}
