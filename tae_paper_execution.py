@@ -696,6 +696,33 @@ def write_report(payload: dict[str, Any]) -> None:
     REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def load_orders_by_decision(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    path = path or ORDERS_JSONL
+    by_id: dict[str, dict[str, Any]] = {}
+    for order in load_jsonl(path):
+        did = _s(order.get("decision_id"))
+        if did:
+            by_id[did] = order
+    return by_id
+
+
+def should_execute_decision(
+    decision_id: str,
+    action: str,
+    *,
+    processed: set[str],
+    last_orders: dict[str, dict[str, Any]],
+) -> tuple[bool, str]:
+    if not decision_id:
+        return False, "missing decision_id"
+    if decision_id not in processed:
+        return True, "new_decision"
+    prior_action = _s((last_orders.get(decision_id) or {}).get("action")).upper()
+    if prior_action and prior_action != action:
+        return True, f"action_changed:{prior_action}->{action}"
+    return False, "already_processed_same_action"
+
+
 def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -708,6 +735,7 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     existing = load_json(PORTFOLIO_JSON)
     portfolio = bootstrap_portfolio(accounting, existing)
     processed = set(portfolio.get("processed_decision_ids") or [])
+    last_orders = load_orders_by_decision(ORDERS_JSONL)
 
     removed_legacy_trades = sanitize_trades_file(TRADES_JSONL)
     before_snapshot = _portfolio_snapshot(portfolio)
@@ -715,20 +743,29 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     orders: list[dict[str, Any]] = []
     action_counts: dict[str, int] = {}
     trades_written = 0
+    reexecuted = 0
+    skipped_same_action = 0
 
     for decision in decisions:
         decision_id = _s(decision.get("decision_id"))
         action = _s(decision.get("action")).upper()
-        if not decision_id or decision_id in processed:
+        ok, reason = should_execute_decision(
+            decision_id, action, processed=processed, last_orders=last_orders
+        )
+        if not ok:
+            skipped_same_action += 1
             continue
         if action not in PAPER_ACTIONS:
             continue
+        if reason.startswith("action_changed"):
+            reexecuted += 1
         order = execute_decision(
             decision,
             portfolio,
             accounting=accounting,
             all_decisions=decisions,
         )
+        order["execution_reason"] = reason
         orders.append(order)
         append_jsonl(ORDERS_JSONL, order)
         if order.get("is_trade"):
@@ -737,6 +774,7 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
             trades_written += 1
         action_counts[action] = action_counts.get(action, 0) + 1
         processed.add(decision_id)
+        last_orders[decision_id] = order
 
     after_snapshot = _portfolio_snapshot(portfolio)
     trades_file_lines = _count_jsonl_lines(TRADES_JSONL)
@@ -775,6 +813,8 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         "cash_after": validation["cash_after"],
         "realized_pnl": validation["realized_pnl"],
         "legacy_trades_removed": removed_legacy_trades,
+        "reexecuted_on_action_change": reexecuted,
+        "skipped_same_action": skipped_same_action,
     }
 
     payload = {

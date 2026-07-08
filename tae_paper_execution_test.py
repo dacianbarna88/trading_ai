@@ -341,6 +341,82 @@ class PaperExecutionTest(unittest.TestCase):
             self.assertEqual(len(remaining), 1)
             self.assertEqual(remaining[0]["decision_id"], "good")
 
+    def test_reexecute_when_action_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "runtime_outputs/paper_execution"
+            out_dir.mkdir(parents=True)
+            decisions_path = Path(tmp) / "runtime_outputs/paper_decisions/paper_decisions.json"
+            decisions_path.parent.mkdir(parents=True, exist_ok=True)
+            portfolio_path = out_dir / "paper_portfolio.json"
+            portfolio_path.write_text(
+                json.dumps(
+                    {
+                        "schema": pe.SCHEMA,
+                        "mode": pe.MODE,
+                        "cash": 1000.0,
+                        "realized_pnl": 0.0,
+                        "processed_decision_ids": ["PDEC-AAPL-001"],
+                        "positions": {
+                            "AAPL": {
+                                "ticker": "AAPL",
+                                "shares": 10.0,
+                                "avg_price": 90.0,
+                                "current_price": 100.0,
+                                "status": "OPEN",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            orders_path = out_dir / "paper_orders.jsonl"
+            orders_path.write_text(
+                json.dumps(
+                    {
+                        "decision_id": "PDEC-AAPL-001",
+                        "ticker": "AAPL",
+                        "action": "PROTECT_PAPER",
+                        "executed": True,
+                        "is_trade": False,
+                        "fill_shares": 0,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            decisions_path.write_text(
+                json.dumps(
+                    {
+                        "decisions": [
+                            {
+                                "decision_id": "PDEC-AAPL-001",
+                                "ticker": "AAPL",
+                                "action": "SELL_PAPER",
+                                "confidence": 0.9,
+                                "expected_profit_delta": 100.0,
+                                "evidence": "sell after protect",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(pe, "DECISIONS_JSON", decisions_path), mock.patch.object(
+                pe, "OUTPUT_DIR", out_dir
+            ), mock.patch.object(pe, "PORTFOLIO_JSON", portfolio_path), mock.patch.object(
+                pe, "ORDERS_JSONL", orders_path
+            ), mock.patch.object(pe, "TRADES_JSONL", out_dir / "paper_trades.jsonl"), mock.patch.object(
+                pe, "ATTRIBUTION_JSON", out_dir / "rule_outcome_attribution.json"
+            ), mock.patch.object(pe, "ACCOUNTING_JSON", out_dir / "acct.json"), mock.patch.object(
+                pe, "REPORT_MD", Path(tmp) / "report.md"
+            ):
+                result = pe.run_paper_execution(write_report_flag=False)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["stats"]["reexecuted_on_action_change"], 1)
+            self.assertEqual(result["stats"]["trades_written"], 1)
+            portfolio = json.loads(portfolio_path.read_text())
+            self.assertNotIn("AAPL", portfolio.get("positions") or {})
+
 
 if __name__ == "__main__":
     unittest.main()
