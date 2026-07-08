@@ -38,6 +38,7 @@ APPE_JSON = Path("tae_adaptive_profit_policy_engine.json")
 PPG_JSON = Path("tae_portfolio_profit_governor.json")
 ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
 CANONICAL_REPORT_MD = Path("TAE_CANONICAL_VS_PAPER_REPORT.md")
+CONFLICTS_JSON = Path("runtime_outputs/conflict_resolution/conflicts.json")
 
 ACTION_BUCKETS = {
     "BUY_PAPER": "buy",
@@ -417,6 +418,20 @@ def _executive_recommendation(
     return " ".join(parts)
 
 
+def _conflict_resolution_view(conflicts: dict[str, Any] | None) -> dict[str, Any]:
+    if not conflicts:
+        return {"loaded": False}
+    return {
+        "loaded": True,
+        "ticker_count": conflicts.get("ticker_count"),
+        "top_conflicts": (conflicts.get("top_conflicts") or [])[:8],
+        "buy_blocked_despite_cash": conflicts.get("buy_blocked_despite_cash") or [],
+        "strong_buy_to_skip": conflicts.get("strong_buy_to_skip") or [],
+        "policy_state": (conflicts.get("policy_context") or {}).get("policy_state"),
+        "cash_hint": (conflicts.get("policy_context") or {}).get("cash_hint"),
+    }
+
+
 def build_council_synthesis(*, include_morning_audit: bool = True) -> dict[str, Any]:
     """Load upstream artifacts and produce synthesis payload — no independent decisions."""
     decisions_doc = _load_json(DECISIONS_JSON) or {}
@@ -433,6 +448,7 @@ def build_council_synthesis(*, include_morning_audit: bool = True) -> dict[str, 
     appe = _load_json(APPE_JSON)
     ppg = _load_json(PPG_JSON)
     accounting = _load_json(ACCOUNTING_JSON)
+    conflicts = _load_json(CONFLICTS_JSON)
 
     morning: dict[str, Any] = {}
     if include_morning_audit:
@@ -462,6 +478,7 @@ def build_council_synthesis(*, include_morning_audit: bool = True) -> dict[str, 
     strongest, weakest = _rule_rankings(lifecycle, attribution)
     dpe_view = _dpe_philosophy_view(adaptive, evaluation, appe)
     capital = _capital_status(paper, accounting, ppg, appe)
+    conflict_view = _conflict_resolution_view(conflicts)
 
     governance_blocked = governance_verdict == "BLOCKED_WITH_REASONS"
     action_plan = _build_action_plan(decisions, governance_blocked=governance_blocked)
@@ -503,6 +520,7 @@ def build_council_synthesis(*, include_morning_audit: bool = True) -> dict[str, 
         "dpe_philosophy_view": dpe_view,
         "canonical_vs_paper": canonical,
         "capital_status": capital,
+        "conflict_resolution": conflict_view,
         "morning_audit_summary": {
             "verdict": morning.get("verdict"),
             "global_score": morning.get("global_score"),
@@ -525,6 +543,7 @@ def build_council_synthesis(*, include_morning_audit: bool = True) -> dict[str, 
             "ppg": PPG_JSON.is_file(),
             "accounting": ACCOUNTING_JSON.is_file(),
             "canonical_report_md": CANONICAL_REPORT_MD.is_file(),
+            "conflict_resolution": CONFLICTS_JSON.is_file(),
             "morning_audit": bool(morning.get("verdict")),
         },
         "summary": {
@@ -547,6 +566,7 @@ def write_council_report(payload: dict[str, Any]) -> None:
     delta = canonical.get("delta") or {}
     dpe = payload.get("dpe_philosophy_view") or {}
     rebuild = payload.get("portfolio_rebuild_view") or {}
+    conflict = payload.get("conflict_resolution") or {}
 
     def _rows(items: list[dict[str, Any]], cols: list[str]) -> list[str]:
         if not items:
@@ -591,53 +611,92 @@ def write_council_report(payload: dict[str, Any]) -> None:
         "",
         *_rows(payload.get("hard_risk_alerts") or [], ["pnl_pct", "status", "required_action", "hard_rule"]),
         "",
-        "## 7. Portfolio rebuild view",
+        "## 6b. Conflict resolution (EV evidence)",
         "",
-        f"- GII portfolio strategy: **{rebuild.get('gii_portfolio_strategy') or 'N/A'}**",
-        f"- Would BUY: `{[r.get('ticker') for r in rebuild.get('would_buy') or []]}`",
-        f"- Would SELL: `{[r.get('ticker') for r in rebuild.get('would_sell') or []]}`",
-        f"- Would ROTATE: `{[r.get('ticker') for r in rebuild.get('would_rotate') or []]}`",
-        f"- Would REDUCE: `{[r.get('ticker') for r in rebuild.get('would_reduce') or []]}`",
-        f"- Note: {rebuild.get('note')}",
+        f"- Loaded: **{conflict.get('loaded')}** | tickers: **{conflict.get('ticker_count')}** | policy: **{conflict.get('policy_state') or 'N/A'}** | cash hint: **${ _f(conflict.get('cash_hint')):,.2f}**",
         "",
-        "## 8. Strongest rules",
+        "### Top conflicts",
         "",
-        *_rows(payload.get("strongest_rules") or [], ["state", "net_pnl_impact", "win_rate"]),
+        *_rows(conflict.get("top_conflicts") or [], ["winning_scenario", "final_authority"]),
         "",
-        "## 9. Weakest / disabled rules",
-        "",
-        *_rows(payload.get("weakest_rules") or [], ["state", "net_pnl_impact", "reason"]),
-        "",
-        "## 10. DPE philosophy view",
-        "",
-        f"- Preferred philosophy: **{dpe.get('preferred_philosophy') or 'N/A'}**",
-        f"- Adaptive confidence: **{dpe.get('adaptive_confidence')}**",
-        f"- Competitive / Collaborative: **{dpe.get('competitive_pct')}% / {dpe.get('collaborative_pct')}%**",
-        f"- Context: **{dpe.get('context_label') or 'N/A'}**",
-        f"- Evaluator winner: **{dpe.get('evaluator_winner') or 'N/A'}**",
-        f"- Policy state: **{dpe.get('policy_state') or 'N/A'}** ({dpe.get('suggested_policy') or 'N/A'})",
-        f"- Recommendation: {dpe.get('adaptive_recommendation') or 'N/A'}",
-        "",
-        "## 11. Canonical vs PAPER result",
-        "",
-        f"- Canonical value: **${ _f((canonical.get('canonical') or {}).get('total_value')):,.2f}**",
-        f"- PAPER value: **${ _f((canonical.get('paper') or {}).get('total_value')):,.2f}**",
-        f"- Delta: **${ _f(delta.get('total_value')):,.2f}**",
-        f"- PAPER reconciliation: **{(canonical.get('paper') or {}).get('reconciliation_status') or 'N/A'}**",
-        f"- Explanation: {(canonical.get('explanation') or 'N/A')[:300]}",
-        "",
-        "## 12. Capital / cash status",
-        "",
-        f"- PAPER cash: **${ _f(capital.get('paper_cash')):,.2f}**",
-        f"- PAPER total value: **${ _f(capital.get('paper_total_value')):,.2f}**",
-        f"- PAPER realized / unrealized PnL: **${ _f(capital.get('paper_realized_pnl')):,.2f}** / **${ _f(capital.get('paper_unrealized_pnl')):,.2f}**",
-        f"- Open PAPER positions: **{capital.get('paper_open_positions')}**",
-        f"- PPG verdict: **{capital.get('ppg_portfolio_verdict') or 'N/A'}**",
-        f"- APPE policy: **{capital.get('appe_policy_state') or 'N/A'}**",
-        "",
-        "## 13. What changed since last cycle",
+        "### BUY blocked despite idle cash (positive BUY EV)",
         "",
     ]
+    buy_blocked = conflict.get("buy_blocked_despite_cash") or []
+    if buy_blocked:
+        for row in buy_blocked[:8]:
+            lines.append(
+                f"- **{row.get('ticker')}** winner={row.get('winning_scenario')} buy_raEV={row.get('buy_raEV')} "
+                f"blockers={row.get('buy_blockers')} mitigated={row.get('high_risk_buy_allowed')}"
+            )
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "### STRONG BUY → SKIP cases",
+            "",
+        ]
+    )
+    strong_skips = conflict.get("strong_buy_to_skip") or []
+    if strong_skips:
+        for row in strong_skips[:8]:
+            lines.append(
+                f"- **{row.get('ticker')}** EV winner={row.get('winning_scenario')} — {_s(row.get('explanation'))[:120]}"
+            )
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "## 7. Portfolio rebuild view",
+            "",
+            f"- GII portfolio strategy: **{rebuild.get('gii_portfolio_strategy') or 'N/A'}**",
+            f"- Would BUY: `{[r.get('ticker') for r in rebuild.get('would_buy') or []]}`",
+            f"- Would SELL: `{[r.get('ticker') for r in rebuild.get('would_sell') or []]}`",
+            f"- Would ROTATE: `{[r.get('ticker') for r in rebuild.get('would_rotate') or []]}`",
+            f"- Would REDUCE: `{[r.get('ticker') for r in rebuild.get('would_reduce') or []]}`",
+            f"- Note: {rebuild.get('note')}",
+            "",
+            "## 8. Strongest rules",
+            "",
+            *_rows(payload.get("strongest_rules") or [], ["state", "net_pnl_impact", "win_rate"]),
+            "",
+            "## 9. Weakest / disabled rules",
+            "",
+            *_rows(payload.get("weakest_rules") or [], ["state", "net_pnl_impact", "reason"]),
+            "",
+            "## 10. DPE philosophy view",
+            "",
+            f"- Preferred philosophy: **{dpe.get('preferred_philosophy') or 'N/A'}**",
+            f"- Adaptive confidence: **{dpe.get('adaptive_confidence')}**",
+            f"- Competitive / Collaborative: **{dpe.get('competitive_pct')}% / {dpe.get('collaborative_pct')}%**",
+            f"- Context: **{dpe.get('context_label') or 'N/A'}**",
+            f"- Evaluator winner: **{dpe.get('evaluator_winner') or 'N/A'}**",
+            f"- Policy state: **{dpe.get('policy_state') or 'N/A'}** ({dpe.get('suggested_policy') or 'N/A'})",
+            f"- Recommendation: {dpe.get('adaptive_recommendation') or 'N/A'}",
+            "",
+            "## 11. Canonical vs PAPER result",
+            "",
+            f"- Canonical value: **${ _f((canonical.get('canonical') or {}).get('total_value')):,.2f}**",
+            f"- PAPER value: **${ _f((canonical.get('paper') or {}).get('total_value')):,.2f}**",
+            f"- Delta: **${ _f(delta.get('total_value')):,.2f}**",
+            f"- PAPER reconciliation: **{(canonical.get('paper') or {}).get('reconciliation_status') or 'N/A'}**",
+            f"- Explanation: {(canonical.get('explanation') or 'N/A')[:300]}",
+            "",
+            "## 12. Capital / cash status",
+            "",
+            f"- PAPER cash: **${ _f(capital.get('paper_cash')):,.2f}**",
+            f"- PAPER total value: **${ _f(capital.get('paper_total_value')):,.2f}**",
+            f"- PAPER realized / unrealized PnL: **${ _f(capital.get('paper_realized_pnl')):,.2f}** / **${ _f(capital.get('paper_unrealized_pnl')):,.2f}**",
+            f"- Open PAPER positions: **{capital.get('paper_open_positions')}**",
+            f"- PPG verdict: **{capital.get('ppg_portfolio_verdict') or 'N/A'}**",
+            f"- APPE policy: **{capital.get('appe_policy_state') or 'N/A'}**",
+            "",
+            "## 13. What changed since last cycle",
+            "",
+        ]
+    )
     for change in payload.get("changes_since_last_cycle") or ["none"]:
         lines.append(f"- {change}")
     lines.extend(

@@ -538,6 +538,23 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     if not r10["ok"]:
         exit_code = r10["exit_code"] or 1
 
+    # Conflict resolution refresh — before PDE (EV evidence for policy conflicts)
+    r_cr = run_cli_step("conflict_resolution", [py, "tae.py", "conflict-resolution-refresh"], cwd=root)
+    cli_steps.append(r_cr)
+    steps.append(
+        step_from_cli(
+            10,
+            "conflict_resolution",
+            "CONFLICT RESOLUTION",
+            "LEARNING",
+            r_cr,
+            inputs=["GII", "DPE", "LTP", "replay", "weights"],
+            outputs=["runtime_outputs/conflict_resolution/conflicts.json"],
+        )
+    )
+    if not r_cr["ok"]:
+        exit_code = r_cr["exit_code"] or 1
+
     # Ranks 5-9 — PAPER DECISIONS (PDE: position, profit, loss, buy, policy)
     r_pde = run_cli_step("paper_decisions", [py, "tae.py", "paper-decisions"], cwd=root)
     cli_steps.append(r_pde)

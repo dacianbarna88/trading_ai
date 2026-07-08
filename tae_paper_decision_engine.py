@@ -52,6 +52,7 @@ DISCIPLINE_REPORT_MD = Path("TAE_DECISION_DISCIPLINE_REPORT.md")
 PAPER_PORTFOLIO_JSON = Path("runtime_outputs/paper_execution/paper_portfolio.json")
 RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
 HARD_RISK_JSON = Path("runtime_outputs/governance/hard_risk.json")
+CONFLICTS_JSON = Path("runtime_outputs/conflict_resolution/conflicts.json")
 
 PAPER_ACTIONS = frozenset(
     {
@@ -1074,6 +1075,13 @@ def build_context() -> dict[str, Any]:
     paper_positions = load_paper_positions(paper_portfolio)
     rule_lifecycle = load_json(RULE_LIFECYCLE_JSON)
     hard_risk_doc = load_json(HARD_RISK_JSON)
+    conflict_doc = load_json(CONFLICTS_JSON)
+    conflict_by: dict[str, dict[str, Any]] = {}
+    for row in (conflict_doc or {}).get("tickers") or []:
+        if isinstance(row, dict):
+            t = _s(row.get("ticker")).upper()
+            if t:
+                conflict_by[t] = row
     hard_risk_by: dict[str, dict[str, Any]] = {}
     for row in (hard_risk_doc or {}).get("positions") or []:
         if isinstance(row, dict):
@@ -1118,6 +1126,8 @@ def build_context() -> dict[str, Any]:
         "rule_lifecycle": rule_lifecycle,
         "hard_risk": hard_risk_doc,
         "hard_risk_by": hard_risk_by,
+        "conflict_resolution": conflict_doc,
+        "conflict_resolution_by_ticker": conflict_by,
         "signals": signals,
         "top_growth": top_growth,
         "horizon_ssot": horizon_ssot,
@@ -1151,6 +1161,7 @@ def build_context() -> dict[str, Any]:
             "paper_portfolio": PAPER_PORTFOLIO_JSON.is_file(),
             "rule_lifecycle": RULE_LIFECYCLE_JSON.is_file(),
             "hard_risk": HARD_RISK_JSON.is_file(),
+            "conflict_resolution": CONFLICTS_JSON.is_file(),
         },
     }
 
@@ -1524,6 +1535,11 @@ def score_actions_for_ticker(
     )
     consumption_evidence["hard_risk_discipline"] = hard_risk_discipline
 
+    from tae_conflict_resolution import apply_conflict_resolution_bias
+
+    conflict_resolution_evidence = apply_conflict_resolution_bias(ticker, scores, evidence, ctx)
+    consumption_evidence["conflict_resolution_evidence"] = conflict_resolution_evidence
+
     best = max(scores, key=lambda a: scores[a])
     if scores[best] < 18.0:
         best = "SKIP_PAPER"
@@ -1617,8 +1633,12 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("runtime_outputs/paper_execution/rule_lifecycle.json")
     if ctx.get("hard_risk"):
         sources.append("runtime_outputs/governance/hard_risk.json")
+    if ctx.get("conflict_resolution"):
+        sources.append("runtime_outputs/conflict_resolution/conflicts.json")
     if ticker.upper() in (ctx.get("paper_positions") or {}):
         sources.append("runtime_outputs/paper_execution/paper_portfolio.json")
+
+    conflict_resolution_evidence = consumption_evidence.get("conflict_resolution_evidence") or {}
 
     ts = _now()
     decision_id = f"PDEC-{ticker.upper()}-{seq:04d}"
@@ -1672,6 +1692,11 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "position_discipline": position_discipline,
         "loss_discipline": loss_discipline,
         "hard_risk_discipline": hard_risk_discipline,
+        "conflict_resolution_evidence": conflict_resolution_evidence,
+        "scenario_ev_table": conflict_resolution_evidence.get("scenario_ev_table") or [],
+        "winning_scenario": conflict_resolution_evidence.get("winning_scenario"),
+        "ev_reason": conflict_resolution_evidence.get("ev_reason"),
+        "final_authority": conflict_resolution_evidence.get("final_authority"),
         "paper_position_held": paper_position_held(ticker.upper(), ctx),
         "created_at": ts,
     }
@@ -1812,6 +1837,9 @@ def print_summary(report: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    from tae_conflict_resolution import run_conflict_resolution
+
+    run_conflict_resolution(write_outputs_flag=True)
     ctx = build_context()
     if not ctx.get("gii_by") and not ctx.get("live_positions"):
         print("paper-decision-engine: insufficient inputs — run growth-intelligence and ensure portfolio.csv", flush=True)
