@@ -36,6 +36,7 @@ PAPER_EXEC_PORTFOLIO = Path("runtime_outputs/paper_execution/paper_portfolio.jso
 PAPER_EXEC_ATTRIBUTION = Path("runtime_outputs/paper_execution/rule_outcome_attribution.json")
 PAPER_EXEC_TRADES = Path("runtime_outputs/paper_execution/paper_trades.jsonl")
 PAPER_MTM_JSON = Path("runtime_outputs/paper_execution/mark_to_market.json")
+RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
 
 FORBIDDEN_SNAPSHOT = (
     "live_bot.py",
@@ -171,12 +172,15 @@ def run_pre_pde_feedback(root: Path, step_results: list[dict[str, Any]]) -> None
         return
     from tae_longitudinal_outcome_memory import run_longitudinal_memory
     from tae_adaptive_paper_weights import run_adaptive_paper_weights
+    from tae_rule_survival import run_rule_survival
 
-    print("\n>>> [pre_pde_feedback] refreshing longitudinal memory + adaptive weights before paper-decisions")
+    print("\n>>> [pre_pde_feedback] refreshing longitudinal memory + adaptive weights + rule survival before paper-decisions")
     mem_result = run_longitudinal_memory()
     mem_idx = mem_result.get("index") or {}
     weights_result = run_adaptive_paper_weights()
     weights_doc = weights_result.get("document") or {}
+    survival_result = run_rule_survival(write_report_flag=True)
+    survival_doc = survival_result.get("document") or {}
     step_results.append(
         {
             "step": "pre_pde_longitudinal_memory",
@@ -191,6 +195,14 @@ def run_pre_pde_feedback(root: Path, step_results: list[dict[str, Any]]) -> None
             "ok": weights_result.get("ok", False),
             "exit_code": 0,
             "actions_weighted": len(weights_doc.get("weights") or {}),
+        }
+    )
+    step_results.append(
+        {
+            "step": "pre_pde_rule_survival",
+            "ok": survival_result.get("ok", False),
+            "exit_code": 0,
+            "rules_classified": len(survival_doc.get("rules") or {}),
         }
     )
 
@@ -316,6 +328,19 @@ def collect_summary(
     paper_portfolio = _load_json(PAPER_EXEC_PORTFOLIO) or {}
     paper_attribution = _load_json(PAPER_EXEC_ATTRIBUTION) or {}
     paper_mtm = _load_json(PAPER_MTM_JSON) or {}
+    rule_lifecycle = _load_json(RULE_LIFECYCLE_JSON) or {}
+    decisions = decisions_doc.get("decisions") or []
+
+    blocked_no_position = sum(
+        1 for d in decisions if (d.get("position_discipline") or {}).get("blocked")
+    )
+    losing_evals = [
+        d
+        for d in decisions
+        if (d.get("loss_discipline") or {}).get("evaluated")
+        and _f((d.get("loss_discipline") or {}).get("current_pct")) <= -5.0
+    ]
+    lifecycle_by_state = rule_lifecycle.get("by_state") or {}
 
     canonical_value = _f(accounting.get("account_value_corrected") or accounting.get("total_account_value"))
     paper_value = _f(paper_portfolio.get("total_value"))
@@ -331,7 +356,6 @@ def collect_summary(
         key=lambda x: _f(x[1].get("avg_actual_pnl")),
     )[:3]
 
-    decisions = decisions_doc.get("decisions") or []
     by_action: dict[str, list[dict[str, Any]]] = {}
     for d in decisions:
         by_action.setdefault(d.get("action") or "UNKNOWN", []).append(d)
@@ -444,6 +468,19 @@ def collect_summary(
         "rules_weakened": weakened[:5],
         "top_profitable_rules": [{"rule_id": k, "avg_actual_pnl": v.get("avg_actual_pnl")} for k, v in top_profitable],
         "top_damaging_rules": [{"rule_id": k, "avg_actual_pnl": v.get("avg_actual_pnl")} for k, v in top_damaging],
+        "top_disabled_rules": (lifecycle_by_state.get("DISABLED") or [])[:5],
+        "top_deprecated_rules": (lifecycle_by_state.get("DEPRECATED") or [])[:5],
+        "top_trusted_rules": (lifecycle_by_state.get("TRUSTED") or [])[:5],
+        "decisions_blocked_no_position": blocked_no_position,
+        "losing_positions_evaluated": [
+            {
+                "ticker": d.get("ticker"),
+                "current_pct": (d.get("loss_discipline") or {}).get("current_pct"),
+                "action": d.get("action"),
+                "preferred": (d.get("loss_discipline") or {}).get("preferred"),
+            }
+            for d in losing_evals
+        ],
         "final_verdict": final_verdict,
         "failed_steps": failed_steps,
     }
@@ -507,6 +544,11 @@ def write_report(summary: dict[str, Any]) -> None:
         f"- Rules weakened: `{summary.get('rules_weakened')}`",
         f"- Top profitable rules: `{summary.get('top_profitable_rules')}`",
         f"- Top damaging rules: `{summary.get('top_damaging_rules')}`",
+        f"- Top disabled rules: `{summary.get('top_disabled_rules')}`",
+        f"- Top deprecated rules: `{summary.get('top_deprecated_rules')}`",
+        f"- Top trusted rules: `{summary.get('top_trusted_rules')}`",
+        f"- Decisions blocked (no PAPER position): **{summary.get('decisions_blocked_no_position', 0)}**",
+        f"- Losing positions evaluated: `{summary.get('losing_positions_evaluated')}`",
         "",
         "## Top PAPER actions (by confidence)",
         "",

@@ -15,9 +15,12 @@ from tae_paper_decision_engine import (
     apply_knowledge_base_bias,
     apply_named_confidence_rules,
     apply_named_rule,
+    apply_rule_lifecycle_bias,
     build_decision,
     build_decisions,
     build_horizon_context,
+    enforce_loss_discipline,
+    enforce_position_discipline,
     score_actions_for_ticker,
 )
 
@@ -62,6 +65,10 @@ class PaperDecisionEngineTest(unittest.TestCase):
                 "HSBA.L": {"governor_posture": "TRAIL_SHADOW"},
             },
             "live_positions": {"MRK": {"shares": 10}, "HSBA.L": {"shares": 5}},
+            "paper_positions": {
+                "MRK": {"shares": 10.0, "unrealized_pct": 5.0},
+                "HSBA.L": {"shares": 5.0, "unrealized_pct": 3.0},
+            },
             "signals": {"SPY": {"signal": "STRONG BUY", "score": 100.0}},
             "top_growth": ["MRK", "SPY"],
             "policy_state": "HIGH_RISK",
@@ -82,16 +89,16 @@ class PaperDecisionEngineTest(unittest.TestCase):
         }
 
     def test_hold_for_healthy_winner(self) -> None:
-        action, scores, _, _, _, _, _ = score_actions_for_ticker("MRK", self._ctx())
+        action, scores, _, _, _, _, _, _, _ = score_actions_for_ticker("MRK", self._ctx())
         self.assertEqual(action, "HOLD_PAPER")
         self.assertGreater(scores["HOLD_PAPER"], scores["SELL_PAPER"])
 
     def test_protect_or_rotate_for_risky(self) -> None:
-        action, _, _, _, _, _, _ = score_actions_for_ticker("HSBA.L", self._ctx())
+        action, _, _, _, _, _, _, _, _ = score_actions_for_ticker("HSBA.L", self._ctx())
         self.assertIn(action, {"PROTECT_PAPER", "ROTATE_PAPER", "REDUCE_PAPER", "SELL_PAPER"})
 
     def test_buy_for_strong_signal(self) -> None:
-        action, _, _, _, _, _, _ = score_actions_for_ticker("SPY", self._ctx())
+        action, _, _, _, _, _, _, _, _ = score_actions_for_ticker("SPY", self._ctx())
         self.assertIn(action, {"BUY_PAPER", "SKIP_PAPER"})
 
     def test_decision_fields_complete(self) -> None:
@@ -118,7 +125,8 @@ class PaperDecisionEngineTest(unittest.TestCase):
             "opportunity_category": "LATE_PROTECTION",
         }
         ctx["live_positions"]["AMAT"] = {"shares": 3}
-        action, _, _, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
+        ctx.setdefault("paper_positions", {})["AMAT"] = {"shares": 3.0, "unrealized_pct": 4.0, "current_pct": 4.0}
+        action, _, _, _, _, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
         self.assertEqual(action, "REDUCE_PAPER")
 
     def test_hypothesis_reject_forces_skip(self) -> None:
@@ -134,7 +142,7 @@ class PaperDecisionEngineTest(unittest.TestCase):
             ]
         }
         ctx["exp_by_ticker"] = {"SPY": [{"verdict": "REJECT", "hypothesis_id": "LTB-TEST"}]}
-        action, _, _, applied, _, _, _ = score_actions_for_ticker("SPY", ctx)
+        action, _, _, applied, _, _, _, _, _ = score_actions_for_ticker("SPY", ctx)
         self.assertEqual(action, "SKIP_PAPER")
         self.assertTrue(applied)
 
@@ -217,6 +225,46 @@ class PaperDecisionEngineTest(unittest.TestCase):
                 data = json.loads(paths[0].read_text(encoding="utf-8"))
                 self.assertGreater(data["decision_count"], 0)
                 self.assertFalse(data["live_promotion_allowed"])
+
+    def test_position_discipline_blocks_protect_without_paper_position(self) -> None:
+        ctx = self._ctx()
+        ctx["paper_positions"] = {"MRK": {"shares": 10.0, "unrealized_pct": 2.0}}
+        ctx["live_positions"] = {"MRK": {"shares": 10}, "ABBV": {"shares": 5}}
+        scores = {"PROTECT_PAPER": 50.0, "SELL_PAPER": 10.0, "SKIP_PAPER": 5.0}
+        evidence: list[str] = []
+        result = enforce_position_discipline("ABBV", scores, evidence, ctx)
+        self.assertIn("PROTECT_PAPER", result["blocked"])
+        self.assertEqual(scores["PROTECT_PAPER"], 0.0)
+
+    def test_loss_discipline_favors_sell_on_deep_loss(self) -> None:
+        ctx = self._ctx()
+        ctx["paper_positions"] = {
+            "AMAT": {"shares": 3.0, "unrealized_pct": -7.5, "current_pct": -7.5},
+        }
+        ctx["gii_by"]["AMAT"] = {
+            "lifecycle_stage": "PROFIT_DECAY",
+            "capital_efficiency": 10.0,
+            "current_pct": -7.5,
+            "collapse_probability": 0.6,
+        }
+        scores = {"PROTECT_PAPER": 80.0, "SELL_PAPER": 20.0, "HOLD_PAPER": 5.0}
+        evidence: list[str] = []
+        result = enforce_loss_discipline("AMAT", scores, evidence, ctx, rule_states={"SCORE_DECAY_SHADOW": "DISABLED"})
+        self.assertTrue(result["evaluated"])
+        self.assertGreater(scores["SELL_PAPER"], scores["PROTECT_PAPER"])
+
+    def test_disabled_rule_lifecycle_blocks_positive_influence(self) -> None:
+        scores = {"SKIP_PAPER": 20.0, "BUY_PAPER": 10.0}
+        evidence: list[str] = []
+        ctx = {
+            "rule_lifecycle": {
+                "rules": {
+                    "SCORE_DECAY_SHADOW": {"state": "DISABLED", "influence_multiplier": 0.0},
+                }
+            }
+        }
+        apply_rule_lifecycle_bias(scores, evidence, ctx, ["SCORE_DECAY_SHADOW"])
+        self.assertLess(scores["SKIP_PAPER"], 20.0)
 
 
 if __name__ == "__main__":

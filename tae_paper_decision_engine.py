@@ -48,6 +48,9 @@ OUTPUT_DIR = Path("runtime_outputs/paper_decisions")
 DECISIONS_JSON = OUTPUT_DIR / "paper_decisions.json"
 DECISIONS_JSONL = OUTPUT_DIR / "paper_decisions.jsonl"
 REPORT_MD = Path("TAE_PAPER_DECISION_ENGINE_REPORT.md")
+DISCIPLINE_REPORT_MD = Path("TAE_DECISION_DISCIPLINE_REPORT.md")
+PAPER_PORTFOLIO_JSON = Path("runtime_outputs/paper_execution/paper_portfolio.json")
+RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
 
 PAPER_ACTIONS = frozenset(
     {
@@ -106,6 +109,236 @@ NAMED_RULE_SCORE_DELTAS: dict[str, dict[str, float]] = {
     "DO_NOT_PROMOTE": {"BUY_PAPER": -10.0, "SKIP_PAPER": 8.0},
     "DO_NOT_PROMOTE_TO_LIVE": {"BUY_PAPER": -10.0, "SKIP_PAPER": 8.0},
 }
+
+LIFECYCLE_INFLUENCE = {
+    "NEW": 0.9,
+    "TESTING": 0.85,
+    "ACTIVE": 1.0,
+    "TRUSTED": 1.06,
+    "WATCHLIST": 0.45,
+    "DEPRECATED": 0.12,
+    "DISABLED": 0.0,
+}
+
+POSITION_REQUIRED_ACTIONS = frozenset({"PROTECT_PAPER", "SELL_PAPER", "REDUCE_PAPER", "HOLD_PAPER"})
+
+
+def load_paper_positions(portfolio_doc: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    positions: dict[str, dict[str, Any]] = {}
+    for ticker, pos in ((portfolio_doc or {}).get("positions") or {}).items():
+        if _f(pos.get("shares")) > 0:
+            positions[_s(ticker).upper()] = pos
+    return positions
+
+
+def paper_position_held(ticker: str, ctx: dict[str, Any]) -> bool:
+    pos = (ctx.get("paper_positions") or {}).get(ticker.upper())
+    return bool(pos and _f(pos.get("shares")) > 0)
+
+
+def collect_rules_applied(consumption: dict[str, Any], named_rules: list[str]) -> list[str]:
+    applied: list[str] = list(named_rules or [])
+    ke = consumption.get("knowledge_evidence") or {}
+    applied.extend(ke.get("rules_applied") or [])
+    lk = consumption.get("longitudinal_knowledge_evidence") or {}
+    for rule in lk.get("rules_applied") or lk.get("rule_ids") or []:
+        applied.append(_s(rule))
+    return sorted(set(r for r in applied if r))
+
+
+def apply_rule_lifecycle_bias(
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+    rules_applied: list[str],
+) -> dict[str, Any]:
+    lifecycle_doc = ctx.get("rule_lifecycle") or {}
+    lifecycle_rules = lifecycle_doc.get("rules") or {}
+    adjustments: list[str] = []
+    rule_states: dict[str, str] = {}
+
+    for rule_id in rules_applied:
+        info = lifecycle_rules.get(rule_id) or lifecycle_rules.get(rule_id.upper()) or {}
+        state = _s(info.get("state"), "TESTING")
+        rule_states[rule_id] = state
+        mult = _f(info.get("influence_multiplier"), LIFECYCLE_INFLUENCE.get(state, 1.0))
+        deltas = NAMED_RULE_SCORE_DELTAS.get(rule_id) or NAMED_RULE_SCORE_DELTAS.get(rule_id.upper())
+        if not deltas:
+            continue
+        if state == "DISABLED":
+            for action, delta in deltas.items():
+                if delta > 0 and action in scores:
+                    scores[action] = max(0.0, scores[action] - delta)
+            adjustments.append(f"DISABLED {rule_id}: blocked positive score influence")
+        elif state == "TRUSTED" and mult > 1.0:
+            for action, delta in deltas.items():
+                if delta > 0 and action in scores:
+                    boost = min(4.0, delta * (mult - 1.0))
+                    scores[action] += boost
+            adjustments.append(f"TRUSTED {rule_id}: modest boost x{mult}")
+        elif mult < 1.0:
+            for action, delta in deltas.items():
+                if delta > 0 and action in scores:
+                    scores[action] = max(0.0, scores[action] - delta * (1.0 - mult))
+            adjustments.append(f"{state} {rule_id}: reduced influence x{mult}")
+
+    if adjustments:
+        evidence.append(f"rule lifecycle: {'; '.join(adjustments[:4])}")
+    return {
+        "rules_applied": rules_applied,
+        "rule_states": rule_states,
+        "adjustments": adjustments,
+        "mode": MODE,
+        "live_promotion_allowed": False,
+    }
+
+
+def enforce_position_discipline(
+    ticker: str,
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    ticker = ticker.upper()
+    has_paper = paper_position_held(ticker, ctx)
+    blocked: list[str] = []
+    if has_paper:
+        return {"blocked": blocked, "has_paper_position": True}
+
+    for action in POSITION_REQUIRED_ACTIONS:
+        if scores.get(action, 0.0) > 0:
+            blocked.append(action)
+            scores[action] = 0.0
+    if scores.get("ROTATE_PAPER", 0.0) > 0:
+        blocked.append("ROTATE_PAPER")
+        scores["ROTATE_PAPER"] = 0.0
+    if blocked:
+        evidence.append(f"position discipline: blocked {','.join(blocked)} — no PAPER position")
+    return {"blocked": blocked, "has_paper_position": False}
+
+
+def enforce_loss_discipline(
+    ticker: str,
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+    *,
+    rule_states: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    ticker = ticker.upper()
+    if not paper_position_held(ticker, ctx):
+        return {"evaluated": False}
+
+    pos = (ctx.get("paper_positions") or {}).get(ticker) or {}
+    gii = (ctx.get("gii_by") or {}).get(ticker) or {}
+    current_pct = _f(pos.get("unrealized_pct") or pos.get("current_pct") or gii.get("current_pct"))
+    lifecycle = _s(gii.get("lifecycle_stage"))
+    hz = build_horizon_context(ticker, ctx)
+    long_positive = trend_polarity(hz.get("long_term_trend")) > 0
+    strong_hold = lifecycle in HEALTHY_LIFECYCLE and long_positive
+
+    weak_rules = any(
+        state in {"WATCHLIST", "DEPRECATED", "DISABLED"} for state in (rule_states or {}).values()
+    )
+    detail: dict[str, Any] = {
+        "evaluated": True,
+        "current_pct": round(current_pct, 4),
+        "strong_hold_reason": strong_hold,
+        "weak_rule_evidence": weak_rules,
+    }
+
+    if current_pct <= -7.0:
+        scores["SELL_PAPER"] += 45.0
+        protect_before = scores.get("PROTECT_PAPER", 0.0)
+        if not strong_hold:
+            scores["PROTECT_PAPER"] = min(protect_before, max(0.0, protect_before * 0.25))
+            detail["protect_suppressed"] = True
+            evidence.append(
+                f"loss discipline: {current_pct:.1f}% loss — SELL required unless strong hold "
+                f"(lifecycle={lifecycle}, long_positive={long_positive})"
+            )
+        else:
+            evidence.append(
+                f"loss discipline: {current_pct:.1f}% loss — SELL boosted but strong hold retained "
+                f"(lifecycle={lifecycle})"
+            )
+        detail["severity"] = "critical"
+    elif current_pct <= -5.0 and weak_rules:
+        sell_boost = 40.0 if current_pct <= -6.0 else 30.0
+        protect_cut = 35.0 if current_pct <= -6.0 else 20.0
+        scores["SELL_PAPER"] += sell_boost
+        scores["PROTECT_PAPER"] = max(0.0, scores.get("PROTECT_PAPER", 0.0) - protect_cut)
+        if not strong_hold:
+            scores["PROTECT_PAPER"] = min(scores.get("PROTECT_PAPER", 0.0), scores.get("SELL_PAPER", 0.0))
+            scores["HOLD_PAPER"] = min(scores.get("HOLD_PAPER", 0.0), scores.get("SELL_PAPER", 0.0))
+        evidence.append(
+            f"loss discipline: {current_pct:.1f}% + weak rules — SELL outranks PROTECT"
+        )
+        detail["severity"] = "elevated"
+
+    detail["sell_score"] = round(scores.get("SELL_PAPER", 0.0), 2)
+    detail["protect_score"] = round(scores.get("PROTECT_PAPER", 0.0), 2)
+    detail["preferred"] = "SELL_PAPER" if detail["sell_score"] > detail["protect_score"] else "PROTECT_PAPER"
+    return detail
+
+
+def write_decision_discipline_report(decisions: list[dict[str, Any]], ctx: dict[str, Any]) -> None:
+    blocked_no_position = [
+        d for d in decisions if (d.get("position_discipline") or {}).get("blocked")
+    ]
+    loss_evals = [
+        d
+        for d in decisions
+        if (d.get("loss_discipline") or {}).get("evaluated")
+        and _f((d.get("loss_discipline") or {}).get("current_pct")) <= -5.0
+    ]
+    lifecycle = ctx.get("rule_lifecycle") or {}
+    by_state = lifecycle.get("by_state") or {}
+
+    lines = [
+        "# TAE Decision Discipline Report",
+        "",
+        f"**Generated:** {_now()}",
+        f"**Mode:** {MODE} — NO_BROKER — NO_LIVE_PROMOTION",
+        "",
+        "## Position discipline",
+        "",
+        f"- Decisions blocked (no PAPER position): **{len(blocked_no_position)}**",
+        f"- PAPER positions held: **{len(ctx.get('paper_positions') or {})}**",
+        f"- Canonical positions (read-only): **{len(ctx.get('live_positions') or {})}**",
+        "",
+    ]
+    if blocked_no_position:
+        lines.append("| ticker | blocked actions | chosen action |")
+        lines.append("| --- | --- | --- |")
+        for d in blocked_no_position[:20]:
+            pd = d.get("position_discipline") or {}
+            lines.append(
+                f"| {d.get('ticker')} | {','.join(pd.get('blocked') or [])} | {d.get('action')} |"
+            )
+        lines.append("")
+
+    lines.extend(["## Loss discipline (positions ≤ -5%)", ""])
+    if loss_evals:
+        lines.append("| ticker | current_pct | sell | protect | preferred | reason |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+        for d in sorted(loss_evals, key=lambda x: _f((x.get("loss_discipline") or {}).get("current_pct"))):
+            ld = d.get("loss_discipline") or {}
+            lines.append(
+                f"| {d.get('ticker')} | {ld.get('current_pct', 0):.1f}% | {ld.get('sell_score')} | "
+                f"{ld.get('protect_score')} | {ld.get('preferred')} | {d.get('action')} chosen |"
+            )
+    else:
+        lines.append("- No losing positions below -5% threshold.")
+    lines.append("")
+
+    lines.extend(["## Rule lifecycle summary", ""])
+    for state in ("DISABLED", "DEPRECATED", "WATCHLIST", "TRUSTED", "ACTIVE"):
+        ids = by_state.get(state) or []
+        if ids:
+            lines.append(f"- **{state}**: `{ids[:8]}`")
+
+    DISCIPLINE_REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _now() -> str:
@@ -795,6 +1028,9 @@ def build_context() -> dict[str, Any]:
     from tae_historical_runtime_refresh import load_runtime_state, stale_source_paths
 
     hist_runtime = load_runtime_state()
+    paper_portfolio = load_json(PAPER_PORTFOLIO_JSON)
+    paper_positions = load_paper_positions(paper_portfolio)
+    rule_lifecycle = load_json(RULE_LIFECYCLE_JSON)
 
     return {
         "gii": gii,
@@ -823,6 +1059,9 @@ def build_context() -> dict[str, Any]:
         "longitudinal_knowledge": longitudinal_knowledge,
         "pattern_discovery_present": PATTERN_DISCOVERY_TXT.is_file(),
         "live_positions": live_positions,
+        "paper_positions": paper_positions,
+        "paper_portfolio": paper_portfolio,
+        "rule_lifecycle": rule_lifecycle,
         "signals": signals,
         "top_growth": top_growth,
         "horizon_ssot": horizon_ssot,
@@ -853,12 +1092,14 @@ def build_context() -> dict[str, Any]:
             "longitudinal_knowledge": LONGITUDINAL_KNOWLEDGE_JSON.is_file(),
             "decision_replay": REPLAY_JSON.is_file(),
             "pattern_discovery": PATTERN_DISCOVERY_TXT.is_file(),
+            "paper_portfolio": PAPER_PORTFOLIO_JSON.is_file(),
+            "rule_lifecycle": RULE_LIFECYCLE_JSON.is_file(),
         },
     }
 
 
 def ticker_universe(ctx: dict[str, Any]) -> list[str]:
-    held = set(ctx.get("live_positions") or {})
+    held = set(ctx.get("paper_positions") or {}) or set(ctx.get("live_positions") or {})
     signal_tickers = set(ctx.get("signals") or {})
     gii_tickers = set(ctx.get("gii_by") or {})
     top = set(ctx.get("top_growth") or [])
@@ -1030,9 +1271,10 @@ def compute_risk_score(ticker: str, ctx: dict[str, Any]) -> float:
     return round(min(100.0, max(0.0, score)), 2)
 
 
-def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dict[str, float], list[str]]:
+def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dict[str, float], list[str], list, bool, dict, dict, dict, dict]:
     ticker = ticker.upper()
-    held = ticker in (ctx.get("live_positions") or {})
+    held = paper_position_held(ticker, ctx)
+    paper_pos = (ctx.get("paper_positions") or {}).get(ticker) or {}
     gii = (ctx.get("gii_by") or {}).get(ticker) or {}
     shadow = (ctx.get("shadow_by") or {}).get(ticker) or {}
     ppg_row = (ctx.get("ppg_by") or {}).get(ticker) or {}
@@ -1043,7 +1285,9 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     cap_eff = _f(gii.get("capital_efficiency"))
     growth_score = _f(gii.get("growth_score"))
     missed = _f(gii.get("missed_usd") or shadow.get("missed_opportunity_usd"))
-    current_pct = _f(gii.get("current_pct") or shadow.get("current_pct"))
+    current_pct = _f(paper_pos.get("unrealized_pct") or paper_pos.get("current_pct"))
+    if current_pct == 0.0:
+        current_pct = _f(gii.get("current_pct") or shadow.get("current_pct"))
     opp_cat = _s(gii.get("opportunity_category"))
     posture = _s(ppg_row.get("governor_posture"))
     protect_signal = _s(shadow.get("protection_signal"))
@@ -1062,14 +1306,25 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         scores["SKIP_PAPER"] = 80.0
         evidence.append("insufficient intelligence for ticker")
         hz = build_horizon_context(ticker, ctx)
+        named_rules = apply_named_confidence_rules(scores, evidence, ctx)
         consumption = {
             "knowledge_evidence": apply_knowledge_base_bias(scores, evidence, ctx, ticker),
             "longitudinal_knowledge_evidence": apply_longitudinal_knowledge_bias(scores, evidence, ctx),
             "dpe_evaluator_evidence": apply_dpe_evaluator_bias(scores, evidence, ctx, held=held),
             "adaptive_weight_evidence": None,
-            "named_confidence_rules": apply_named_confidence_rules(scores, evidence, ctx),
+            "named_confidence_rules": named_rules,
         }
-        return "SKIP_PAPER", scores, evidence, [], False, hz, consumption
+        rules_applied = collect_rules_applied(consumption, named_rules)
+        lifecycle_evidence = apply_rule_lifecycle_bias(scores, evidence, ctx, rules_applied)
+        position_discipline = enforce_position_discipline(ticker, scores, evidence, ctx)
+        loss_discipline = enforce_loss_discipline(
+            ticker, scores, evidence, ctx, rule_states=lifecycle_evidence.get("rule_states")
+        )
+        consumption["rule_lifecycle_evidence"] = lifecycle_evidence
+        best = max(scores, key=lambda a: scores[a])
+        if scores[best] < 18.0:
+            best = "SKIP_PAPER"
+        return best, scores, evidence, [], False, hz, consumption, position_discipline, loss_discipline
 
     if held:
         if posture in {"PROTECT_SHADOW"} and current_pct > 2.0 and missed >= 15.0:
@@ -1081,6 +1336,10 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         if lifecycle in WEAK_LIFECYCLE or _f(gii.get("collapse_probability")) > 0.55:
             scores["SELL_PAPER"] += 30.0
             evidence.append(f"weak lifecycle={lifecycle}")
+            if current_pct <= -5.0:
+                scores["SELL_PAPER"] += 15.0
+                scores["PROTECT_PAPER"] = max(0.0, scores.get("PROTECT_PAPER", 0.0) - 15.0)
+                evidence.append(f"weak lifecycle + {current_pct:.1f}% loss favors SELL over PROTECT")
         if opp_cat in {"CAPITAL_LOCKED", "CASH_CONSTRAINT"} and cap_eff < 45.0:
             scores["ROTATE_PAPER"] += 38.0
             evidence.append(f"opportunity_category={opp_cat}")
@@ -1163,6 +1422,14 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         )
     evidence.extend(exp_notes)
 
+    rules_applied = collect_rules_applied(consumption_evidence, named_rules)
+    lifecycle_evidence = apply_rule_lifecycle_bias(scores, evidence, ctx, rules_applied)
+    consumption_evidence["rule_lifecycle_evidence"] = lifecycle_evidence
+    position_discipline = enforce_position_discipline(ticker, scores, evidence, ctx)
+    loss_discipline = enforce_loss_discipline(
+        ticker, scores, evidence, ctx, rule_states=lifecycle_evidence.get("rule_states")
+    )
+
     best = max(scores, key=lambda a: scores[a])
     if scores[best] < 18.0:
         best = "SKIP_PAPER"
@@ -1173,11 +1440,31 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     if rule_note:
         evidence.append(rule_note)
 
-    return best, scores, evidence, applied_hyps, gates_passed, hz, consumption_evidence
+    return (
+        best,
+        scores,
+        evidence,
+        applied_hyps,
+        gates_passed,
+        hz,
+        consumption_evidence,
+        position_discipline,
+        loss_discipline,
+    )
 
 
 def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, Any]:
-    action, scores, evidence_notes, applied_hypotheses, gates_passed, horizon, consumption_evidence = score_actions_for_ticker(ticker, ctx)
+    (
+        action,
+        scores,
+        evidence_notes,
+        applied_hypotheses,
+        gates_passed,
+        horizon,
+        consumption_evidence,
+        position_discipline,
+        loss_discipline,
+    ) = score_actions_for_ticker(ticker, ctx)
     adaptive_weight_detail = consumption_evidence.get("adaptive_weight_evidence")
     gii = (ctx.get("gii_by") or {}).get(ticker.upper()) or {}
     deltas = estimate_deltas(ticker.upper(), action, ctx)
@@ -1230,8 +1517,10 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("pattern_discovery_summary.txt")
     if ticker.upper() in (ctx.get("signals") or {}):
         sources.append("live_signals.csv")
-    if ticker.upper() in (ctx.get("live_positions") or {}):
-        sources.append("portfolio.csv")
+    if ctx.get("rule_lifecycle"):
+        sources.append("runtime_outputs/paper_execution/rule_lifecycle.json")
+    if ticker.upper() in (ctx.get("paper_positions") or {}):
+        sources.append("runtime_outputs/paper_execution/paper_portfolio.json")
 
     ts = _now()
     decision_id = f"PDEC-{ticker.upper()}-{seq:04d}"
@@ -1281,6 +1570,10 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "longitudinal_knowledge_evidence": consumption_evidence.get("longitudinal_knowledge_evidence"),
         "dpe_evaluator_evidence": consumption_evidence.get("dpe_evaluator_evidence"),
         "adaptive_weight_evidence": adaptive_weight_detail,
+        "rule_lifecycle_evidence": consumption_evidence.get("rule_lifecycle_evidence"),
+        "position_discipline": position_discipline,
+        "loss_discipline": loss_discipline,
+        "paper_position_held": paper_position_held(ticker.upper(), ctx),
         "created_at": ts,
     }
 
@@ -1428,8 +1721,9 @@ def main() -> int:
     decisions = build_decisions(ctx)
     report = build_report_payload(decisions, ctx)
     paths = write_outputs(report)
+    write_decision_discipline_report(decisions, ctx)
     print_summary(report)
-    print("Wrote:", *paths)
+    print("Wrote:", *paths, DISCIPLINE_REPORT_MD)
     return 0
 
 
