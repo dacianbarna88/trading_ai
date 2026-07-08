@@ -53,6 +53,7 @@ PAPER_PORTFOLIO_JSON = Path("runtime_outputs/paper_execution/paper_portfolio.jso
 RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
 HARD_RISK_JSON = Path("runtime_outputs/governance/hard_risk.json")
 CONFLICTS_JSON = Path("runtime_outputs/conflict_resolution/conflicts.json")
+ACTIVE_DECISIONS_JSON = Path("runtime_outputs/decision_state/active_decisions.json")
 
 PAPER_ACTIONS = frozenset(
     {
@@ -1076,6 +1077,8 @@ def build_context() -> dict[str, Any]:
     rule_lifecycle = load_json(RULE_LIFECYCLE_JSON)
     hard_risk_doc = load_json(HARD_RISK_JSON)
     conflict_doc = load_json(CONFLICTS_JSON)
+    active_doc = load_json(ACTIVE_DECISIONS_JSON)
+    active_by: dict[str, dict[str, Any]] = dict((active_doc or {}).get("tickers") or {})
     conflict_by: dict[str, dict[str, Any]] = {}
     for row in (conflict_doc or {}).get("tickers") or []:
         if isinstance(row, dict):
@@ -1128,6 +1131,8 @@ def build_context() -> dict[str, Any]:
         "hard_risk_by": hard_risk_by,
         "conflict_resolution": conflict_doc,
         "conflict_resolution_by_ticker": conflict_by,
+        "active_decisions": active_doc,
+        "active_decisions_by_ticker": active_by,
         "signals": signals,
         "top_growth": top_growth,
         "horizon_ssot": horizon_ssot,
@@ -1162,6 +1167,7 @@ def build_context() -> dict[str, Any]:
             "rule_lifecycle": RULE_LIFECYCLE_JSON.is_file(),
             "hard_risk": HARD_RISK_JSON.is_file(),
             "conflict_resolution": CONFLICTS_JSON.is_file(),
+            "active_decisions": ACTIVE_DECISIONS_JSON.is_file(),
         },
     }
 
@@ -1536,11 +1542,32 @@ def score_actions_for_ticker(
     consumption_evidence["hard_risk_discipline"] = hard_risk_discipline
 
     from tae_conflict_resolution import apply_conflict_resolution_bias
+    from tae_decision_state import apply_decision_state_gate
 
     conflict_resolution_evidence = apply_conflict_resolution_bias(ticker, scores, evidence, ctx)
     consumption_evidence["conflict_resolution_evidence"] = conflict_resolution_evidence
 
-    best = max(scores, key=lambda a: scores[a])
+    prelim_best = max(scores, key=lambda a: scores[a])
+    scenario_ev_table = conflict_resolution_evidence.get("scenario_ev_table") or (
+        (ctx.get("conflict_resolution_by_ticker") or {}).get(ticker.upper(), {}).get("scenario_ev_table")
+    )
+    state_detail = apply_decision_state_gate(
+        ticker,
+        prelim_best,
+        scores,
+        evidence,
+        ctx,
+        hard_risk_discipline=hard_risk_discipline,
+        loss_discipline=loss_discipline,
+        scenario_ev_table=scenario_ev_table,
+    )
+    consumption_evidence["decision_state_evidence"] = state_detail
+
+    best = prelim_best
+    if not state_detail.get("decision_switch_authorized") and not hard_risk_discipline.get("override"):
+        gate = state_detail.get("decision_state_evidence") or {}
+        best = _s(gate.get("final_action"), best)
+
     if scores[best] < 18.0:
         best = "SKIP_PAPER"
         evidence.append("no action met minimum confidence threshold")
@@ -1635,10 +1662,14 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("runtime_outputs/governance/hard_risk.json")
     if ctx.get("conflict_resolution"):
         sources.append("runtime_outputs/conflict_resolution/conflicts.json")
+    if ctx.get("active_decisions"):
+        sources.append("runtime_outputs/decision_state/active_decisions.json")
     if ticker.upper() in (ctx.get("paper_positions") or {}):
         sources.append("runtime_outputs/paper_execution/paper_portfolio.json")
 
     conflict_resolution_evidence = consumption_evidence.get("conflict_resolution_evidence") or {}
+    decision_state_detail = consumption_evidence.get("decision_state_evidence") or {}
+    gate = decision_state_detail.get("decision_state_evidence") or decision_state_detail
 
     ts = _now()
     decision_id = f"PDEC-{ticker.upper()}-{seq:04d}"
@@ -1697,6 +1728,16 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "winning_scenario": conflict_resolution_evidence.get("winning_scenario"),
         "ev_reason": conflict_resolution_evidence.get("ev_reason"),
         "final_authority": conflict_resolution_evidence.get("final_authority"),
+        "decision_state_evidence": decision_state_detail,
+        "previous_action": gate.get("previous_action"),
+        "previous_action_at": gate.get("previous_action_at"),
+        "decision_switch_authorized": bool(decision_state_detail.get("decision_switch_authorized")),
+        "switch_reason": gate.get("switch_reason") or decision_state_detail.get("switch_reason"),
+        "cooldown_status": gate.get("cooldown_status"),
+        "churn_risk": gate.get("churn_risk"),
+        "ev_margin_actual": gate.get("ev_margin_actual"),
+        "ev_margin_required": gate.get("ev_margin_required"),
+        "hard_rule_override": bool(hard_risk_discipline.get("override")),
         "paper_position_held": paper_position_held(ticker.upper(), ctx),
         "created_at": ts,
     }
@@ -1785,20 +1826,33 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
             "",
             "## Decision table",
             "",
-            "| ticker | action | confidence | risk | profit Δ | cap eff Δ | evidence |",
+            "| ticker | action | confidence | risk | profit Δ | cap eff Δ | switch | evidence |",
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for row in (report.get("decisions") or [])[:25]:
         ev = _s(row.get("evidence"))[:60].replace("|", "/")
+        sw = "yes" if row.get("decision_switch_authorized") else "no"
         lines.append(
             f"| {row.get('ticker')} | {row.get('action')} | {row.get('confidence')} | "
             f"{row.get('risk_score')} | {row.get('expected_profit_delta')} | "
-            f"{row.get('capital_efficiency_delta')} | {ev} |"
+            f"{row.get('capital_efficiency_delta')} | switch={sw} | {ev} |"
         )
 
+    switch_accepted = sum(1 for d in (report.get("decisions") or []) if d.get("decision_switch_authorized"))
+    switch_blocked = sum(
+        1
+        for d in (report.get("decisions") or [])
+        if d.get("previous_action") and d.get("previous_action") != d.get("action") and not d.get("decision_switch_authorized")
+    )
     lines.extend(
         [
+            "",
+            "## Decision state / switch summary",
+            "",
+            f"- Switch authorized: **{switch_accepted}**",
+            f"- Switch blocked (PDE gate): **{switch_blocked}**",
+            f"- Active decisions loaded: **{(report.get('sources_loaded') or {}).get('active_decisions')}**",
             "",
             "## Closed intelligence loop",
             "",
@@ -1837,8 +1891,10 @@ def print_summary(report: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    from tae_decision_state import run_decision_state_refresh
     from tae_conflict_resolution import run_conflict_resolution
 
+    run_decision_state_refresh(write_outputs_flag=True)
     run_conflict_resolution(write_outputs_flag=True)
     ctx = build_context()
     if not ctx.get("gii_by") and not ctx.get("live_positions"):

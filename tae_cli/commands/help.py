@@ -24,6 +24,7 @@ Available commands:
   dpe-learning
   dpe-adaptive
   learning-profit
+  decision-state-refresh
   conflict-resolution-refresh
   paper-experiments
   paper-decisions
@@ -62,6 +63,7 @@ Available commands:
   dpe-learning — learn from evaluation results (append-only history)
   dpe-adaptive — adaptive philosophy selector (learning → recommendation)
   learning-profit — learning-to-profit bridge (ranked PAPER hypotheses + queue)
+  decision-state-refresh — build active per-ticker decision state from PAPER execution artifacts
   conflict-resolution-refresh — EV-ranked scenario evidence for PDE (no new decision engine)
   paper-experiments — run PAPER scoring experiments from hypothesis queue
   paper-decisions — explicit PAPER BUY/SELL/HOLD/REDUCE/PROTECT/ROTATE/SKIP decisions

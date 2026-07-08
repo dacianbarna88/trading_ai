@@ -454,7 +454,7 @@ def update_checkpoints(
     return updated
 
 
-def ingest_decisions(records: dict[str, dict[str, Any]]) -> tuple[int, int]:
+def ingest_decisions(records: dict[str, dict[str, Any]]) -> tuple[int, int, int]:
     decisions_doc = load_json(PAPER_DECISIONS_JSON) or {}
     validation_doc = load_json(VALIDATION_JSON) or {}
     promotion_doc = load_json(PROMOTION_JSON) or {}
@@ -492,9 +492,42 @@ def ingest_decisions(records: dict[str, dict[str, Any]]) -> tuple[int, int]:
                 ppg_by[_s(row["ticker"]).upper()] = _s(row.get("governor_posture"))
 
     new_count = 0
+    action_change_count = 0
     for decision in decisions_doc.get("decisions") or []:
         did = _s(decision.get("decision_id"))
-        if not did or did in records:
+        if not did:
+            continue
+        action = _s(decision.get("action")).upper()
+        if did in records:
+            existing = records[did]
+            prev_action = _s(existing.get("action")).upper()
+            if prev_action == action:
+                continue
+            action_change_count += 1
+            changes = list(existing.get("action_changes") or [])
+            changes.append(
+                {
+                    "event": "ACTION_CHANGE",
+                    "timestamp": _now(),
+                    "previous_action": prev_action,
+                    "new_action": action,
+                    "decision_switch_authorized": decision.get("decision_switch_authorized"),
+                    "switch_reason": decision.get("switch_reason"),
+                    "hard_rule_override": bool((decision.get("hard_risk_discipline") or {}).get("override")),
+                    "cooldown_status": decision.get("cooldown_status"),
+                    "churn_risk": decision.get("churn_risk"),
+                    "ev_margin_actual": decision.get("ev_margin_actual"),
+                    "ev_margin_required": decision.get("ev_margin_required"),
+                }
+            )
+            existing["action_changes"] = changes
+            existing["action_change_count"] = len(changes)
+            existing["action"] = action
+            existing["confidence"] = _f(decision.get("confidence"))
+            existing["expected_profit_delta"] = _f(decision.get("expected_profit_delta"))
+            existing["expected_risk_delta"] = _f(decision.get("expected_risk_delta"))
+            existing["decision_state_evidence"] = decision.get("decision_state_evidence")
+            existing["memory_updated_at"] = _now()
             continue
         ticker = _s(decision.get("ticker")).upper()
         action = _s(decision.get("action")).upper()
@@ -542,7 +575,7 @@ def ingest_decisions(records: dict[str, dict[str, Any]]) -> tuple[int, int]:
         mtm_doc=mtm_doc,
         orders_by_decision=orders_by,
     )
-    return new_count, cp_updated
+    return new_count, cp_updated, action_change_count
 
 
 def aggregate_learning(records: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -819,7 +852,7 @@ def run_longitudinal_memory(*, write_reports_flag: bool = True) -> dict[str, Any
     AUDIT_JSON.write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
 
     records = load_memory_index()
-    new_count, cp_updated = ingest_decisions(records)
+    new_count, cp_updated, action_change_count = ingest_decisions(records)
     save_memory_index(records)
 
     learning = aggregate_learning(records)
@@ -833,6 +866,7 @@ def run_longitudinal_memory(*, write_reports_flag: bool = True) -> dict[str, Any
         "generated_at": _now(),
         "total_records": len(records),
         "new_records": new_count,
+        "action_change_events": action_change_count,
         "checkpoints_updated": cp_updated,
         "learning": learning,
         "knowledge_count": len(knowledge),

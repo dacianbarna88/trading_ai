@@ -941,6 +941,8 @@ def write_report(payload: dict[str, Any]) -> None:
         f"- Orders executed (this run): **{stats.get('orders_executed', 0)}**",
         f"- Orders skipped (this run): **{stats.get('orders_skipped', 0)}**",
         f"- Skipped same action: **{stats.get('skipped_same_action', 0)}**",
+        f"- Skipped unauthorized switch: **{stats.get('skipped_switch_not_authorized', 0)}**",
+        f"- Accepted action switches: **{stats.get('accepted_action_switches', 0)}**",
         f"- Re-executed on action change: **{stats.get('reexecuted_on_action_change', 0)}**",
         f"- Trades written (this run): **{stats.get('trades_written', 0)}**",
         f"- Trades file total lines: **{stats.get('trades_file_lines', 0)}**",
@@ -1059,6 +1061,8 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     trades_written = 0
     reexecuted = 0
     skipped_same_action = 0
+    skipped_switch = 0
+    accepted_switch = 0
 
     for decision in decisions:
         decision_id = _s(decision.get("decision_id"))
@@ -1072,7 +1076,34 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         if action not in PAPER_ACTIONS:
             continue
         if reason.startswith("action_changed"):
+            hard_override = bool((decision.get("hard_risk_discipline") or {}).get("override"))
+            switch_ok = bool(decision.get("decision_switch_authorized"))
+            if not hard_override and not switch_ok:
+                skipped_switch += 1
+                order = {
+                    "timestamp": _now(),
+                    "decision_id": decision_id,
+                    "ticker": _s(decision.get("ticker")).upper(),
+                    "action": action,
+                    "status": "SKIPPED_SWITCH_NOT_AUTHORIZED",
+                    "executed": False,
+                    "is_trade": False,
+                    "execution_reason": reason,
+                    "switch_reason": _s(decision.get("switch_reason")),
+                    "decision_switch_authorized": False,
+                    "hard_rule_override": hard_override,
+                    "ev_margin_actual": decision.get("ev_margin_actual"),
+                    "ev_margin_required": decision.get("ev_margin_required"),
+                    "previous_action": decision.get("previous_action"),
+                    "mode": MODE,
+                    "broker_executed": False,
+                    "live_money": False,
+                }
+                orders.append(order)
+                append_jsonl(ORDERS_JSONL, order)
+                continue
             reexecuted += 1
+            accepted_switch += 1
         order = execute_decision(
             decision,
             portfolio,
@@ -1134,6 +1165,8 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         "legacy_trades_removed": removed_legacy_trades,
         "reexecuted_on_action_change": reexecuted,
         "skipped_same_action": skipped_same_action,
+        "skipped_switch_not_authorized": skipped_switch,
+        "accepted_action_switches": accepted_switch,
     }
 
     payload = {

@@ -429,6 +429,48 @@ def _conflict_resolution_view(conflicts: dict[str, Any] | None) -> dict[str, Any
         "strong_buy_to_skip": conflicts.get("strong_buy_to_skip") or [],
         "policy_state": (conflicts.get("policy_context") or {}).get("policy_state"),
         "cash_hint": (conflicts.get("policy_context") or {}).get("cash_hint"),
+        "switch_accepted_count": conflicts.get("switch_accepted_count"),
+        "switch_blocked_count": conflicts.get("switch_blocked_count"),
+    }
+
+
+def _decision_state_view(decisions: list[dict[str, Any]]) -> dict[str, Any]:
+    switch_accepted = sum(
+        1
+        for d in decisions
+        if d.get("previous_action")
+        and d.get("previous_action") != d.get("action")
+        and d.get("decision_switch_authorized")
+    )
+    switch_blocked = sum(
+        1
+        for d in decisions
+        if d.get("previous_action")
+        and d.get("previous_action") != d.get("action")
+        and not d.get("decision_switch_authorized")
+    )
+    churn_high = sum(1 for d in decisions if _s(d.get("churn_risk")).upper() == "HIGH")
+    cooldown_active = sum(
+        1 for d in decisions if ((d.get("cooldown_status") or {}).get("active"))
+    )
+    return {
+        "switch_accepted_count": switch_accepted,
+        "switch_blocked_count": switch_blocked,
+        "churn_high_count": churn_high,
+        "cooldown_active_count": cooldown_active,
+        "sample_switches": [
+            {
+                "ticker": d.get("ticker"),
+                "previous_action": d.get("previous_action"),
+                "action": d.get("action"),
+                "decision_switch_authorized": d.get("decision_switch_authorized"),
+                "switch_reason": d.get("switch_reason"),
+                "ev_margin_actual": d.get("ev_margin_actual"),
+                "ev_margin_required": d.get("ev_margin_required"),
+            }
+            for d in decisions
+            if d.get("previous_action") and d.get("previous_action") != d.get("action")
+        ][:10],
     }
 
 
@@ -479,6 +521,7 @@ def build_council_synthesis(*, include_morning_audit: bool = True) -> dict[str, 
     dpe_view = _dpe_philosophy_view(adaptive, evaluation, appe)
     capital = _capital_status(paper, accounting, ppg, appe)
     conflict_view = _conflict_resolution_view(conflicts)
+    decision_state_view = _decision_state_view(decisions)
 
     governance_blocked = governance_verdict == "BLOCKED_WITH_REASONS"
     action_plan = _build_action_plan(decisions, governance_blocked=governance_blocked)
@@ -521,6 +564,7 @@ def build_council_synthesis(*, include_morning_audit: bool = True) -> dict[str, 
         "canonical_vs_paper": canonical,
         "capital_status": capital,
         "conflict_resolution": conflict_view,
+        "decision_state": decision_state_view,
         "morning_audit_summary": {
             "verdict": morning.get("verdict"),
             "global_score": morning.get("global_score"),
@@ -567,6 +611,7 @@ def write_council_report(payload: dict[str, Any]) -> None:
     dpe = payload.get("dpe_philosophy_view") or {}
     rebuild = payload.get("portfolio_rebuild_view") or {}
     conflict = payload.get("conflict_resolution") or {}
+    decision_state = payload.get("decision_state") or {}
 
     def _rows(items: list[dict[str, Any]], cols: list[str]) -> list[str]:
         if not items:
@@ -643,6 +688,32 @@ def write_council_report(payload: dict[str, Any]) -> None:
         for row in strong_skips[:8]:
             lines.append(
                 f"- **{row.get('ticker')}** EV winner={row.get('winning_scenario')} — {_s(row.get('explanation'))[:120]}"
+            )
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "## 6c. Decision state (anti-churn)",
+            "",
+            f"- Switch authorized (PDE): **{decision_state.get('switch_accepted_count', 0)}**",
+            f"- Switch blocked (PDE): **{decision_state.get('switch_blocked_count', 0)}**",
+            f"- Conflict switch authorized: **{conflict.get('switch_accepted_count', 0)}**",
+            f"- Conflict switch blocked: **{conflict.get('switch_blocked_count', 0)}**",
+            f"- Cooldown active tickers: **{decision_state.get('cooldown_active_count', 0)}**",
+            f"- High churn risk tickers: **{decision_state.get('churn_high_count', 0)}**",
+            "",
+            "### Proposed action changes",
+            "",
+        ]
+    )
+    switch_samples = decision_state.get("sample_switches") or []
+    if switch_samples:
+        for row in switch_samples[:8]:
+            lines.append(
+                f"- **{row.get('ticker')}** {row.get('previous_action')}→{row.get('action')} "
+                f"authorized={'yes' if row.get('decision_switch_authorized') else 'no'} "
+                f"reason={row.get('switch_reason')} EV={row.get('ev_margin_actual')}/{row.get('ev_margin_required')}"
             )
     else:
         lines.append("- none")

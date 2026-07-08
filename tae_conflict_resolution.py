@@ -387,6 +387,7 @@ def build_scenario_row(
 
 
 def resolve_ticker(ticker: str, ctx: dict[str, Any], *, recon_ok: bool) -> dict[str, Any]:
+    from tae_decision_state import evaluate_action_switch
     from tae_paper_decision_engine import PAPER_ACTIONS, paper_position_held
 
     ticker = ticker.upper()
@@ -461,6 +462,41 @@ def resolve_ticker(ticker: str, ctx: dict[str, Any], *, recon_ok: bool) -> dict[
     signal_name = _s(signal.get("signal")).upper()
     strong_buy_skip = "STRONG BUY" in signal_name and winning == "SKIP_PAPER"
 
+    active_state = (ctx.get("active_decisions_by_ticker") or {}).get(ticker) or {}
+    raev_map = {r["action"]: _f(r.get("risk_adjusted_EV")) for r in scenario_table if _f(r.get("risk_adjusted_EV")) > -9000}
+    switch_eval = evaluate_action_switch(
+        ticker,
+        winning,
+        state=active_state,
+        hard_rule_override=bool(hard_risk.get("override")),
+        scenario_raev=raev_map,
+        loss_context={"current_pct": _f(((ctx.get("paper_positions") or {}).get(ticker) or {}).get("unrealized_pct"))},
+        held=held,
+    )
+    switch_cost = round(max(0.0, _f(switch_eval.get("ev_margin_required")) - _f(switch_eval.get("ev_margin_actual"))), 4)
+
+    for row in scenario_table:
+        prop = _s(row.get("action"))
+        row_switch = evaluate_action_switch(
+            ticker,
+            prop,
+            state=active_state,
+            hard_rule_override=bool(hard_risk.get("override")),
+            scenario_raev=raev_map,
+            held=held,
+        )
+        row["previous_action"] = active_state.get("last_executed_action")
+        row["switch_cost"] = switch_cost if prop != active_state.get("last_executed_action") else 0.0
+        row["churn_risk"] = active_state.get("churn_risk")
+        row["cooldown_status"] = active_state.get("cooldown_status")
+        row["ev_margin_required"] = row_switch.get("ev_margin_required")
+        row["ev_margin_actual"] = row_switch.get("ev_margin_actual")
+        row["switch_authorized"] = bool(row_switch.get("switch_authorized"))
+
+    if not switch_eval.get("switch_authorized") and not hard_risk.get("override"):
+        winning = _s(switch_eval.get("final_action"), winning)
+        final_authority = "DECISION_STATE_GATE"
+
     return {
         "ticker": ticker,
         "paper_position_held": held,
@@ -474,6 +510,13 @@ def resolve_ticker(ticker: str, ctx: dict[str, Any], *, recon_ok: bool) -> dict[
         "strong_buy_to_skip": strong_buy_skip,
         "idle_cash_usd": round(cash, 2),
         "policy_state": policy_state,
+        "switch_authorized": bool(switch_eval.get("switch_authorized")),
+        "switch_reason": switch_eval.get("switch_reason"),
+        "ev_margin_actual": switch_eval.get("ev_margin_actual"),
+        "ev_margin_required": switch_eval.get("ev_margin_required"),
+        "previous_action": active_state.get("last_executed_action"),
+        "churn_risk": active_state.get("churn_risk"),
+        "cooldown_status": active_state.get("cooldown_status"),
     }
 
 
@@ -482,9 +525,11 @@ def _buy_scenario_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_conflict_resolution(ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    from tae_decision_state import load_active_by_ticker
     from tae_paper_decision_engine import build_context, ticker_universe
 
     ctx = ctx or build_context()
+    ctx["active_decisions_by_ticker"] = load_active_by_ticker()
     recon_ok, recon_note = _governance_reconciliation_ok()
     tickers = ticker_universe(ctx)
     rows = [resolve_ticker(ticker, ctx, recon_ok=recon_ok) for ticker in tickers]
@@ -516,6 +561,21 @@ def build_conflict_resolution(ctx: dict[str, Any] | None = None) -> dict[str, An
     ]
 
     strong_buy_skips = [r for r in rows if r.get("strong_buy_to_skip")]
+
+    switch_accepted = sum(
+        1
+        for r in rows
+        if r.get("previous_action")
+        and r.get("winning_scenario") != r.get("previous_action")
+        and r.get("switch_authorized")
+    )
+    switch_blocked = sum(
+        1
+        for r in rows
+        if r.get("previous_action")
+        and r.get("winning_scenario") != r.get("previous_action")
+        and not r.get("switch_authorized")
+    )
 
     registry = {
         "schema": "tae.scenario_registry.v1",
@@ -556,6 +616,8 @@ def build_conflict_resolution(ctx: dict[str, Any] | None = None) -> dict[str, An
         "top_conflicts": top_conflicts,
         "buy_blocked_despite_cash": buy_blocked_despite_cash,
         "strong_buy_to_skip": strong_buy_skips,
+        "switch_accepted_count": switch_accepted,
+        "switch_blocked_count": switch_blocked,
         "scenario_registry": registry,
         "sources_loaded": ctx.get("sources_loaded") or {},
         "safety": {
@@ -582,12 +644,34 @@ def write_conflict_report(payload: dict[str, Any]) -> None:
         f"- Cash hint: **${ _f((payload.get('policy_context') or {}).get('cash_hint')):,.2f}**",
         f"- BUY blocked despite cash (positive BUY EV): **{len(payload.get('buy_blocked_despite_cash') or [])}**",
         f"- STRONG BUY → SKIP cases: **{len(payload.get('strong_buy_to_skip') or [])}**",
+        f"- Switch authorized: **{payload.get('switch_accepted_count', 0)}**",
+        f"- Switch blocked (decision state): **{payload.get('switch_blocked_count', 0)}**",
+        "",
+        "## Switch gating sample",
+        "",
+        "| ticker | prev | winner | authorized | hard bypass | cooldown | churn | EV act/req |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in (payload.get("tickers") or [])[:12]:
+        if not row.get("previous_action"):
+            continue
+        cd = row.get("cooldown_status") or {}
+        lines.append(
+            f"| {row.get('ticker')} | {row.get('previous_action')} | {row.get('winning_scenario')} | "
+            f"{'yes' if row.get('switch_authorized') else 'no'} | "
+            f"{'yes' if row.get('final_authority') == 'HARD_RULE' else 'no'} | "
+            f"{'active' if cd.get('active') else 'no'} | {row.get('churn_risk') or '-'} | "
+            f"{row.get('ev_margin_actual')} / {row.get('ev_margin_required')} |"
+        )
+    lines.extend(
+        [
         "",
         "## Top conflicts",
         "",
         "| ticker | winner | authority | explanation |",
         "| --- | --- | --- | --- |",
     ]
+    )
     for row in payload.get("top_conflicts") or []:
         lines.append(
             f"| {row.get('ticker')} | {row.get('winning_scenario')} | {row.get('final_authority')} | "
@@ -673,13 +757,17 @@ def apply_conflict_resolution_bias(
     buy_row = next((s for s in ev_table if s.get("action") == "BUY_PAPER"), None)
     if buy_row and row.get("high_risk_buy_allowed") and not buy_row["hard_rule_status"]["blocked"]:
         buy_raev = _f(buy_row.get("risk_adjusted_EV"))
-        scores["BUY_PAPER"] += 38.0
-        scores["SKIP_PAPER"] = max(0.0, scores.get("SKIP_PAPER", 0.0) - 22.0)
-        evidence.append(
-            f"conflict resolution: HIGH_RISK BUY allowed raEV={buy_raev:.2f} "
-            f"cash=${_f(row.get('idle_cash_usd')):.0f} drawdown={buy_row.get('expected_drawdown')}"
-        )
-    elif winning == "BUY_PAPER" and row.get("final_authority") == "EV_OPTIMIZER":
+        prev = _s((row.get("previous_action") or (ctx.get("active_decisions_by_ticker") or {}).get(ticker.upper(), {}).get("last_executed_action")))
+        if prev and prev != "BUY_PAPER" and not row.get("switch_authorized"):
+            evidence.append(f"conflict resolution: BUY boost skipped — switch not authorized ({row.get('switch_reason')})")
+        else:
+            scores["BUY_PAPER"] += 38.0
+            scores["SKIP_PAPER"] = max(0.0, scores.get("SKIP_PAPER", 0.0) - 22.0)
+            evidence.append(
+                f"conflict resolution: HIGH_RISK BUY allowed raEV={buy_raev:.2f} "
+                f"cash=${_f(row.get('idle_cash_usd')):.0f} drawdown={buy_row.get('expected_drawdown')}"
+            )
+    elif winning == "BUY_PAPER" and row.get("final_authority") == "EV_OPTIMIZER" and row.get("switch_authorized", True):
         scores["BUY_PAPER"] += 18.0
         scores["SKIP_PAPER"] = max(0.0, scores.get("SKIP_PAPER", 0.0) - 10.0)
         evidence.append("conflict resolution: EV_OPTIMIZER selects BUY_PAPER over policy SKIP bias")
@@ -714,6 +802,9 @@ def apply_conflict_resolution_bias(
 
 
 def run_conflict_resolution(*, write_outputs_flag: bool = True, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    from tae_decision_state import run_decision_state_refresh
+
+    run_decision_state_refresh(write_outputs_flag=write_outputs_flag)
     payload = build_conflict_resolution(ctx)
     if write_outputs_flag:
         paths = write_outputs(payload)

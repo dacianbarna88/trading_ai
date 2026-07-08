@@ -35,6 +35,7 @@ MEMORY_JSONL = Path("runtime_outputs/longitudinal_memory/decisions.jsonl")
 PAPER_EXEC_PORTFOLIO = Path("runtime_outputs/paper_execution/paper_portfolio.json")
 PAPER_EXEC_ATTRIBUTION = Path("runtime_outputs/paper_execution/rule_outcome_attribution.json")
 PAPER_EXEC_TRADES = Path("runtime_outputs/paper_execution/paper_trades.jsonl")
+PAPER_EXEC_ORDERS = Path("runtime_outputs/paper_execution/paper_orders.jsonl")
 PAPER_MTM_JSON = Path("runtime_outputs/paper_execution/mark_to_market.json")
 RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
 
@@ -409,6 +410,25 @@ def collect_summary(
         final_verdict = "READY_FOR_PAPER_DAY"
 
     portfolio = accounting.get("portfolio_summary") or accounting
+
+    switch_accepted = sum(
+        1
+        for d in decisions
+        if d.get("previous_action")
+        and d.get("previous_action") != d.get("action")
+        and d.get("decision_switch_authorized")
+    )
+    switch_blocked = sum(
+        1
+        for d in decisions
+        if d.get("previous_action")
+        and d.get("previous_action") != d.get("action")
+        and not d.get("decision_switch_authorized")
+    )
+    skipped_switch_exec = sum(
+        1 for row in _load_jsonl(PAPER_EXEC_ORDERS) if row.get("status") == "SKIPPED_SWITCH_NOT_AUTHORIZED"
+    )
+
     return {
         "schema": "tae_full_paper_cycle_summary",
         "version": "v1",
@@ -488,6 +508,9 @@ def collect_summary(
             }
             for d in losing_evals
         ],
+        "decision_switch_accepted_count": switch_accepted,
+        "decision_switch_blocked_count": switch_blocked,
+        "execution_skipped_switch_count": skipped_switch_exec,
         "final_verdict": final_verdict,
         "failed_steps": failed_steps,
     }
@@ -558,6 +581,12 @@ def write_report(summary: dict[str, Any]) -> None:
         f"- Top trusted rules: `{summary.get('top_trusted_rules')}`",
         f"- Decisions blocked (no PAPER position): **{summary.get('decisions_blocked_no_position', 0)}**",
         f"- Losing positions evaluated: `{summary.get('losing_positions_evaluated')}`",
+        "",
+        "## Decision state (anti-churn)",
+        "",
+        f"- PDE switch authorized: **{summary.get('decision_switch_accepted_count', 0)}**",
+        f"- PDE switch blocked: **{summary.get('decision_switch_blocked_count', 0)}**",
+        f"- Execution skipped (unauthorized switch): **{summary.get('execution_skipped_switch_count', 0)}**",
         "",
         "## Top PAPER actions (by confidence)",
         "",

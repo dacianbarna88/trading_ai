@@ -1,6 +1,6 @@
 # TAE Paper Decision Engine Report
 
-**Generated:** 2026-07-08T15:51:02+00:00
+**Generated:** 2026-07-08T19:30:07+00:00
 **Mode:** PAPER_ONLY — READ_ONLY — NO_BROKER — NO_LIVE_CHANGE — NO_EXECUTION
 **Live promotion allowed:** false
 
@@ -9,40 +9,47 @@
 ## Executive summary
 
 - Decisions generated: **25**
-- **HOLD_PAPER**: 4
+- **BUY_PAPER**: 2
+- **HOLD_PAPER**: 7
 - **PROTECT_PAPER**: 3
-- **SELL_PAPER**: 1
-- **SKIP_PAPER**: 17
+- **SELL_PAPER**: 2
+- **SKIP_PAPER**: 11
 
 ## Decision table
 
-| ticker | action | confidence | risk | profit Δ | cap eff Δ | evidence |
+| ticker | action | confidence | risk | profit Δ | cap eff Δ | switch | evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| QQQ | SELL_PAPER | 0.925 | 80.05 | 0.79 | 0.64 | HARD RISK override (HARD_STOP_LOSS_-3): -3.21% loss → SELL_P |
-| AAPL | PROTECT_PAPER | 0.867 | 21.22 | 5.43 | -0.51 | protection posture/signal=/TRAILING_PROTECTION_SHADOW; monit |
-| LLY | PROTECT_PAPER | 0.856 | 43.32 | 4.96 | 2.58 | protection posture/signal=TRAIL_SHADOW/; monitor strategy=HO |
-| MC.PA | PROTECT_PAPER | 0.398 | 21.28 | 3.31 | -0.78 | monitor strategy=HOLD_AND_MONITOR_SHADOW; knowledge base rul |
-| SPY | HOLD_PAPER | 0.673 | 18.7 | 4.37 | -1.84 | healthy winner lifecycle=EARLY_WINNER; horizon: candidate al |
-| PM | HOLD_PAPER | 0.615 | 16.68 | 4.27 | -1.97 | healthy winner lifecycle=EARLY_WINNER; knowledge base rules: |
-| PG | HOLD_PAPER | 0.614 | 11.33 | 11.41 | -0.98 | healthy winner lifecycle=SURVIVED; horizon: candidate alignm |
-| MRK | HOLD_PAPER | 0.59 | 10.37 | 0.32 | -1.92 | healthy winner lifecycle=SURVIVED; horizon: candidate alignm |
-| AMAT | SKIP_PAPER | 0.356 | 100.0 | 35.25 | 2.9 | signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHA |
-| HSBA.L | SKIP_PAPER | 0.349 | 100.0 | 37.38 | 3.6 | signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHA |
-| HD | SKIP_PAPER | 0.344 | 0.0 | 12.54 | -0.0 | signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHA |
-| MU | SKIP_PAPER | 0.344 | 100.0 | 35.9 | 2.9 | signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHA |
-| SIE.DE | SKIP_PAPER | 0.344 | 19.03 | 18.45 | -0.51 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| ABBV | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| AIR.PA | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | signal=STRONG BUY score=100.0; policy=HIGH_RISK/CAPITAL_PRES |
-| ALV.DE | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| AZN.L | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| BP.L | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| DIA | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHA |
-| GE | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | signal=STRONG BUY score=100.0; policy=HIGH_RISK/CAPITAL_PRES |
-| MSFT | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| NVDA | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| SAP.DE | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| SHEL.L | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
-| ULVR.L | SKIP_PAPER | 0.332 | 0.0 | 0.0 | 0.0 | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| HSBA.L | BUY_PAPER | 0.275 | 100.0 | 37.38 | 3.6 | switch=yes | signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHA |
+| MU | BUY_PAPER | 0.275 | 100.0 | 35.9 | 2.9 | switch=yes | signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHA |
+| AMAT | SELL_PAPER | 0.95 | 100.0 | 35.25 | 2.9 | switch=no | HARD RISK override (HARD_STOP_LOSS_-3): -3.50% loss → SELL_P |
+| HD | SELL_PAPER | 0.5 | 0.0 | 12.54 | -0.0 | switch=yes | low capital_efficiency=0.0; knowledge base rules: MISSED_PRO |
+| AAPL | PROTECT_PAPER | 0.931 | 21.22 | 5.43 | -0.51 | switch=yes | protection posture/signal=/TRAILING_PROTECTION_SHADOW; monit |
+| LLY | PROTECT_PAPER | 0.921 | 43.32 | 4.96 | 2.58 | switch=yes | protection posture/signal=TRAIL_SHADOW/; monitor strategy=HO |
+| MC.PA | PROTECT_PAPER | 0.461 | 21.28 | 3.31 | -0.78 | switch=yes | monitor strategy=HOLD_AND_MONITOR_SHADOW; knowledge base rul |
+| AIR.PA | HOLD_PAPER | 0.753 | 0.0 | 0.0 | 0.0 | switch=no | low capital_efficiency=0.0; knowledge base rules: MISSED_PRO |
+| DIA | HOLD_PAPER | 0.753 | 0.0 | 0.0 | 0.0 | switch=no | low capital_efficiency=0.0; knowledge base rules: MISSED_PRO |
+| GE | HOLD_PAPER | 0.753 | 0.0 | 0.0 | 0.0 | switch=no | low capital_efficiency=0.0; knowledge base rules: MISSED_PRO |
+| SPY | HOLD_PAPER | 0.675 | 18.7 | 4.37 | -1.84 | switch=yes | healthy winner lifecycle=EARLY_WINNER; horizon: candidate al |
+| PM | HOLD_PAPER | 0.618 | 16.68 | 4.27 | -1.97 | switch=yes | healthy winner lifecycle=EARLY_WINNER; knowledge base rules: |
+| PG | HOLD_PAPER | 0.616 | 11.33 | 11.41 | -0.98 | switch=yes | healthy winner lifecycle=SURVIVED; horizon: candidate alignm |
+| MRK | HOLD_PAPER | 0.593 | 10.37 | 0.32 | -1.92 | switch=yes | healthy winner lifecycle=SURVIVED; horizon: candidate alignm |
+| QQQ | SKIP_PAPER | 0.331 | 80.05 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; horizon BUY ga |
+| ABBV | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| ALV.DE | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| AZN.L | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| BP.L | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| MSFT | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| NVDA | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| SAP.DE | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| SHEL.L | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| SIE.DE | SKIP_PAPER | 0.25 | 19.03 | 18.45 | -0.51 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+| ULVR.L | SKIP_PAPER | 0.25 | 0.0 | 0.0 | 0.0 | switch=yes | policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base |
+
+## Decision state / switch summary
+
+- Switch authorized: **21**
+- Switch blocked (PDE gate): **3**
+- Active decisions loaded: **True**
 
 ## Closed intelligence loop
 

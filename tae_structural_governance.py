@@ -538,6 +538,23 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     if not r10["ok"]:
         exit_code = r10["exit_code"] or 1
 
+    # Decision state refresh — before conflict resolution (anti-churn ownership view)
+    r_ds = run_cli_step("decision_state", [py, "tae.py", "decision-state-refresh"], cwd=root)
+    cli_steps.append(r_ds)
+    steps.append(
+        step_from_cli(
+            10,
+            "decision_state",
+            "DECISION STATE",
+            "LEARNING",
+            r_ds,
+            inputs=["paper_orders", "paper_portfolio", "hard_risk"],
+            outputs=["runtime_outputs/decision_state/active_decisions.json"],
+        )
+    )
+    if not r_ds["ok"]:
+        exit_code = r_ds["exit_code"] or 1
+
     # Conflict resolution refresh — before PDE (EV evidence for policy conflicts)
     r_cr = run_cli_step("conflict_resolution", [py, "tae.py", "conflict-resolution-refresh"], cwd=root)
     cli_steps.append(r_cr)

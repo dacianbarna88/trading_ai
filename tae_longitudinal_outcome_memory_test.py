@@ -102,11 +102,11 @@ class LongitudinalOutcomeMemoryTest(unittest.TestCase):
                 "tae_longitudinal_outcome_memory.SHADOW_JSON", base / "missing.json"
             ), mock.patch("tae_longitudinal_outcome_memory.ACCOUNTING_JSON", base / "missing.json"):
                 records: dict = {}
-                new1, _ = ingest_decisions(records)
+                new1, _, _ = ingest_decisions(records)
                 self.assertEqual(new1, 1)
                 save_memory_index(records)
                 records2 = load_memory_index()
-                new2, _ = ingest_decisions(records2)
+                new2, _, _ = ingest_decisions(records2)
                 self.assertEqual(new2, 0)
                 self.assertEqual(len(records2), 1)
 
