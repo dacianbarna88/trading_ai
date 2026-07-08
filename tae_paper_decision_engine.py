@@ -51,6 +51,7 @@ REPORT_MD = Path("TAE_PAPER_DECISION_ENGINE_REPORT.md")
 DISCIPLINE_REPORT_MD = Path("TAE_DECISION_DISCIPLINE_REPORT.md")
 PAPER_PORTFOLIO_JSON = Path("runtime_outputs/paper_execution/paper_portfolio.json")
 RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
+HARD_RISK_JSON = Path("runtime_outputs/governance/hard_risk.json")
 
 PAPER_ACTIONS = frozenset(
     {
@@ -190,6 +191,47 @@ def apply_rule_lifecycle_bias(
         "adjustments": adjustments,
         "mode": MODE,
         "live_promotion_allowed": False,
+    }
+
+
+def enforce_hard_risk_discipline(
+    ticker: str,
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """HARD layer: -3% stop / -5% critical override before all soft policy logic."""
+    ticker = ticker.upper()
+    if not paper_position_held(ticker, ctx):
+        return {"override": False, "evaluated": False}
+
+    row = (ctx.get("hard_risk_by") or {}).get(ticker) or {}
+    status = _s(row.get("status"))
+    if status not in {"STOP_LOSS_BREACHED", "CRITICAL_LOSS"}:
+        return {
+            "override": False,
+            "evaluated": True,
+            "status": status or "OK",
+            "pnl_pct": _f(row.get("pnl_pct")),
+        }
+
+    hard_rule = _s(row.get("hard_rule"))
+    pnl_pct = _f(row.get("pnl_pct"))
+    required = _s(row.get("required_action"))
+    for action in scores:
+        scores[action] = 0.0
+    scores["SELL_PAPER"] = 100.0
+    evidence.append(
+        f"HARD RISK override ({hard_rule}): {pnl_pct:.2f}% loss → SELL_PAPER "
+        f"(required={required}, before soft logic)"
+    )
+    return {
+        "override": True,
+        "evaluated": True,
+        "status": status,
+        "hard_rule": hard_rule,
+        "pnl_pct": pnl_pct,
+        "required_action": required,
     }
 
 
@@ -1031,6 +1073,18 @@ def build_context() -> dict[str, Any]:
     paper_portfolio = load_json(PAPER_PORTFOLIO_JSON)
     paper_positions = load_paper_positions(paper_portfolio)
     rule_lifecycle = load_json(RULE_LIFECYCLE_JSON)
+    hard_risk_doc = load_json(HARD_RISK_JSON)
+    hard_risk_by: dict[str, dict[str, Any]] = {}
+    for row in (hard_risk_doc or {}).get("positions") or []:
+        if isinstance(row, dict):
+            t = _s(row.get("ticker")).upper()
+            if t:
+                hard_risk_by[t] = row
+    for row in (hard_risk_doc or {}).get("breaches") or []:
+        if isinstance(row, dict):
+            t = _s(row.get("ticker")).upper()
+            if t:
+                hard_risk_by[t] = row
 
     return {
         "gii": gii,
@@ -1062,6 +1116,8 @@ def build_context() -> dict[str, Any]:
         "paper_positions": paper_positions,
         "paper_portfolio": paper_portfolio,
         "rule_lifecycle": rule_lifecycle,
+        "hard_risk": hard_risk_doc,
+        "hard_risk_by": hard_risk_by,
         "signals": signals,
         "top_growth": top_growth,
         "horizon_ssot": horizon_ssot,
@@ -1094,6 +1150,7 @@ def build_context() -> dict[str, Any]:
             "pattern_discovery": PATTERN_DISCOVERY_TXT.is_file(),
             "paper_portfolio": PAPER_PORTFOLIO_JSON.is_file(),
             "rule_lifecycle": RULE_LIFECYCLE_JSON.is_file(),
+            "hard_risk": HARD_RISK_JSON.is_file(),
         },
     }
 
@@ -1271,7 +1328,9 @@ def compute_risk_score(ticker: str, ctx: dict[str, Any]) -> float:
     return round(min(100.0, max(0.0, score)), 2)
 
 
-def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dict[str, float], list[str], list, bool, dict, dict, dict, dict]:
+def score_actions_for_ticker(
+    ticker: str, ctx: dict[str, Any]
+) -> tuple[str, dict[str, float], list[str], list, bool, dict, dict, dict, dict, dict]:
     ticker = ticker.upper()
     held = paper_position_held(ticker, ctx)
     paper_pos = (ctx.get("paper_positions") or {}).get(ticker) or {}
@@ -1302,6 +1361,28 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     scores: dict[str, float] = {a: 0.0 for a in PAPER_ACTIONS}
     evidence: list[str] = []
 
+    hard_risk_discipline = enforce_hard_risk_discipline(ticker, scores, evidence, ctx)
+    if hard_risk_discipline.get("override"):
+        hz = build_horizon_context(ticker, ctx)
+        position_discipline = enforce_position_discipline(ticker, scores, evidence, ctx)
+        loss_discipline = {"evaluated": True, "superseded_by": "hard_risk_discipline"}
+        consumption = {
+            "hard_risk_discipline": hard_risk_discipline,
+            "rule_lifecycle_evidence": None,
+        }
+        return (
+            "SELL_PAPER",
+            scores,
+            evidence,
+            [],
+            False,
+            hz,
+            consumption,
+            position_discipline,
+            loss_discipline,
+            hard_risk_discipline,
+        )
+
     if not gii and not shadow and not signal:
         scores["SKIP_PAPER"] = 80.0
         evidence.append("insufficient intelligence for ticker")
@@ -1321,10 +1402,22 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
             ticker, scores, evidence, ctx, rule_states=lifecycle_evidence.get("rule_states")
         )
         consumption["rule_lifecycle_evidence"] = lifecycle_evidence
+        consumption["hard_risk_discipline"] = hard_risk_discipline
         best = max(scores, key=lambda a: scores[a])
         if scores[best] < 18.0:
             best = "SKIP_PAPER"
-        return best, scores, evidence, [], False, hz, consumption, position_discipline, loss_discipline
+        return (
+            best,
+            scores,
+            evidence,
+            [],
+            False,
+            hz,
+            consumption,
+            position_discipline,
+            loss_discipline,
+            hard_risk_discipline,
+        )
 
     if held:
         if posture in {"PROTECT_SHADOW"} and current_pct > 2.0 and missed >= 15.0:
@@ -1429,6 +1522,7 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
     loss_discipline = enforce_loss_discipline(
         ticker, scores, evidence, ctx, rule_states=lifecycle_evidence.get("rule_states")
     )
+    consumption_evidence["hard_risk_discipline"] = hard_risk_discipline
 
     best = max(scores, key=lambda a: scores[a])
     if scores[best] < 18.0:
@@ -1450,6 +1544,7 @@ def score_actions_for_ticker(ticker: str, ctx: dict[str, Any]) -> tuple[str, dic
         consumption_evidence,
         position_discipline,
         loss_discipline,
+        hard_risk_discipline,
     )
 
 
@@ -1464,6 +1559,7 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         consumption_evidence,
         position_discipline,
         loss_discipline,
+        hard_risk_discipline,
     ) = score_actions_for_ticker(ticker, ctx)
     adaptive_weight_detail = consumption_evidence.get("adaptive_weight_evidence")
     gii = (ctx.get("gii_by") or {}).get(ticker.upper()) or {}
@@ -1519,6 +1615,8 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("live_signals.csv")
     if ctx.get("rule_lifecycle"):
         sources.append("runtime_outputs/paper_execution/rule_lifecycle.json")
+    if ctx.get("hard_risk"):
+        sources.append("runtime_outputs/governance/hard_risk.json")
     if ticker.upper() in (ctx.get("paper_positions") or {}):
         sources.append("runtime_outputs/paper_execution/paper_portfolio.json")
 
@@ -1573,6 +1671,7 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "rule_lifecycle_evidence": consumption_evidence.get("rule_lifecycle_evidence"),
         "position_discipline": position_discipline,
         "loss_discipline": loss_discipline,
+        "hard_risk_discipline": hard_risk_discipline,
         "paper_position_held": paper_position_held(ticker.upper(), ctx),
         "created_at": ts,
     }
