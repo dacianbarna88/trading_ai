@@ -168,7 +168,7 @@ def price_for_ticker(ticker: str, accounting: dict[str, Any] | None, decision: d
     px = _f(pos.get("current_price"))
     if px > 0:
         return px
-    return 100.0
+    return 0.0
 
 
 def fill_price_for_position(
@@ -177,7 +177,7 @@ def fill_price_for_position(
     accounting: dict[str, Any] | None,
     decision: dict[str, Any],
 ) -> float:
-    """MTM/current price for fills — never use avg_price as fill."""
+    """MTM/current price for fills — never use avg_price or synthetic defaults as fill."""
     if pos:
         px = _f(pos.get("current_price"))
         if px > 0:
@@ -189,11 +189,94 @@ def fill_price_for_position(
             px = 0.0
     if px > 0:
         return px
-    if pos:
+    return 0.0
+
+
+def _canonical_account_value(accounting: dict[str, Any] | None) -> float:
+    acct = accounting or {}
+    for key in ("account_value_corrected", "account_value_cash_based", "total_account_value"):
+        value = _f(acct.get(key))
+        if value > 0:
+            return value
+    cash = _f(acct.get("cash_available"))
+    open_val = _f(acct.get("open_positions_value"))
+    if cash + open_val > 0:
+        return cash + open_val
+    return _f(acct.get("effective_contributed_capital"), 30000.0)
+
+
+def _validation_capital_base(accounting: dict[str, Any] | None) -> float:
+    acct = accounting or {}
+    contributed = _f(acct.get("effective_contributed_capital"))
+    if contributed > 0:
+        return contributed
+    return _canonical_account_value(acct)
+
+
+def paper_portfolio_has_synthetic_fill_corruption(
+    portfolio: dict[str, Any],
+    accounting: dict[str, Any] | None = None,
+) -> bool:
+    """Detect inflated PAPER state from legacy $100 synthetic fill fallback."""
+    canon = _canonical_account_value(accounting)
+    paper_val = _f(portfolio.get("total_value"))
+    if canon > 0 and paper_val - canon > 1000:
+        return True
+    for pos in (portfolio.get("positions") or {}).values():
         avg = _f(pos.get("avg_price"))
-        if avg > 0:
-            return avg
-    return 100.0
+        current = _f(pos.get("current_price"))
+        if abs(avg - 100.0) < 0.01 and current > 150:
+            return True
+    if TRADES_JSONL.is_file():
+        buy_at_100 = 0
+        for line in TRADES_JSONL.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                trade = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if _s(trade.get("action")).upper() != "BUY_PAPER":
+                continue
+            if abs(_f(trade.get("fill_price")) - 100.0) < 0.01:
+                buy_at_100 += 1
+        if buy_at_100 >= 3:
+            return True
+    return False
+
+
+def reset_paper_portfolio_from_accounting(
+    accounting: dict[str, Any] | None = None,
+    *,
+    archive_ledger: bool = True,
+) -> dict[str, Any]:
+    """Rebuild PAPER portfolio from canonical accounting; archive corrupt ledger."""
+    acct = accounting or load_json(ACCOUNTING_JSON) or {}
+    archive_dir = OUTPUT_DIR / "archive" / "capital_base_defect_reset"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _now().replace(":", "").replace("+", "")
+    if archive_ledger:
+        for path in (PORTFOLIO_JSON, ORDERS_JSONL, TRADES_JSONL):
+            if not path.is_file():
+                continue
+            dest = archive_dir / f"{path.name}.{stamp}"
+            dest.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+            if path.suffix == ".jsonl":
+                path.write_text("", encoding="utf-8")
+    portfolio = bootstrap_portfolio(acct, None)
+    recalc_portfolio(portfolio)
+    portfolio["validation_capital_base"] = round(_validation_capital_base(acct), 2)
+    portfolio["starting_value"] = round(_f(portfolio.get("total_value")), 2)
+    portfolio["baseline_unrealized_pnl"] = round(_f(portfolio.get("unrealized_pnl")), 4)
+    portfolio["realized_pnl_at_baseline"] = 0.0
+    portfolio["realized_pnl"] = 0.0
+    portfolio["processed_decision_ids"] = []
+    portfolio.pop("accounting_baseline_v1", None)
+    portfolio["capital_base_reset_at"] = _now()
+    portfolio["capital_base_reset_reason"] = "SYNTHETIC_100_FILL_DEFECT"
+    recalc_portfolio(portfolio)
+    save_json(PORTFOLIO_JSON, portfolio)
+    return portfolio
 
 
 def extract_rule_sources(decision: dict[str, Any]) -> list[str]:
@@ -270,6 +353,7 @@ def bootstrap_portfolio(accounting: dict[str, Any] | None, existing: dict[str, A
         "processed_decision_ids": [],
     }
     recalc_portfolio(portfolio)
+    portfolio["validation_capital_base"] = round(_validation_capital_base(acct), 2)
     portfolio["starting_value"] = round(_f(portfolio.get("total_value")), 2)
     portfolio["baseline_unrealized_pnl"] = round(_f(portfolio.get("unrealized_pnl")), 4)
     portfolio["realized_pnl_at_baseline"] = round(_f(portfolio.get("realized_pnl")), 4)
@@ -397,6 +481,11 @@ def execute_decision(
     pos_ref = positions.get(ticker)
     fill_price = fill_price_for_position(pos_ref, ticker, accounting, decision)
     price = fill_price
+    if fill_price <= 0 and _has_open_position(_position_snapshot(pos_ref)):
+        fallback = _f((_position_snapshot(pos_ref)).get("current_price"))
+        if fallback > 0:
+            fill_price = fallback
+            price = fallback
 
     cash_before = round(_f(portfolio.get("cash")), 4)
     before = _position_snapshot(positions.get(ticker))
@@ -466,20 +555,24 @@ def execute_decision(
         else:
             status = "NO_CHANGE"
     elif action == "BUY_PAPER":
-        cash = _f(portfolio.get("cash"))
-        notional = min(cash * max(0.05, confidence * 0.12), cash * 0.15)
-        bought, after_pos = _buy_shares(portfolio, ticker, notional, fill_price)
-        fill_shares = bought
-        if fill_shares > 0:
-            gross_value = round(notional, 4)
-            capital_impact = round(-notional, 4)
-            after = _position_snapshot(after_pos)
-            status = "EXECUTED"
-            executed = True
-            is_trade = True
+        if fill_price <= 0:
+            status = "SKIPPED_NO_MARK_PRICE"
+            reason = f"BUY_PAPER skipped — no mark price for {ticker}"
         else:
-            status = "SKIPPED_NO_CASH"
-            reason = f"BUY_PAPER skipped — insufficient cash for {ticker}"
+            cash = _f(portfolio.get("cash"))
+            notional = min(cash * max(0.05, confidence * 0.12), cash * 0.15)
+            bought, after_pos = _buy_shares(portfolio, ticker, notional, fill_price)
+            fill_shares = bought
+            if fill_shares > 0:
+                gross_value = round(notional, 4)
+                capital_impact = round(-notional, 4)
+                after = _position_snapshot(after_pos)
+                status = "EXECUTED"
+                executed = True
+                is_trade = True
+            else:
+                status = "SKIPPED_NO_CASH"
+                reason = f"BUY_PAPER skipped — insufficient cash for {ticker}"
     elif action == "ROTATE_PAPER":
         sell_shares = _f(before.get("shares"))
         avg = _f(before.get("avg_price"))
@@ -723,6 +816,9 @@ def ensure_accounting_baseline(portfolio: dict[str, Any]) -> bool:
     if portfolio.get("accounting_baseline_v1"):
         return False
     recalc_portfolio(portfolio)
+    accounting = load_json(ACCOUNTING_JSON) or {}
+    if portfolio.get("validation_capital_base") is None:
+        portfolio["validation_capital_base"] = round(_validation_capital_base(accounting), 2)
     portfolio["starting_value"] = round(_f(portfolio.get("total_value")), 2)
     portfolio["baseline_unrealized_pnl"] = round(_f(portfolio.get("unrealized_pnl")), 4)
     portfolio["realized_pnl_at_baseline"] = round(_f(portfolio.get("realized_pnl")), 4)
@@ -1039,13 +1135,20 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     decisions = list(decisions_doc.get("decisions") or [])
     accounting = load_json(ACCOUNTING_JSON)
     existing = load_json(PORTFOLIO_JSON)
-    portfolio = bootstrap_portfolio(accounting, existing)
+    if existing and paper_portfolio_has_synthetic_fill_corruption(existing, accounting):
+        portfolio = reset_paper_portfolio_from_accounting(accounting, archive_ledger=True)
+        existing = portfolio
+    else:
+        portfolio = bootstrap_portfolio(accounting, existing)
     if portfolio.get("baseline_unrealized_pnl") is None:
         portfolio["baseline_unrealized_pnl"] = round(_f(portfolio.get("unrealized_pnl")), 4)
     if portfolio.get("realized_pnl_at_baseline") is None:
         portfolio["realized_pnl_at_baseline"] = round(_f(portfolio.get("realized_pnl")), 4)
     if _f(portfolio.get("starting_value")) <= 0:
+        recalc_portfolio(portfolio)
         portfolio["starting_value"] = round(_f(portfolio.get("total_value")), 2)
+    if portfolio.get("validation_capital_base") is None:
+        portfolio["validation_capital_base"] = round(_validation_capital_base(accounting), 2)
     backfill_portfolio_realized_from_trades(portfolio, TRADES_JSONL)
     baseline_reset = ensure_accounting_baseline(portfolio) if existing else False
     if not baseline_reset:

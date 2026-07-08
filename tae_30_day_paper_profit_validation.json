@@ -1,0 +1,99 @@
+{
+  "schema": "tae_30_day_paper_profit_validation",
+  "version": "v1",
+  "validation_started": "2026-07-08",
+  "validation_baseline_reestablished": "2026-07-08T20:57:14+00:00",
+  "architecture_frozen": true,
+  "frozen_commits": [
+    "59982ee",
+    "d39ec35",
+    "b48a3c7",
+    "357446a",
+    "e6e5a4a",
+    "09c13bb"
+  ],
+  "mode": "PAPER_ONLY",
+  "live_promotion_allowed": false,
+  "updated_at": "2026-07-08T20:57:14+00:00",
+  "current_day": 0,
+  "capital_base_defect": {
+    "status": "FIXED",
+    "audit": "TAE_PAPER_CAPITAL_BASE_DEFECT_AUDIT.md",
+    "audit_json": "tae_paper_capital_base_defect_audit.json",
+    "invalid_session_day": 1,
+    "invalid_reason": "SYNTHETIC_100_FILL_PRICE_FALLBACK inflated account value to 51442.97"
+  },
+  "validation_baseline": {
+    "established_at": "2026-07-08T20:57:14+00:00",
+    "validation_capital_base": 30000.0,
+    "paper_account_value": 29913.959,
+    "cash": 2359.2777,
+    "open_positions": 12,
+    "realized_pnl_cumulative": 0.0,
+    "unrealized_pnl": -426.9614,
+    "total_pnl": -426.9614,
+    "profit_vs_capital_base": -86.041,
+    "starting_value": 30340.92,
+    "canonical_account_value_reference": 30340.91,
+    "reconciliation_status": "PASS"
+  },
+  "milestones": {
+    "day_5_review": false,
+    "day_10_review": false,
+    "day_20_review": false,
+    "day_30_final": false
+  },
+  "final_verdict": null,
+  "sessions": [
+    {
+      "day": 1,
+      "session_date": "2026-07-08",
+      "session_timestamp": "2026-07-08T20:40:11",
+      "status": "INVALID_SUPERSEDED",
+      "invalid_reason": "Capital base defect — synthetic $100 fills inflated PAPER account to 51442.97",
+      "command": "python3 tae.py full-paper-cycle",
+      "cycle_verdict": "READY_FOR_PAPER_DAY",
+      "exit_code": 0,
+      "metrics": {
+        "paper_account_value": 51442.9736,
+        "cash": 24583.8761,
+        "open_positions": 11,
+        "realized_pnl_cumulative": 14870.5632,
+        "unrealized_pnl": 6231.4896,
+        "total_pnl": 21102.0528,
+        "note": "CORRUPT — do not use for profit validation"
+      },
+      "superseded_by": "2026-07-08T20:57:14+00:00"
+    },
+    {
+      "day": 0,
+      "session_date": "2026-07-08",
+      "session_timestamp": "2026-07-08T20:57:14+00:00",
+      "status": "BASELINE_REESTABLISHED",
+      "command": "python3 tae.py full-paper-cycle",
+      "cycle_verdict": "READY_FOR_PAPER_DAY",
+      "exit_code": 0,
+      "fix_applied": "TAE: Fix PAPER capital base for profit validation",
+      "metrics": {
+        "validation_capital_base": 30000.0,
+        "paper_account_value": 29913.959,
+        "cash": 2359.2777,
+        "open_positions": 12,
+        "realized_pnl_cumulative": 0.0,
+        "unrealized_pnl": -426.9614,
+        "total_pnl": -426.9614,
+        "profit_vs_capital_base": -86.041,
+        "canonical_account_value_reference": 30340.91
+      },
+      "reconciliation": {
+        "status": "PASS",
+        "ok": true,
+        "errors": []
+      },
+      "canonical_vs_paper_delta": {
+        "total_value": -426.951,
+        "note": "MTM price drift from canonical snapshot marks; within expected post-reset tolerance"
+      }
+    }
+  ]
+}

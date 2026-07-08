@@ -1,0 +1,100 @@
+{
+  "schema": "tae_paper_capital_base_defect_audit",
+  "version": "v1",
+  "audit_date": "2026-07-08",
+  "verdict": "PAPER_CAPITAL_BASE_FIXED",
+  "mode": "PAPER_ONLY",
+  "rules": {
+    "audit_first": true,
+    "no_new_modules": true,
+    "no_strategy_changes": true,
+    "no_decision_logic_changes": true,
+    "paper_only": true
+  },
+  "defect_summary": {
+    "reported_account_value": 51442.9736,
+    "reported_total_pnl": 21102.0528,
+    "expected_capital_base": 30000.0,
+    "canonical_account_value": 30340.91,
+    "paper_minus_canonical_delta": 21102.0636,
+    "primary_cause": "SYNTHETIC_100_FILL_PRICE_FALLBACK",
+    "root_cause_file": "tae_paper_execution.py",
+    "root_cause_functions": [
+      "price_for_ticker",
+      "fill_price_for_position"
+    ]
+  },
+  "mathematical_proof": {
+    "corrupt_state": {
+      "cash": 24583.8761,
+      "open_positions_value": 26859.0975,
+      "total_value": 51442.9736,
+      "total_value_formula": "cash + open_positions_value",
+      "total_value_check_ok": true,
+      "realized_pnl": 14870.5632,
+      "unrealized_pnl": 6231.4896,
+      "total_pnl": 21102.0528,
+      "total_pnl_formula": "realized_pnl + unrealized_pnl",
+      "total_pnl_check_ok": true,
+      "starting_value_stored": 30057.82,
+      "effective_contributed_capital": 30000.0,
+      "account_value_corrected": 30340.91
+    },
+    "synthetic_inflation": {
+      "buy_at_100_count": 12,
+      "sell_from_100_basis_count": 9,
+      "fake_realized_pnl_from_100_basis": 15706.29,
+      "open_positions_avg_100_tickers": [
+        "AIR.PA",
+        "DIA",
+        "GE"
+      ],
+      "fake_unrealized_pnl_from_100_basis": 6157.59,
+      "combined_synthetic_pnl": 21863.88,
+      "explains_paper_canonical_delta": true
+    },
+    "ruled_out": {
+      "cash_positions_pnl_double_count": false,
+      "duplicated_trades": false,
+      "realized_pnl_in_total_value": false
+    }
+  },
+  "contributing_factors": [
+    "bootstrap_portfolio preserved corrupt existing portfolio when schema matched",
+    "ensure_accounting_baseline set starting_value from inflated total_value",
+    "pre_validation_churn_trades_on_2026_07_08 mixed into cumulative ledger",
+    "day_1_validation_used_inflated_total_value_as_baseline"
+  ],
+  "fix": {
+    "files_patched": [
+      "tae_paper_execution.py",
+      "tae_paper_execution_test.py"
+    ],
+    "changes": [
+      "removed_100_dollar_fill_fallback",
+      "buy_skipped_no_mark_price",
+      "auto_reset_on_corruption_detection",
+      "validation_capital_base_from_effective_contributed_capital",
+      "archive_corrupt_ledger_on_reset"
+    ],
+    "validation_day_1_status": "INVALID_SUPERSEDED",
+    "post_fix": {
+      "paper_account_value": 29913.959,
+      "validation_capital_base": 30000.0,
+      "profit_vs_capital_base": -86.041,
+      "realized_pnl": 0.0,
+      "unrealized_pnl": -426.9614,
+      "reconciliation_status": "PASS",
+      "canonical_vs_paper_delta_value": -426.951
+    }
+  },
+  "artifacts_inspected": [
+    "runtime_outputs/paper_execution/paper_portfolio.json",
+    "runtime_outputs/paper_execution/paper_orders.jsonl",
+    "runtime_outputs/paper_execution/paper_trades.jsonl",
+    "tae_paper_execution.py",
+    "tae_accounting_snapshot.json",
+    "TAE_30_DAY_PAPER_PROFIT_VALIDATION.md",
+    "tae_30_day_paper_profit_validation.json"
+  ]
+}

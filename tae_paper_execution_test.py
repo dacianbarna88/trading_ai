@@ -596,5 +596,78 @@ class PaperExecutionTest(unittest.TestCase):
             self.assertNotIn("AAPL", portfolio.get("positions") or {})
 
 
+class TestCapitalBaseDefectFix(unittest.TestCase):
+    def test_fill_price_no_synthetic_default(self) -> None:
+        decision = {"portfolio_snapshot": {}}
+        self.assertEqual(pe.fill_price_for_position(None, "NEWCO", None, decision), 0.0)
+        self.assertEqual(pe.price_for_ticker("NEWCO", None, decision), 0.0)
+
+    def test_buy_skipped_without_mark_price(self) -> None:
+        portfolio = {"cash": 5000.0, "realized_pnl": 0.0, "positions": {}}
+        decision = {
+            "decision_id": "PDEC-NEW-001",
+            "ticker": "NEWCO",
+            "action": "BUY_PAPER",
+            "confidence": 0.8,
+            "expected_profit_delta": 10.0,
+            "evidence": "test",
+        }
+        order = pe.execute_decision(decision, portfolio, accounting=None, all_decisions=[decision])
+        self.assertEqual(order["status"], "SKIPPED_NO_MARK_PRICE")
+        self.assertFalse(order["is_trade"])
+        self.assertEqual(portfolio["cash"], 5000.0)
+
+    def test_reset_portfolio_from_accounting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "paper_execution"
+            out_dir.mkdir(parents=True)
+            acct_path = Path(tmp) / "acct.json"
+            acct = {
+                "effective_contributed_capital": 30000.0,
+                "account_value_corrected": 30340.91,
+                "cash_available": 2335.28,
+                "open_positions_value": 28005.63,
+                "open_positions": [
+                    {"ticker": "AAPL", "shares": 10.0, "current_price": 312.96, "pnl": 35.0},
+                ],
+            }
+            acct_path.write_text(json.dumps(acct), encoding="utf-8")
+            corrupt = {
+                "schema": pe.SCHEMA,
+                "total_value": 51442.97,
+                "cash": 24583.88,
+                "realized_pnl": 14870.56,
+                "positions": {"DIA": {"shares": 8.0, "avg_price": 100.0, "current_price": 522.0}},
+            }
+            portfolio_path = out_dir / "paper_portfolio.json"
+            trades_path = out_dir / "paper_trades.jsonl"
+            portfolio_path.write_text(json.dumps(corrupt), encoding="utf-8")
+            trades_path.write_text(
+                json.dumps(
+                    {
+                        "action": "BUY_PAPER",
+                        "fill_price": 100.0,
+                        "is_trade": True,
+                        "record_type": "paper_trade",
+                        "fill_shares": 1.0,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(pe, "OUTPUT_DIR", out_dir), mock.patch.object(
+                pe, "PORTFOLIO_JSON", portfolio_path
+            ), mock.patch.object(pe, "ORDERS_JSONL", out_dir / "paper_orders.jsonl"), mock.patch.object(
+                pe, "TRADES_JSONL", trades_path
+            ), mock.patch.object(pe, "ACCOUNTING_JSON", acct_path):
+                self.assertTrue(pe.paper_portfolio_has_synthetic_fill_corruption(corrupt, acct))
+                reset = pe.reset_paper_portfolio_from_accounting(acct, archive_ledger=True)
+            self.assertAlmostEqual(reset["validation_capital_base"], 30000.0, places=2)
+            self.assertAlmostEqual(reset["realized_pnl"], 0.0, places=2)
+            self.assertIn("AAPL", reset["positions"])
+            self.assertNotIn("DIA", reset["positions"])
+            self.assertAlmostEqual(reset["total_value"], 5464.88, places=0)
+
+
 if __name__ == "__main__":
     unittest.main()
