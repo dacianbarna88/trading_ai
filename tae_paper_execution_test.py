@@ -572,6 +572,7 @@ class PaperExecutionTest(unittest.TestCase):
                                 "confidence": 0.9,
                                 "expected_profit_delta": 100.0,
                                 "evidence": "sell after protect",
+                                "decision_switch_authorized": True,
                             }
                         ]
                     }

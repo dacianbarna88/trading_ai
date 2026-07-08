@@ -1,0 +1,81 @@
+{
+  "schema": "tae.main_decision_brain_closure_audit.v1",
+  "generated_at": "2026-07-08T19:50:00+00:00",
+  "branch": "cursor/x12b-legacy-archive-hotfix",
+  "base_commits": {
+    "decision_state_wiring": "59982ee",
+    "paper_stabilization": "d39ec35"
+  },
+  "final_verdict": "MAIN_DECISION_BRAIN_CLOSED",
+  "governance_verdict": "READY_FOR_PAPER_DAY",
+  "decision_brain": {
+    "module": "tae_paper_decision_engine.py",
+    "final_action_function": "build_decision",
+    "orchestrator": "tae_structural_governance.py",
+    "cli_entry": "python3 tae.py full-paper-cycle"
+  },
+  "decision_path": [
+    "data_market_inputs",
+    "hard_risk_guardian",
+    "pde_scoring",
+    "conflict_resolution_bias",
+    "decision_state_gate",
+    "final_decision_payload",
+    "paper_execution",
+    "paper_accounting",
+    "longitudinal_memory"
+  ],
+  "ownership_model": {
+    "one_ticker_one_final_decision_per_cycle": true,
+    "decision_id_format": "PDEC-{TICKER}-{seq:04d}",
+    "decision_id_stable_per_ticker": true,
+    "active_owner_artifact": "runtime_outputs/decision_state/active_decisions.json",
+    "final_authority": "PDE",
+    "conflict_resolution_role": "evidence_bias_only",
+    "decision_state_role": "switch_gate_not_engine"
+  },
+  "validation": {
+    "commands": [
+      "python3 tae.py decision-state-refresh",
+      "python3 tae.py full-paper-cycle",
+      "python3 tae.py decision-state-refresh",
+      "python3 tae.py full-paper-cycle",
+      "python3 tae.py full-paper-cycle"
+    ],
+    "unit_tests": "45/45 PASS",
+    "reconciliation_status": "PASS",
+    "reconciliation_ok": true,
+    "forbidden_paths_diff_zero": true,
+    "promotion_lock_false": true,
+    "decision_count": 25,
+    "one_decision_per_ticker": true,
+    "decision_switch_blocked": 3,
+    "execution_skipped_switch": 3,
+    "unauthorized_executed_switches": 0
+  },
+  "safety_checks": {
+    "hard_risk_first": true,
+    "hard_minus_3_sell_bypass": true,
+    "stop_reentry_churn_enforced": true,
+    "execution_switch_gate": true,
+    "portfolio_mutation_authorized_only": true,
+    "longitudinal_action_change_ingest": true,
+    "no_master_decision_authority": true,
+    "no_duplicate_decision_engine": true,
+    "live_promotion_allowed": false
+  },
+  "code_patched": true,
+  "code_patch_scope": "test_alignment_only",
+  "patched_files": [
+    "tae_paper_decision_engine_test.py",
+    "tae_paper_execution_test.py"
+  ],
+  "production_code_patched": false,
+  "defects": [],
+  "known_limitations": [
+    "decision_id seq tied to sorted universe index",
+    "rapid multi-cycle runs may authorized-switch high-EV tickers",
+    "hard override clears after flat position until next breach"
+  ],
+  "next_allowed_work": "30_day_disciplined_paper_validation"
+}

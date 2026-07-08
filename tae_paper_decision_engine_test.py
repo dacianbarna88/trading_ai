@@ -89,16 +89,16 @@ class PaperDecisionEngineTest(unittest.TestCase):
         }
 
     def test_hold_for_healthy_winner(self) -> None:
-        action, scores, _, _, _, _, _, _, _ = score_actions_for_ticker("MRK", self._ctx())
+        action, scores, _, _, _, _, _, _, _, _ = score_actions_for_ticker("MRK", self._ctx())
         self.assertEqual(action, "HOLD_PAPER")
         self.assertGreater(scores["HOLD_PAPER"], scores["SELL_PAPER"])
 
     def test_protect_or_rotate_for_risky(self) -> None:
-        action, _, _, _, _, _, _, _, _ = score_actions_for_ticker("HSBA.L", self._ctx())
+        action, _, _, _, _, _, _, _, _, _ = score_actions_for_ticker("HSBA.L", self._ctx())
         self.assertIn(action, {"PROTECT_PAPER", "ROTATE_PAPER", "REDUCE_PAPER", "SELL_PAPER"})
 
     def test_buy_for_strong_signal(self) -> None:
-        action, _, _, _, _, _, _, _, _ = score_actions_for_ticker("SPY", self._ctx())
+        action, _, _, _, _, _, _, _, _, _ = score_actions_for_ticker("SPY", self._ctx())
         self.assertIn(action, {"BUY_PAPER", "SKIP_PAPER"})
 
     def test_decision_fields_complete(self) -> None:
@@ -126,7 +126,7 @@ class PaperDecisionEngineTest(unittest.TestCase):
         }
         ctx["live_positions"]["AMAT"] = {"shares": 3}
         ctx.setdefault("paper_positions", {})["AMAT"] = {"shares": 3.0, "unrealized_pct": 4.0, "current_pct": 4.0}
-        action, _, _, _, _, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
+        action, _, _, _, _, _, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
         self.assertEqual(action, "REDUCE_PAPER")
 
     def test_hypothesis_reject_forces_skip(self) -> None:
@@ -142,7 +142,7 @@ class PaperDecisionEngineTest(unittest.TestCase):
             ]
         }
         ctx["exp_by_ticker"] = {"SPY": [{"verdict": "REJECT", "hypothesis_id": "LTB-TEST"}]}
-        action, _, _, applied, _, _, _, _, _ = score_actions_for_ticker("SPY", ctx)
+        action, _, _, applied, _, _, _, _, _, _ = score_actions_for_ticker("SPY", ctx)
         self.assertEqual(action, "SKIP_PAPER")
         self.assertTrue(applied)
 

@@ -1,13 +1,14 @@
 # Trading AI — PROJECT BOOK (Canonical Journal)
 
 **Last updated:** 2026-07-08  
-**Latest sprint:** **PAPER Stabilization** — Decision state wiring + final stabilization audit (`59982ee` + stabilization commit)  
-**Previous milestone closed:** X.Decision checkpoint — Governor advisory VIEW + infra health hardening (`50ebc0b`)  
+**Latest sprint:** **Main Decision Brain Closure** — PDE single final authority closed (`MAIN_DECISION_BRAIN_CLOSED`)  
+**Previous milestones:** `d39ec35` PAPER stabilization · `59982ee` decision state wiring · `50ebc0b` X.Decision checkpoint  
+**Branch:** `cursor/x12b-legacy-archive-hotfix`  
 **Governance mode:** PAPER_ONLY · ADVISORY_ONLY · NO_BROKER · NO_LIVE_PROMOTION  
 **Canonical runtime:** `live_bot.py` (not `live_bot_v5_1.py`)
 
-> **Read first each session:** `SESSION_START.md` → `TAE_MASTER_CONTEXT.md` (generated session bootstrap)  
-> **PAPER daily operator command:** `python3 tae.py full-paper-cycle` (once per session — see `TAE_FINAL_PAPER_STABILIZATION_AUDIT.md`)  
+> **Read first each session:** `SESSION_START.md` → `TAE_MAIN_DECISION_BRAIN_CLOSURE_AUDIT.md`  
+> **PAPER daily operator command:** `python3 tae.py full-paper-cycle` (once per session)  
 > **End each sprint:** `bash tae_checkpoint.sh` then update this file + commit
 
 ---
@@ -21,7 +22,7 @@
 | Autostart | Active | `startup_runner.sh` → `market_session_guard.py` |
 | Session gate | Per-ticker | `markets/market_hours.py` |
 | Quick health | TAE official | `python3 tae_quick_health_check.py` |
-| **PAPER full cycle** | **Active (PAPER_ONLY)** | `python3 tae.py full-paper-cycle` |
+| **PAPER full cycle** | **Active — MAIN DECISION BRAIN** | `python3 tae.py full-paper-cycle` → PDE final authority |
 | **Decision state** | **Active (PAPER_ONLY)** | `python3 tae.py decision-state-refresh` |
 | Market-open shadow stack | **Active (SHADOW_ONLY)** | `python3 tae_market_open_intelligence_runner.py` |
 | Decision governor VIEW | **Active (SHADOW_ONLY)** | `python3 tae_decision_governor.py` |
