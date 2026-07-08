@@ -20,6 +20,7 @@ from tae_cli.commands import (
     help as help_cmd,
     historical_refresh,
     learning_profit,
+    investment_council,
     long_term_learning,
     morning_audit,
     opportunity,
@@ -78,6 +79,7 @@ COMMANDS = {
     "paper-mark-to-market": paper_mark_to_market.run,
     "canonical-vs-paper": canonical_vs_paper.run,
     "morning-audit": morning_audit.run,
+    "investment-council": investment_council.run,
     "status": status.run,
     "help": help_cmd.run,
 }

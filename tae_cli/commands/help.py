@@ -40,6 +40,7 @@ Available commands:
   30-day-paper-validation
   promotion-lock
   morning-audit
+  investment-council
   status
   help
 
@@ -76,6 +77,7 @@ Available commands:
   30-day-paper-validation — Phase 8 plan, checklist, criteria, Day 0 baseline
   promotion-lock — Phase 9 live promotion hard-lock audit
   morning-audit — consolidated read-only morning operational brief
+  investment-council — synthesis-only operator brief from existing PDE/GII/DPE/governance artifacts
 ================================="""
 
 

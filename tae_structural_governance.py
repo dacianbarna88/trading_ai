@@ -808,6 +808,36 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     CYCLE_SUMMARY_JSON.write_text(json.dumps(rich_summary, indent=2) + "\n", encoding="utf-8")
     write_cycle_report(rich_summary)
 
+    # Rank 20 — INVESTMENT COUNCIL (synthesis only, REPORT_ONLY — does not affect verdict)
+    print("\n>>> [investment_council] synthesizing operator brief from existing modules")
+    from tae_investment_council import run_investment_council
+
+    council = run_investment_council(write_outputs=True, include_morning_audit=False)
+    steps.append(
+        StepRecord(
+            rank=20,
+            step_id="investment_council",
+            name="INVESTMENT COUNCIL",
+            rule_class="REPORT_ONLY",
+            ok=True,
+            status="PASS",
+            reason=None,
+            inputs=["paper_decisions", "gii", "governance", "dpe", "rule_lifecycle"],
+            outputs=["runtime_outputs/investment_council/council.json", "TAE_INVESTMENT_COUNCIL_REPORT.md"],
+            metrics={
+                "action_plan_count": len(council.get("final_paper_action_plan") or []),
+                "governance_verdict": council.get("governance_verdict"),
+            },
+        )
+    )
+    state["steps"] = [step.__dict__ for step in sorted(steps, key=lambda s: s.rank)]
+    state["investment_council"] = {
+        "executive_recommendation": council.get("executive_recommendation"),
+        "governance_verdict": council.get("governance_verdict"),
+        "action_plan_count": len(council.get("final_paper_action_plan") or []),
+    }
+    GOVERNANCE_JSON.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
     print("\n===== TAE STRUCTURAL GOVERNANCE — COMPLETE =====")
     print("Final verdict:", final_verdict)
     print("Wrote:", GOVERNANCE_JSON, GOVERNANCE_REPORT_MD, CONSOLIDATION_REPORT_MD, CYCLE_SUMMARY_JSON)
