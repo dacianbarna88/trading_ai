@@ -307,6 +307,20 @@ def best_rotate_target(decisions: list[dict[str, Any]], source_ticker: str) -> d
     return max(candidates, key=lambda d: _f(d.get("confidence")) * _f(d.get("expected_profit_delta"), 1.0))
 
 
+def _has_open_position(before: dict[str, Any]) -> bool:
+    return _f(before.get("shares")) > 0
+
+
+def _portfolio_snapshot(portfolio: dict[str, Any]) -> dict[str, Any]:
+    positions = portfolio.get("positions") or {}
+    return {
+        "cash": round(_f(portfolio.get("cash")), 4),
+        "positions_count": len(positions),
+        "realized_pnl": round(_f(portfolio.get("realized_pnl")), 4),
+        "total_value": round(_f(portfolio.get("total_value")), 4),
+    }
+
+
 def execute_decision(
     decision: dict[str, Any],
     portfolio: dict[str, Any],
@@ -329,67 +343,108 @@ def execute_decision(
     capital_impact = 0.0
     risk_impact = _f(decision.get("expected_risk_delta"))
     reason = _s(decision.get("evidence"))[:240] or action
+    fill_shares = 0.0
+    status = "NO_CHANGE"
+    executed = False
+    is_trade = False
+    after = before
 
-    if action == "SKIP_PAPER":
-        after = before
+    requires_position = action in {"SELL_PAPER", "REDUCE_PAPER", "PROTECT_PAPER", "ROTATE_PAPER"}
+    if requires_position and not _has_open_position(before):
+        status = "SKIPPED_NO_POSITION"
+        reason = f"{action} skipped — no open paper position for {ticker}"
+    elif action == "SKIP_PAPER":
+        status = "NO_CHANGE"
     elif action == "HOLD_PAPER":
-        after = before
+        status = "NO_CHANGE"
     elif action == "SELL_PAPER":
-        realized_pnl, after_pos = _sell_shares(portfolio, ticker, _f(before.get("shares")), price)
+        sell_shares = _f(before.get("shares"))
+        realized_pnl, after_pos = _sell_shares(portfolio, ticker, sell_shares, price)
+        fill_shares = sell_shares
         capital_impact = round(realized_pnl + _f(before.get("current_value")), 4)
         after = _position_snapshot(after_pos)
+        status = "EXECUTED"
+        executed = True
+        is_trade = fill_shares > 0
     elif action == "REDUCE_PAPER":
         trim_pct = 30.0 if confidence < 0.7 else 20.0
         trim_shares = _f(before.get("shares")) * (trim_pct / 100.0)
         realized_pnl, after_pos = _sell_shares(portfolio, ticker, trim_shares, price)
+        fill_shares = trim_shares
         capital_impact = round(trim_shares * price, 4)
         after = _position_snapshot(after_pos)
         reason = f"REDUCE_PAPER trim {trim_pct:.0f}% — {reason}"
+        status = "EXECUTED"
+        executed = True
+        is_trade = fill_shares > 0
     elif action == "PROTECT_PAPER":
         pos = positions.get(ticker)
-        if pos:
-            pos["protect_mode"] = "TRAIL_SHADOW"
-            if risk_score >= 80:
-                trim_shares = _f(pos.get("shares")) * 0.1
-                realized_pnl, after_pos = _sell_shares(portfolio, ticker, trim_shares, price)
-                after = _position_snapshot(after_pos)
-                reason = f"PROTECT_PAPER urgency trim 10% — {reason}"
-            else:
-                after = _position_snapshot(pos)
-                reason = f"PROTECT_PAPER protect-only — {reason}"
+        prev_protect = before.get("protect_mode")
+        pos["protect_mode"] = "TRAIL_SHADOW"
+        if risk_score >= 80 and _f(pos.get("shares")) > 0:
+            trim_shares = _f(pos.get("shares")) * 0.1
+            realized_pnl, after_pos = _sell_shares(portfolio, ticker, trim_shares, price)
+            fill_shares = trim_shares
+            after = _position_snapshot(after_pos)
+            reason = f"PROTECT_PAPER urgency trim 10% — {reason}"
+            is_trade = fill_shares > 0
         else:
-            after = before
+            after = _position_snapshot(pos)
+            reason = f"PROTECT_PAPER protect-only — {reason}"
+        if prev_protect != "TRAIL_SHADOW" or is_trade:
+            status = "EXECUTED"
+            executed = True
+        else:
+            status = "NO_CHANGE"
     elif action == "BUY_PAPER":
         cash = _f(portfolio.get("cash"))
         notional = min(cash * max(0.05, confidence * 0.12), cash * 0.15)
-        _, after_pos = _buy_shares(portfolio, ticker, notional, price)
-        capital_impact = round(-notional, 4)
-        after = _position_snapshot(after_pos)
+        bought, after_pos = _buy_shares(portfolio, ticker, notional, price)
+        fill_shares = bought
+        if fill_shares > 0:
+            capital_impact = round(-notional, 4)
+            after = _position_snapshot(after_pos)
+            status = "EXECUTED"
+            executed = True
+            is_trade = True
+        else:
+            status = "SKIPPED_NO_CASH"
+            reason = f"BUY_PAPER skipped — insufficient cash for {ticker}"
     elif action == "ROTATE_PAPER":
-        realized_pnl, _ = _sell_shares(portfolio, ticker, _f(before.get("shares")), price)
-        target = best_rotate_target(all_decisions, ticker)
+        sell_shares = _f(before.get("shares"))
+        realized_pnl, _ = _sell_shares(portfolio, ticker, sell_shares, price)
         rotate_notional = _f(before.get("current_value")) or _f(portfolio.get("cash")) * 0.1
-        if target:
+        target = best_rotate_target(all_decisions, ticker)
+        buy_fill = 0.0
+        if target and rotate_notional > 0:
             tgt_ticker = _s(target.get("ticker")).upper()
             tgt_price = price_for_ticker(tgt_ticker, accounting, target)
-            _, after_pos = _buy_shares(portfolio, tgt_ticker, rotate_notional, tgt_price)
+            buy_fill, after_pos = _buy_shares(portfolio, tgt_ticker, rotate_notional, tgt_price)
             after = _position_snapshot(after_pos)
             reason = f"ROTATE_PAPER {ticker}→{tgt_ticker} — {reason}"
         else:
             after = _position_snapshot(None)
             reason = f"ROTATE_PAPER sell-only (no BUY target) — {reason}"
+        fill_shares = sell_shares if sell_shares > 0 else buy_fill
         capital_impact = round(rotate_notional - _f(before.get("current_value")), 4)
+        status = "EXECUTED"
+        executed = sell_shares > 0 or buy_fill > 0
+        is_trade = sell_shares > 0 or buy_fill > 0
     else:
-        after = before
         reason = f"unknown action {action} — skipped"
 
-    recalc_portfolio(portfolio)
+    if status != "SKIPPED_NO_POSITION":
+        recalc_portfolio(portfolio)
 
     order = {
         "timestamp": _now(),
         "decision_id": decision_id,
         "ticker": ticker,
         "action": action,
+        "status": status,
+        "executed": executed,
+        "is_trade": is_trade,
+        "fill_shares": round(fill_shares, 6),
         "rule_sources": rule_sources,
         "before_position": before,
         "after_position": after,
@@ -413,6 +468,8 @@ def build_rule_attribution(
 ) -> dict[str, Any]:
     rules: dict[str, dict[str, Any]] = dict((previous or {}).get("rules") or {})
     for order in orders:
+        if not order.get("executed"):
+            continue
         pnl = _f(order.get("simulated_pnl_impact"))
         expected = _f(order.get("expected_profit_delta"))
         outcome = pnl if pnl != 0 else (expected * 0.1)
@@ -441,6 +498,7 @@ def build_rule_attribution(
             entry["last_ticker"] = order.get("ticker")
             entry["last_outcome"] = "positive" if positive else "negative"
 
+    executed_orders = sum(1 for o in orders if o.get("executed"))
     return {
         "schema": "tae.rule_outcome_attribution.v1",
         "mode": MODE,
@@ -448,12 +506,128 @@ def build_rule_attribution(
         "live_money": False,
         "generated_at": _now(),
         "rules": rules,
-        "orders_processed": len(orders),
+        "orders_processed": executed_orders,
+    }
+
+
+def _count_jsonl_lines(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def sanitize_trades_file(path: Path) -> int:
+    """Remove invalid zero-position or zero-share trade rows from prior runs."""
+    if not path.is_file():
+        return 0
+    kept: list[str] = []
+    removed = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            removed += 1
+            continue
+        shares = _f(row.get("fill_shares") or row.get("shares"))
+        action = _s(row.get("action")).upper()
+        before = row.get("before_position") or {}
+        if shares <= 0 and action in {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"}:
+            shares = _f(before.get("shares"))
+        if shares <= 0:
+            removed += 1
+            continue
+        if action in {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"} and _f(before.get("shares")) <= 0:
+            removed += 1
+            continue
+        kept.append(line)
+    if removed:
+        assert_safe_path(path)
+        path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+    return removed
+
+
+def validate_trades_file(path: Path) -> list[str]:
+    errors: list[str] = []
+    if not path.is_file():
+        return errors
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"invalid jsonl line: {exc}")
+            continue
+        errors.extend(validate_trade_record(row))
+    return errors
+
+
+def validate_trade_record(trade: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    is_trade_row = trade.get("record_type") == "paper_trade" or trade.get("is_trade") is True
+    if not is_trade_row:
+        return errors
+    shares = _f(trade.get("fill_shares") or trade.get("shares"))
+    action = _s(trade.get("action")).upper()
+    before = trade.get("before_position") or {}
+    if shares <= 0:
+        errors.append(f"{trade.get('decision_id')}: trade fill_shares must be > 0")
+    if action in {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"} and _f(before.get("shares")) <= 0:
+        errors.append(f"{trade.get('decision_id')}: {action} trade requires existing position")
+    return errors
+
+
+def validate_execution_run(
+    orders: list[dict[str, Any]],
+    *,
+    trades_written: int,
+    trades_file_lines: int,
+    portfolio: dict[str, Any],
+    before_snapshot: dict[str, Any],
+    after_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    errors: list[str] = []
+    trade_orders = [o for o in orders if o.get("is_trade")]
+    if len(trade_orders) != trades_written:
+        errors.append(
+            f"trades_written mismatch: is_trade orders={len(trade_orders)} trades_written={trades_written}"
+        )
+    for order in trade_orders:
+        errors.extend(validate_trade_record(order))
+    skipped = [o for o in orders if o.get("status") == "SKIPPED_NO_POSITION"]
+    for order in skipped:
+        if order.get("is_trade"):
+            errors.append(f"{order.get('decision_id')}: skipped order must not be a trade")
+        before = order.get("before_position") or {}
+        if _f(before.get("shares")) > 0:
+            errors.append(f"{order.get('decision_id')}: SKIPPED_NO_POSITION but before shares > 0")
+
+    positions = portfolio.get("positions") or {}
+    if len(positions) != after_snapshot.get("positions_count"):
+        errors.append("positions count does not reconcile with portfolio state")
+
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "orders_created": len(orders),
+        "orders_executed": sum(1 for o in orders if o.get("executed")),
+        "orders_skipped": sum(1 for o in orders if str(o.get("status", "")).startswith("SKIPPED")),
+        "trades_written": trades_written,
+        "trades_file_lines": trades_file_lines,
+        "positions_before": before_snapshot.get("positions_count"),
+        "positions_after": after_snapshot.get("positions_count"),
+        "cash_before": before_snapshot.get("cash"),
+        "cash_after": after_snapshot.get("cash"),
+        "realized_pnl": after_snapshot.get("realized_pnl"),
     }
 
 
 def write_report(payload: dict[str, Any]) -> None:
     portfolio = payload.get("portfolio") or {}
+    stats = payload.get("stats") or {}
+    validation = payload.get("validation") or {}
     action_counts = payload.get("action_counts") or {}
     lines = [
         "# TAE PAPER Execution Report",
@@ -461,17 +635,34 @@ def write_report(payload: dict[str, Any]) -> None:
         f"**Generated:** {payload.get('generated_at')}",
         f"**Mode:** {MODE} — NO_BROKER — NO_LIVE_PROMOTION",
         "",
+        "## Run summary",
+        "",
         f"- Decisions consumed: **{payload.get('decisions_consumed', 0)}**",
-        f"- Orders executed: **{payload.get('orders_executed', 0)}**",
+        f"- Orders created (this run): **{stats.get('orders_created', 0)}**",
+        f"- Orders executed (this run): **{stats.get('orders_executed', 0)}**",
+        f"- Orders skipped (this run): **{stats.get('orders_skipped', 0)}**",
+        f"- Trades written (this run): **{stats.get('trades_written', 0)}**",
+        f"- Trades file total lines: **{stats.get('trades_file_lines', 0)}**",
+        "",
+        "## Portfolio delta (this run)",
+        "",
+        f"- Positions before: **{stats.get('positions_before', 0)}**",
+        f"- Positions after: **{stats.get('positions_after', 0)}**",
+        f"- Cash before: **${ _f(stats.get('cash_before')):,.2f}**",
+        f"- Cash after: **${ _f(stats.get('cash_after')):,.2f}**",
+        f"- Realized PnL: **${ _f(stats.get('realized_pnl')):,.2f}**",
         f"- Portfolio value: **${ _f(portfolio.get('total_value')):,.2f}**",
-        f"- Cash: **${ _f(portfolio.get('cash')):,.2f}**",
-        f"- Open positions: **{len(portfolio.get('positions') or {})}**",
-        f"- Realized PnL: **${ _f(portfolio.get('realized_pnl')):,.2f}**",
         f"- Unrealized PnL: **${ _f(portfolio.get('unrealized_pnl')):,.2f}**",
         "",
-        "## Action summary",
+        "## Validation",
         "",
+        f"- Validation OK: **{validation.get('ok', False)}**",
     ]
+    for err in validation.get("errors") or []:
+        lines.append(f"- Error: {err}")
+    if not validation.get("errors"):
+        lines.append("- No validation errors")
+    lines.extend(["", "## Action summary (this run)", ""])
     for action, count in sorted(action_counts.items()):
         lines.append(f"- {action}: **{count}**")
     lines.extend(
@@ -482,14 +673,6 @@ def write_report(payload: dict[str, Any]) -> None:
             "- broker_executed: **false**",
             "- live_money: **false**",
             "- live_bot.py / portfolio.csv: **untouched**",
-            "",
-            "## Execution boundary audit",
-            "",
-            "- live_bot.py classification: **LOCAL_PAPER_RUNTIME** (no broker SDK; CSV journal only)",
-            "- live_bot.py broker_connected: **false**",
-            "- PAPER portfolio SSOT: **`runtime_outputs/paper_execution/paper_portfolio.json`**",
-            "- Live risk SSOT (read-only seed): **`tae_accounting_snapshot.json` / `portfolio.csv`**",
-            "- Forbidden paths untouched: **live_bot.py, portfolio.csv, live_signals.csv, watchlist.txt, core/, research_core/**",
             "",
             "## Outputs",
             "",
@@ -515,8 +698,12 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     portfolio = bootstrap_portfolio(accounting, existing)
     processed = set(portfolio.get("processed_decision_ids") or [])
 
+    removed_legacy_trades = sanitize_trades_file(TRADES_JSONL)
+    before_snapshot = _portfolio_snapshot(portfolio)
+
     orders: list[dict[str, Any]] = []
     action_counts: dict[str, int] = {}
+    trades_written = 0
 
     for decision in decisions:
         decision_id = _s(decision.get("decision_id"))
@@ -533,11 +720,27 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         )
         orders.append(order)
         append_jsonl(ORDERS_JSONL, order)
-        if action not in {"HOLD_PAPER", "SKIP_PAPER", "PROTECT_PAPER"} or _f(order.get("simulated_pnl_impact")):
-            trade = {**order, "record_type": "paper_trade"}
+        if order.get("is_trade"):
+            trade = {**order, "record_type": "paper_trade", "shares": order.get("fill_shares")}
             append_jsonl(TRADES_JSONL, trade)
+            trades_written += 1
         action_counts[action] = action_counts.get(action, 0) + 1
         processed.add(decision_id)
+
+    after_snapshot = _portfolio_snapshot(portfolio)
+    trades_file_lines = _count_jsonl_lines(TRADES_JSONL)
+    validation = validate_execution_run(
+        orders,
+        trades_written=trades_written,
+        trades_file_lines=trades_file_lines,
+        portfolio=portfolio,
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+    )
+    file_errors = validate_trades_file(TRADES_JSONL)
+    if file_errors:
+        validation["errors"].extend(file_errors)
+        validation["ok"] = False
 
     portfolio["processed_decision_ids"] = sorted(processed)
     portfolio["last_execution_at"] = _now()
@@ -549,11 +752,26 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     attribution = build_rule_attribution(orders, prev_attr)
     save_json(ATTRIBUTION_JSON, attribution)
 
+    stats = {
+        "orders_created": validation["orders_created"],
+        "orders_executed": validation["orders_executed"],
+        "orders_skipped": validation["orders_skipped"],
+        "trades_written": validation["trades_written"],
+        "trades_file_lines": validation["trades_file_lines"],
+        "positions_before": validation["positions_before"],
+        "positions_after": validation["positions_after"],
+        "cash_before": validation["cash_before"],
+        "cash_after": validation["cash_after"],
+        "realized_pnl": validation["realized_pnl"],
+        "legacy_trades_removed": removed_legacy_trades,
+    }
+
     payload = {
-        "ok": True,
+        "ok": validation["ok"],
         "generated_at": _now(),
         "decisions_consumed": len(decisions),
-        "orders_executed": len(orders),
+        "stats": stats,
+        "validation": validation,
         "action_counts": action_counts,
         "portfolio": portfolio,
         "attribution_rules": len(attribution.get("rules") or {}),
@@ -568,9 +786,14 @@ def main() -> int:
     print(f"Mode: {MODE} | NO_BROKER | NO_LIVE_EXECUTION | isolated portfolio")
     result = run_paper_execution()
     if not result.get("ok"):
-        print(f"ERROR: {result.get('error')}", file=__import__("sys").stderr)
+        err = result.get("error") or "; ".join((result.get("validation") or {}).get("errors") or ["validation failed"])
+        print(f"ERROR: {err}", file=__import__("sys").stderr)
         return 1
-    print(f"Orders executed: {result.get('orders_executed')}")
+    stats = result.get("stats") or {}
+    print(f"Orders created: {stats.get('orders_created', 0)}")
+    print(f"Orders executed: {stats.get('orders_executed', 0)}")
+    print(f"Orders skipped: {stats.get('orders_skipped', 0)}")
+    print(f"Trades written: {stats.get('trades_written', 0)}")
     print(f"Portfolio value: ${ _f((result.get('portfolio') or {}).get('total_value')):,.2f}")
     print(f"Rule attribution rules: {result.get('attribution_rules')}")
     print(f"Wrote: {REPORT_MD}")
