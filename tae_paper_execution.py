@@ -29,6 +29,9 @@ CANONICAL_VS_PAPER_MD = Path("TAE_CANONICAL_VS_PAPER_REPORT.md")
 DECISIONS_JSON = Path("runtime_outputs/paper_decisions/paper_decisions.json")
 ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
 VALIDATION_JSON = Path("runtime_outputs/paper_decisions/decision_validation_results.json")
+INTEGRITY_REPORT_JSON = Path("tae_paper_profit_integrity_guard_report.json")
+INTEGRITY_REPORT_MD = Path("TAE_PAPER_PROFIT_INTEGRITY_GUARD_REPORT.md")
+VALIDATION_PROFIT_JSON = Path("tae_30_day_paper_profit_validation.json")
 
 INFLUENCE_DELTA_CAP = 0.008
 
@@ -86,8 +89,17 @@ def assert_safe_path(path: Path) -> None:
     resolved = str(path.resolve())
     out_root = OUTPUT_DIR.resolve()
     if out_root not in path.resolve().parents and path.resolve() != out_root:
-        if path.suffix == ".md" and path.parent.resolve() == Path(".").resolve():
-            return
+        if path.parent.resolve() == Path(".").resolve():
+            allowed_root = {
+                REPORT_MD.name,
+                MTM_REPORT_MD.name,
+                CANONICAL_VS_PAPER_MD.name,
+                INTEGRITY_REPORT_MD.name,
+                INTEGRITY_REPORT_JSON.name,
+                VALIDATION_PROFIT_JSON.name,
+            }
+            if path.name in allowed_root:
+                return
         raise RuntimeError(f"Unsafe output path outside {OUTPUT_DIR}: {path}")
     for forbidden in FORBIDDEN_WRITE_PREFIXES:
         if forbidden.rstrip("/") in resolved:
@@ -108,6 +120,8 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
 
 
 RECONCILE_EPS = 0.02
+EXPECTED_VALIDATION_CAPITAL_BASE = 30000.0
+SYNTHETIC_FILL_ANCHOR = 100.0
 
 
 def recalc_portfolio(portfolio: dict[str, Any]) -> None:
@@ -277,6 +291,309 @@ def reset_paper_portfolio_from_accounting(
     recalc_portfolio(portfolio)
     save_json(PORTFOLIO_JSON, portfolio)
     return portfolio
+
+
+def _resolved_mark_price(
+    ticker: str,
+    *,
+    pos: dict[str, Any] | None,
+    accounting: dict[str, Any] | None,
+    decision: dict[str, Any] | None,
+) -> float:
+    if pos:
+        px = _f(pos.get("current_price"))
+        if px > 0:
+            return px
+    return price_for_ticker(ticker, accounting, decision or {})
+
+
+def _has_proven_mark_source(
+    ticker: str,
+    pos: dict[str, Any] | None,
+    accounting: dict[str, Any] | None,
+) -> bool:
+    if pos and _s(pos.get("mark_source")) not in {"", "UNAVAILABLE"}:
+        return True
+    for row in (accounting or {}).get("open_positions") or []:
+        if _s(row.get("ticker")).upper() == ticker.upper() and _f(row.get("current_price")) > 0:
+            return True
+    return False
+
+
+def is_suspicious_synthetic_fill_price(
+    fill_price: float,
+    ticker: str,
+    *,
+    pos: dict[str, Any] | None = None,
+    decision: dict[str, Any] | None = None,
+    accounting: dict[str, Any] | None = None,
+) -> bool:
+    """Reject $100 fills unless accounting/mark source proves a real ~$100 instrument."""
+    if abs(fill_price - SYNTHETIC_FILL_ANCHOR) >= 0.01:
+        return False
+    if pos:
+        current = _f(pos.get("current_price"))
+        avg = _f(pos.get("avg_price"))
+        if current > 0 and abs(current - fill_price) < 0.01:
+            return False
+        if abs(avg - SYNTHETIC_FILL_ANCHOR) < 0.01 and current > SYNTHETIC_FILL_ANCHOR + 50.0:
+            return True
+    if not _has_proven_mark_source(ticker, pos, accounting):
+        return True
+    market_px = _resolved_mark_price(ticker, pos=pos, accounting=accounting, decision=decision)
+    if market_px > 0 and abs(market_px - SYNTHETIC_FILL_ANCHOR) <= 15.0:
+        return False
+    return True
+
+
+def is_suspicious_avg_price_position(ticker: str, pos: dict[str, Any]) -> bool:
+    avg = _f(pos.get("avg_price"))
+    current = _f(pos.get("current_price"))
+    if abs(avg - SYNTHETIC_FILL_ANCHOR) >= 0.01:
+        return False
+    if current <= SYNTHETIC_FILL_ANCHOR + 15.0:
+        return False
+    return True
+
+
+def trades_have_synthetic_fill_contamination(trades: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    rows = trades if trades is not None else load_jsonl(TRADES_JSONL)
+    for trade in rows:
+        action = _s(trade.get("action")).upper()
+        if action not in {"BUY_PAPER", "SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"}:
+            continue
+        fill_price = _f(trade.get("fill_price") or trade.get("price"))
+        ticker = _s(trade.get("ticker")).upper()
+        before = trade.get("before_position") or trade.get("position_before") or {}
+        if action == "BUY_PAPER" and is_suspicious_synthetic_fill_price(
+            fill_price,
+            ticker,
+            pos=trade.get("after_position") or trade.get("position_after"),
+            decision={"portfolio_snapshot": before},
+            accounting=None,
+        ):
+            findings.append(
+                {
+                    "code": "SYNTHETIC_FILL_TRADE",
+                    "ticker": ticker,
+                    "decision_id": trade.get("decision_id"),
+                    "action": action,
+                    "fill_price": fill_price,
+                    "timestamp": trade.get("timestamp"),
+                }
+            )
+    return findings
+
+
+def collect_fake_profit_contamination(
+    portfolio: dict[str, Any] | None = None,
+    accounting: dict[str, Any] | None = None,
+    *,
+    trades: list[dict[str, Any]] | None = None,
+    orders: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    paper = portfolio or load_json(PORTFOLIO_JSON) or {}
+    acct = accounting if accounting is not None else load_json(ACCOUNTING_JSON)
+
+    for ticker, pos in (paper.get("positions") or {}).items():
+        if is_suspicious_avg_price_position(ticker, pos):
+            findings.append(
+                {
+                    "code": "SUSPICIOUS_AVG_PRICE",
+                    "ticker": ticker,
+                    "avg_price": _f(pos.get("avg_price")),
+                    "current_price": _f(pos.get("current_price")),
+                    "unrealized_pnl": _f(pos.get("pnl")),
+                }
+            )
+
+    findings.extend(trades_have_synthetic_fill_contamination(trades))
+
+    canon = _canonical_account_value(acct)
+    paper_val = _f(paper.get("total_value"))
+    if canon > 0 and paper_val - canon > 1000:
+        findings.append(
+            {
+                "code": "PAPER_CANONICAL_VALUE_GAP",
+                "paper_account_value": paper_val,
+                "canonical_account_value": canon,
+                "delta": round(paper_val - canon, 4),
+            }
+        )
+
+    for order in orders or load_jsonl(ORDERS_JSONL):
+        if _s(order.get("status")) == "BLOCKED_FAKE_PROFIT_RISK":
+            findings.append(
+                {
+                    "code": "BLOCKED_ORDER",
+                    "ticker": order.get("ticker"),
+                    "decision_id": order.get("decision_id"),
+                    "action": order.get("action"),
+                    "reason": order.get("reason"),
+                }
+            )
+    return findings
+
+
+def check_paper_profit_integrity(
+    *,
+    portfolio: dict[str, Any] | None = None,
+    accounting: dict[str, Any] | None = None,
+    trades: list[dict[str, Any]] | None = None,
+    orders: list[dict[str, Any]] | None = None,
+    write_report_flag: bool = True,
+    update_validation_json: bool = True,
+) -> dict[str, Any]:
+    """Preflight guard — profit validation is invalid until this passes."""
+    paper = portfolio or load_json(PORTFOLIO_JSON) or {}
+    acct = accounting if accounting is not None else load_json(ACCOUNTING_JSON)
+    reconciliation = validate_portfolio_reconciliation(paper)
+
+    capital_base = _f(paper.get("validation_capital_base"))
+    if capital_base <= 0:
+        capital_base = _validation_capital_base(acct)
+    account_value = _f(paper.get("total_value"))
+    profit_vs_capital_base = round(account_value - EXPECTED_VALIDATION_CAPITAL_BASE, 4)
+    contaminated = collect_fake_profit_contamination(paper, acct, trades=trades, orders=orders)
+
+    checks: list[dict[str, Any]] = [
+        {
+            "name": "no_synthetic_fill_fallback",
+            "pass": True,
+            "detail": "price_for_ticker/fill_price_for_position return 0.0 without mark",
+        },
+        {
+            "name": "validation_capital_base_exact",
+            "pass": abs(capital_base - EXPECTED_VALIDATION_CAPITAL_BASE) <= RECONCILE_EPS,
+            "expected": EXPECTED_VALIDATION_CAPITAL_BASE,
+            "actual": capital_base,
+        },
+        {
+            "name": "account_value_formula",
+            "pass": reconciliation.get("ok", False),
+            "detail": "cash + open_positions_value",
+        },
+        {
+            "name": "profit_vs_capital_base_formula",
+            "pass": True,
+            "expected": profit_vs_capital_base,
+            "actual": profit_vs_capital_base,
+            "formula": "account_value - validation_capital_base",
+        },
+        {
+            "name": "no_synthetic_contamination",
+            "pass": not contaminated,
+            "findings_count": len(contaminated),
+        },
+        {
+            "name": "portfolio_reconciliation",
+            "pass": reconciliation.get("ok", False),
+        },
+    ]
+
+    ok = all(item["pass"] for item in checks)
+    if not ok and any(f.get("code") in {"SYNTHETIC_FILL_TRADE", "SUSPICIOUS_AVG_PRICE", "PAPER_CANONICAL_VALUE_GAP"} for f in contaminated):
+        verdict = "BLOCKED_FAKE_PROFIT_RISK"
+    elif not ok and not checks[1]["pass"]:
+        verdict = "BLOCKED_BY_UNRESOLVED_CAPITAL_DEFECT"
+    elif ok:
+        verdict = "PAPER_PROFIT_INTEGRITY_CLOSED"
+    else:
+        verdict = "BLOCKED_FAKE_PROFIT_RISK"
+
+    payload = {
+        "schema": "tae_paper_profit_integrity_guard",
+        "version": "v1",
+        "generated_at": _now(),
+        "ok": ok,
+        "status": verdict,
+        "verdict": verdict,
+        "validation_safe_to_resume": ok,
+        "checks": checks,
+        "contaminated": contaminated,
+        "metrics": {
+            "validation_capital_base": capital_base,
+            "account_value": account_value,
+            "cash": _f(paper.get("cash")),
+            "open_positions": len(paper.get("positions") or {}),
+            "realized_pnl": _f(paper.get("realized_pnl")),
+            "unrealized_pnl": _f(paper.get("unrealized_pnl")),
+            "total_pnl_internal": _f(paper.get("total_pnl")),
+            "profit_vs_capital_base": profit_vs_capital_base,
+            "canonical_account_value": _canonical_account_value(acct),
+        },
+        "reconciliation": reconciliation,
+    }
+
+    if write_report_flag:
+        write_profit_integrity_guard_report(payload)
+    if update_validation_json:
+        update_validation_profit_integrity_status(payload)
+    return payload
+
+
+def write_profit_integrity_guard_report(integrity: dict[str, Any]) -> None:
+    save_json(INTEGRITY_REPORT_JSON, integrity)
+    metrics = integrity.get("metrics") or {}
+    lines = [
+        "# TAE PAPER Profit Integrity Guard Report",
+        "",
+        f"**Generated:** {integrity.get('generated_at')}",
+        f"**Verdict:** **{integrity.get('verdict')}**",
+        f"**Validation safe to resume:** **{integrity.get('validation_safe_to_resume')}**",
+        "",
+        "## Metrics",
+        "",
+        f"- Validation capital base: **${metrics.get('validation_capital_base', 0):,.2f}**",
+        f"- Account value: **${metrics.get('account_value', 0):,.2f}**",
+        f"- Profit vs $30k base: **${metrics.get('profit_vs_capital_base', 0):,.2f}**",
+        f"- Realized PnL: **${metrics.get('realized_pnl', 0):,.2f}**",
+        f"- Unrealized PnL: **${metrics.get('unrealized_pnl', 0):,.2f}**",
+        "",
+        "## Checks",
+        "",
+        "| check | pass | detail |",
+        "| --- | --- | --- |",
+    ]
+    for check in integrity.get("checks") or []:
+        lines.append(
+            f"| {check.get('name')} | {check.get('pass')} | "
+            f"{check.get('detail') or check.get('formula') or check.get('findings_count', '')} |"
+        )
+    contaminated = integrity.get("contaminated") or []
+    lines.extend(["", "## Contamination", ""])
+    if contaminated:
+        for item in contaminated:
+            lines.append(f"- `{item.get('code')}` {item.get('ticker') or ''} {json.dumps(item, ensure_ascii=False)}")
+    else:
+        lines.append("- none detected")
+    INTEGRITY_REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def update_validation_profit_integrity_status(integrity: dict[str, Any]) -> None:
+    if not VALIDATION_PROFIT_JSON.is_file():
+        return
+    try:
+        doc = json.loads(VALIDATION_PROFIT_JSON.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    doc["profit_integrity"] = {
+        "status": integrity.get("status"),
+        "ok": integrity.get("ok"),
+        "validation_safe_to_resume": integrity.get("validation_safe_to_resume"),
+        "updated_at": integrity.get("generated_at"),
+        "metrics": integrity.get("metrics"),
+        "contaminated_count": len(integrity.get("contaminated") or []),
+    }
+    if not integrity.get("ok"):
+        doc["validation_blocked"] = True
+        doc["validation_block_reason"] = integrity.get("verdict")
+    else:
+        doc.pop("validation_blocked", None)
+        doc.pop("validation_block_reason", None)
+    VALIDATION_PROFIT_JSON.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
 
 def extract_rule_sources(decision: dict[str, Any]) -> list[str]:
@@ -510,54 +827,88 @@ def execute_decision(
     elif action == "HOLD_PAPER":
         status = "NO_CHANGE"
     elif action == "SELL_PAPER":
-        sell_shares = _f(before.get("shares"))
-        avg = _f(before.get("avg_price"))
-        cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
-        realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, sell_shares, fill_price)
-        fill_shares = sell_shares
-        capital_impact = round(gross_value, 4)
-        after = _position_snapshot(after_pos)
-        status = "EXECUTED"
-        executed = True
-        is_trade = fill_shares > 0
+        if fill_price <= 0:
+            status = "SKIPPED_NO_MARK_PRICE"
+            reason = f"SELL_PAPER skipped — no mark price for {ticker}"
+        elif is_suspicious_synthetic_fill_price(
+            fill_price, ticker, pos=pos_ref, decision=decision, accounting=accounting
+        ):
+            status = "BLOCKED_FAKE_PROFIT_RISK"
+            reason = f"SELL_PAPER blocked — suspicious ${SYNTHETIC_FILL_ANCHOR:.0f} fill for {ticker}"
+        else:
+            sell_shares = _f(before.get("shares"))
+            avg = _f(before.get("avg_price"))
+            cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
+            realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, sell_shares, fill_price)
+            fill_shares = sell_shares
+            capital_impact = round(gross_value, 4)
+            after = _position_snapshot(after_pos)
+            status = "EXECUTED"
+            executed = True
+            is_trade = fill_shares > 0
     elif action == "REDUCE_PAPER":
-        trim_pct = 30.0 if confidence < 0.7 else 20.0
-        trim_shares = _f(before.get("shares")) * (trim_pct / 100.0)
-        avg = _f(before.get("avg_price"))
-        cost_basis = round(avg * trim_shares, 4) if avg > 0 else 0.0
-        realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, trim_shares, fill_price)
-        fill_shares = trim_shares
-        capital_impact = round(gross_value, 4)
-        after = _position_snapshot(after_pos)
-        reason = f"REDUCE_PAPER trim {trim_pct:.0f}% — {reason}"
-        status = "EXECUTED"
-        executed = True
-        is_trade = fill_shares > 0
-    elif action == "PROTECT_PAPER":
-        pos = positions.get(ticker)
-        prev_protect = before.get("protect_mode")
-        pos["protect_mode"] = "TRAIL_SHADOW"
-        if risk_score >= 80 and _f(pos.get("shares")) > 0:
-            trim_shares = _f(pos.get("shares")) * 0.1
+        if fill_price <= 0:
+            status = "SKIPPED_NO_MARK_PRICE"
+            reason = f"REDUCE_PAPER skipped — no mark price for {ticker}"
+        elif is_suspicious_synthetic_fill_price(
+            fill_price, ticker, pos=pos_ref, decision=decision, accounting=accounting
+        ):
+            status = "BLOCKED_FAKE_PROFIT_RISK"
+            reason = f"REDUCE_PAPER blocked — suspicious ${SYNTHETIC_FILL_ANCHOR:.0f} fill for {ticker}"
+        else:
+            trim_pct = 30.0 if confidence < 0.7 else 20.0
+            trim_shares = _f(before.get("shares")) * (trim_pct / 100.0)
             avg = _f(before.get("avg_price"))
             cost_basis = round(avg * trim_shares, 4) if avg > 0 else 0.0
             realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, trim_shares, fill_price)
             fill_shares = trim_shares
+            capital_impact = round(gross_value, 4)
             after = _position_snapshot(after_pos)
-            reason = f"PROTECT_PAPER urgency trim 10% — {reason}"
-            is_trade = fill_shares > 0
-        else:
-            after = _position_snapshot(pos)
-            reason = f"PROTECT_PAPER protect-only — {reason}"
-        if prev_protect != "TRAIL_SHADOW" or is_trade:
+            reason = f"REDUCE_PAPER trim {trim_pct:.0f}% — {reason}"
             status = "EXECUTED"
             executed = True
+            is_trade = fill_shares > 0
+    elif action == "PROTECT_PAPER":
+        pos = positions.get(ticker)
+        prev_protect = before.get("protect_mode")
+        if risk_score >= 80 and _f(pos.get("shares")) > 0:
+            if fill_price <= 0:
+                status = "SKIPPED_NO_MARK_PRICE"
+                reason = f"PROTECT_PAPER trim skipped — no mark price for {ticker}"
+            elif is_suspicious_synthetic_fill_price(
+                fill_price, ticker, pos=pos_ref, decision=decision, accounting=accounting
+            ):
+                status = "BLOCKED_FAKE_PROFIT_RISK"
+                reason = f"PROTECT_PAPER trim blocked — suspicious ${SYNTHETIC_FILL_ANCHOR:.0f} fill for {ticker}"
+            else:
+                trim_shares = _f(pos.get("shares")) * 0.1
+                avg = _f(before.get("avg_price"))
+                cost_basis = round(avg * trim_shares, 4) if avg > 0 else 0.0
+                realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, trim_shares, fill_price)
+                fill_shares = trim_shares
+                after = _position_snapshot(after_pos)
+                reason = f"PROTECT_PAPER urgency trim 10% — {reason}"
+                is_trade = fill_shares > 0
+                status = "EXECUTED"
+                executed = True
         else:
-            status = "NO_CHANGE"
+            pos["protect_mode"] = "TRAIL_SHADOW"
+            after = _position_snapshot(pos)
+            reason = f"PROTECT_PAPER protect-only — {reason}"
+            if prev_protect != "TRAIL_SHADOW":
+                status = "EXECUTED"
+                executed = True
+            else:
+                status = "NO_CHANGE"
     elif action == "BUY_PAPER":
         if fill_price <= 0:
             status = "SKIPPED_NO_MARK_PRICE"
             reason = f"BUY_PAPER skipped — no mark price for {ticker}"
+        elif is_suspicious_synthetic_fill_price(
+            fill_price, ticker, pos=pos_ref, decision=decision, accounting=accounting
+        ):
+            status = "BLOCKED_FAKE_PROFIT_RISK"
+            reason = f"BUY_PAPER blocked — suspicious ${SYNTHETIC_FILL_ANCHOR:.0f} fill for {ticker}"
         else:
             cash = _f(portfolio.get("cash"))
             notional = min(cash * max(0.05, confidence * 0.12), cash * 0.15)
@@ -574,36 +925,51 @@ def execute_decision(
                 status = "SKIPPED_NO_CASH"
                 reason = f"BUY_PAPER skipped — insufficient cash for {ticker}"
     elif action == "ROTATE_PAPER":
-        sell_shares = _f(before.get("shares"))
-        avg = _f(before.get("avg_price"))
-        cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
-        realized_pnl, gross_value, _ = _sell_shares(portfolio, ticker, sell_shares, fill_price)
-        rotate_notional = gross_value or _f(before.get("current_value")) or _f(portfolio.get("cash")) * 0.1
-        target = best_rotate_target(all_decisions, ticker)
-        buy_fill = 0.0
-        if target and rotate_notional > 0:
-            tgt_ticker = _s(target.get("ticker")).upper()
-            tgt_price = fill_price_for_position(
-                (portfolio.get("positions") or {}).get(tgt_ticker),
-                tgt_ticker,
-                accounting,
-                target,
-            )
-            buy_fill, after_pos = _buy_shares(portfolio, tgt_ticker, rotate_notional, tgt_price)
-            after = _position_snapshot(after_pos)
-            reason = f"ROTATE_PAPER {ticker}→{tgt_ticker} — {reason}"
+        if fill_price <= 0:
+            status = "SKIPPED_NO_MARK_PRICE"
+            reason = f"ROTATE_PAPER skipped — no mark price for {ticker}"
+        elif is_suspicious_synthetic_fill_price(
+            fill_price, ticker, pos=pos_ref, decision=decision, accounting=accounting
+        ):
+            status = "BLOCKED_FAKE_PROFIT_RISK"
+            reason = f"ROTATE_PAPER blocked — suspicious ${SYNTHETIC_FILL_ANCHOR:.0f} fill for {ticker}"
         else:
-            after = _position_snapshot(None)
-            reason = f"ROTATE_PAPER sell-only (no BUY target) — {reason}"
-        fill_shares = sell_shares if sell_shares > 0 else buy_fill
-        capital_impact = round(rotate_notional - gross_value, 4)
-        status = "EXECUTED"
-        executed = sell_shares > 0 or buy_fill > 0
-        is_trade = sell_shares > 0 or buy_fill > 0
+            sell_shares = _f(before.get("shares"))
+            avg = _f(before.get("avg_price"))
+            cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
+            realized_pnl, gross_value, _ = _sell_shares(portfolio, ticker, sell_shares, fill_price)
+            rotate_notional = gross_value or _f(before.get("current_value")) or _f(portfolio.get("cash")) * 0.1
+            target = best_rotate_target(all_decisions, ticker)
+            buy_fill = 0.0
+            if target and rotate_notional > 0:
+                tgt_ticker = _s(target.get("ticker")).upper()
+                tgt_price = fill_price_for_position(
+                    (portfolio.get("positions") or {}).get(tgt_ticker),
+                    tgt_ticker,
+                    accounting,
+                    target,
+                )
+                if tgt_price <= 0 or is_suspicious_synthetic_fill_price(
+                    tgt_price, tgt_ticker, pos=(portfolio.get("positions") or {}).get(tgt_ticker),
+                    decision=target, accounting=accounting,
+                ):
+                    reason = f"ROTATE_PAPER {ticker} sell-only — no valid mark for {tgt_ticker}"
+                else:
+                    buy_fill, after_pos = _buy_shares(portfolio, tgt_ticker, rotate_notional, tgt_price)
+                    after = _position_snapshot(after_pos)
+                    reason = f"ROTATE_PAPER {ticker}→{tgt_ticker} — {reason}"
+            else:
+                after = _position_snapshot(None)
+                reason = f"ROTATE_PAPER sell-only (no BUY target) — {reason}"
+            fill_shares = sell_shares if sell_shares > 0 else buy_fill
+            capital_impact = round(rotate_notional - gross_value, 4)
+            status = "EXECUTED"
+            executed = sell_shares > 0 or buy_fill > 0
+            is_trade = sell_shares > 0 or buy_fill > 0
     else:
         reason = f"unknown action {action} — skipped"
 
-    if status != "SKIPPED_NO_POSITION":
+    if status not in {"SKIPPED_NO_POSITION", "SKIPPED_NO_MARK_PRICE", "BLOCKED_FAKE_PROFIT_RISK"}:
         recalc_portfolio(portfolio)
 
     cash_after = round(_f(portfolio.get("cash")), 4)
@@ -1149,10 +1515,31 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         portfolio["starting_value"] = round(_f(portfolio.get("total_value")), 2)
     if portfolio.get("validation_capital_base") is None:
         portfolio["validation_capital_base"] = round(_validation_capital_base(accounting), 2)
-    backfill_portfolio_realized_from_trades(portfolio, TRADES_JSONL)
+
+    trade_contamination = trades_have_synthetic_fill_contamination()
+    if not trade_contamination:
+        backfill_portfolio_realized_from_trades(portfolio, TRADES_JSONL)
     baseline_reset = ensure_accounting_baseline(portfolio) if existing else False
     if not baseline_reset:
         recalc_portfolio(portfolio)
+
+    preflight = check_paper_profit_integrity(
+        portfolio=portfolio,
+        accounting=accounting,
+        write_report_flag=True,
+        update_validation_json=True,
+    )
+    portfolio["profit_integrity_status"] = preflight.get("status")
+    portfolio["profit_integrity_ok"] = preflight.get("ok")
+    if not preflight.get("ok"):
+        save_json(PORTFOLIO_JSON, portfolio)
+        return {
+            "ok": False,
+            "error": preflight.get("verdict"),
+            "blocked": True,
+            "integrity": preflight,
+            "contaminated": preflight.get("contaminated") or [],
+        }
     processed = set(portfolio.get("processed_decision_ids") or [])
     last_orders = load_orders_by_decision(ORDERS_JSONL)
 
@@ -1272,12 +1659,24 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         "accepted_action_switches": accepted_switch,
     }
 
+    post_integrity = check_paper_profit_integrity(
+        portfolio=portfolio,
+        accounting=accounting,
+        orders=orders,
+        write_report_flag=True,
+        update_validation_json=True,
+    )
+    portfolio["profit_integrity_status"] = post_integrity.get("status")
+    portfolio["profit_integrity_ok"] = post_integrity.get("ok")
+    save_json(PORTFOLIO_JSON, portfolio)
+
     payload = {
-        "ok": validation["ok"],
+        "ok": validation["ok"] and post_integrity.get("ok", True),
         "generated_at": _now(),
         "decisions_consumed": len(decisions),
         "stats": stats,
         "validation": validation,
+        "integrity": post_integrity,
         "action_counts": action_counts,
         "portfolio": portfolio,
         "attribution_rules": len(attribution.get("rules") or {}),

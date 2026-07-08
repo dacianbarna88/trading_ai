@@ -1,0 +1,130 @@
+{
+  "schema": "tae_paper_profit_integrity_guard",
+  "version": "v1",
+  "generated_at": "2026-07-08T21:16:03+00:00",
+  "ok": true,
+  "status": "PAPER_PROFIT_INTEGRITY_CLOSED",
+  "verdict": "PAPER_PROFIT_INTEGRITY_CLOSED",
+  "validation_safe_to_resume": true,
+  "root_cause_recap": {
+    "defect_commit": "295303f",
+    "cause": "SYNTHETIC_100_FILL_PRICE_FALLBACK",
+    "invalid_day1_account_value": 51442.9736,
+    "corrected_account_value": 29913.959
+  },
+  "protections": [
+    "no_synthetic_fill_fallback",
+    "skipped_no_mark_price_on_missing_mark",
+    "blocked_fake_profit_risk_on_suspicious_100_fill",
+    "suspicious_avg_price_detection",
+    "preflight_integrity_before_execution",
+    "skip_backfill_on_contaminated_trades",
+    "validation_capital_base_30000_enforced",
+    "full_paper_cycle_integrity_gate"
+  ],
+  "files_changed": [
+    "tae_paper_execution.py",
+    "tae_paper_execution_test.py",
+    "tae_full_paper_cycle.py"
+  ],
+  "test_evidence": {
+    "tae_paper_execution_test": "26/26 PASS",
+    "combined_suites": "55/55 PASS",
+    "full_paper_cycle_exit_code": 0
+  },
+  "checks": [
+    {
+      "name": "no_synthetic_fill_fallback",
+      "pass": true,
+      "detail": "price_for_ticker/fill_price_for_position return 0.0 without mark"
+    },
+    {
+      "name": "validation_capital_base_exact",
+      "pass": true,
+      "expected": 30000.0,
+      "actual": 30000.0
+    },
+    {
+      "name": "account_value_formula",
+      "pass": true,
+      "detail": "cash + open_positions_value"
+    },
+    {
+      "name": "profit_vs_capital_base_formula",
+      "pass": true,
+      "expected": -86.041,
+      "actual": -86.041,
+      "formula": "account_value - validation_capital_base"
+    },
+    {
+      "name": "no_synthetic_contamination",
+      "pass": true,
+      "findings_count": 0
+    },
+    {
+      "name": "portfolio_reconciliation",
+      "pass": true
+    }
+  ],
+  "contaminated": [],
+  "metrics": {
+    "validation_capital_base": 30000.0,
+    "account_value": 29913.959,
+    "cash": 9759.7205,
+    "open_positions": 9,
+    "realized_pnl": -428.6105,
+    "unrealized_pnl": 1.6491,
+    "total_pnl_internal": -426.9614,
+    "profit_vs_capital_base": -86.041,
+    "canonical_account_value": 30340.91
+  },
+  "reconciliation": {
+    "ok": true,
+    "status": "PASS",
+    "errors": [],
+    "checks": [
+      {
+        "name": "total_value",
+        "expected": 29913.959,
+        "actual": 29913.959,
+        "ok": true,
+        "formula": "cash + open_positions_value"
+      },
+      {
+        "name": "open_positions_value",
+        "expected": 20154.2385,
+        "actual": 20154.2385,
+        "ok": true,
+        "formula": "sum(position.current_value)"
+      },
+      {
+        "name": "unrealized_pnl",
+        "expected": 1.649,
+        "actual": 1.6491,
+        "ok": true,
+        "formula": "sum(position.pnl)"
+      },
+      {
+        "name": "total_pnl",
+        "expected": -426.9614,
+        "actual": -426.9614,
+        "ok": true,
+        "formula": "realized_pnl + unrealized_pnl"
+      },
+      {
+        "name": "value_delta",
+        "expected": -426.9614,
+        "actual": -426.961,
+        "ok": true,
+        "formula": "(realized_pnl - realized_at_baseline) + (unrealized_pnl - baseline_unrealized_pnl)"
+      }
+    ],
+    "cash": 9759.7205,
+    "open_positions_value": 20154.2385,
+    "total_value": 29913.959,
+    "realized_pnl": -428.6105,
+    "unrealized_pnl": 1.6491,
+    "total_pnl": -426.9614,
+    "positions_count": 9
+  }
+}

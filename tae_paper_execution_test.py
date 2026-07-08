@@ -348,6 +348,7 @@ class PaperExecutionTest(unittest.TestCase):
                     {
                         "cash_available": 5000,
                         "account_value_corrected": 10000,
+                        "effective_contributed_capital": 30000.0,
                         "open_positions": [
                             {"ticker": "AAPL", "shares": 5, "current_price": 100, "pnl": 0},
                         ],
@@ -365,7 +366,11 @@ class PaperExecutionTest(unittest.TestCase):
                 pe, "TRADES_JSONL", out_dir / "paper_trades.jsonl"
             ), mock.patch.object(
                 pe, "ATTRIBUTION_JSON", out_dir / "rule_outcome_attribution.json"
-            ), mock.patch.object(pe, "REPORT_MD", root / "TAE_PAPER_EXECUTION_REPORT.md"):
+            ), mock.patch.object(pe, "REPORT_MD", root / "TAE_PAPER_EXECUTION_REPORT.md"), mock.patch.object(
+                pe, "INTEGRITY_REPORT_JSON", out_dir / "integrity.json"
+            ), mock.patch.object(pe, "INTEGRITY_REPORT_MD", out_dir / "integrity.md"), mock.patch.object(
+                pe, "VALIDATION_PROFIT_JSON", out_dir / "validation.json"
+            ):
                 result = pe.run_paper_execution(write_report_flag=False)
                 self.assertTrue(result["ok"])
                 stats = result.get("stats") or {}
@@ -667,6 +672,127 @@ class TestCapitalBaseDefectFix(unittest.TestCase):
             self.assertIn("AAPL", reset["positions"])
             self.assertNotIn("DIA", reset["positions"])
             self.assertAlmostEqual(reset["total_value"], 5464.88, places=0)
+
+
+class TestProfitIntegrityGuard(unittest.TestCase):
+    def test_sell_skipped_without_mark_price_no_mutation(self) -> None:
+        portfolio = {
+            "cash": 1000.0,
+            "realized_pnl": 0.0,
+            "positions": {
+                "NEWCO": {
+                    "ticker": "NEWCO",
+                    "shares": 5.0,
+                    "avg_price": 200.0,
+                    "current_price": 0.0,
+                    "status": "OPEN",
+                }
+            },
+        }
+        before_cash = portfolio["cash"]
+        decision = {
+            "decision_id": "PDEC-NEW-002",
+            "ticker": "NEWCO",
+            "action": "SELL_PAPER",
+            "confidence": 0.9,
+            "evidence": "sell",
+        }
+        order = pe.execute_decision(decision, portfolio, accounting=None, all_decisions=[decision])
+        self.assertEqual(order["status"], "SKIPPED_NO_MARK_PRICE")
+        self.assertFalse(order["is_trade"])
+        self.assertEqual(portfolio["cash"], before_cash)
+        self.assertIn("NEWCO", portfolio["positions"])
+
+    def test_synthetic_buy_blocked_from_ledger(self) -> None:
+        self.assertTrue(
+            pe.is_suspicious_synthetic_fill_price(100.0, "DIA", pos=None, decision={}, accounting=None)
+        )
+        order = pe.execute_decision(
+            {
+                "decision_id": "PDEC-DIA-X",
+                "ticker": "DIA",
+                "action": "BUY_PAPER",
+                "confidence": 0.8,
+                "portfolio_snapshot": {"current_price": 100.0},
+                "evidence": "test",
+            },
+            {"cash": 5000.0, "realized_pnl": 0.0, "positions": {}},
+            accounting=None,
+            all_decisions=[],
+        )
+        self.assertEqual(order["status"], "BLOCKED_FAKE_PROFIT_RISK")
+
+    def test_corrupt_avg_price_detected_before_validation(self) -> None:
+        corrupt = {
+            "validation_capital_base": 30000.0,
+            "total_value": 51442.97,
+            "cash": 24583.88,
+            "positions": {"DIA": {"shares": 8.0, "avg_price": 100.0, "current_price": 522.0}},
+        }
+        findings = pe.collect_fake_profit_contamination(corrupt, {"account_value_corrected": 30340.91})
+        codes = {f["code"] for f in findings}
+        self.assertIn("SUSPICIOUS_AVG_PRICE", codes)
+        self.assertIn("PAPER_CANONICAL_VALUE_GAP", codes)
+
+    def test_validation_blocked_when_capital_base_not_30000(self) -> None:
+        portfolio = {
+            "validation_capital_base": 25000.0,
+            "cash": 1000.0,
+            "open_positions_value": 9000.0,
+            "total_value": 10000.0,
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 0.0,
+            "total_pnl": 0.0,
+            "starting_value": 10000.0,
+            "baseline_unrealized_pnl": 0.0,
+            "realized_pnl_at_baseline": 0.0,
+            "positions": {},
+        }
+        with mock.patch.object(pe, "VALIDATION_PROFIT_JSON", Path("/dev/null/nonexistent.json")):
+            result = pe.check_paper_profit_integrity(
+                portfolio=portfolio,
+                accounting={"effective_contributed_capital": 30000.0},
+                write_report_flag=False,
+                update_validation_json=False,
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["verdict"], "BLOCKED_BY_UNRESOLVED_CAPITAL_DEFECT")
+
+    def test_integrity_pass_on_clean_portfolio(self) -> None:
+        portfolio = {
+            "validation_capital_base": 30000.0,
+            "cash": 2335.28,
+            "open_positions_value": 2504.0,
+            "total_value": 4839.28,
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 0.32,
+            "total_pnl": 0.32,
+            "starting_value": 4839.28,
+            "baseline_unrealized_pnl": 0.0,
+            "realized_pnl_at_baseline": 0.0,
+            "value_delta": 0.32,
+            "positions": {
+                "AAPL": {
+                    "shares": 8.0,
+                    "avg_price": 312.96,
+                    "current_price": 313.0,
+                    "current_value": 2504.0,
+                    "pnl": 0.32,
+                }
+            },
+        }
+        with mock.patch.object(pe, "VALIDATION_PROFIT_JSON", Path("/dev/null/nonexistent.json")):
+            result = pe.check_paper_profit_integrity(
+                portfolio=portfolio,
+                accounting={"effective_contributed_capital": 30000.0, "account_value_corrected": 30340.91},
+                trades=[],
+                orders=[],
+                write_report_flag=False,
+                update_validation_json=False,
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["verdict"], "PAPER_PROFIT_INTEGRITY_CLOSED")
+        self.assertAlmostEqual(result["metrics"]["profit_vs_capital_base"], -25160.72, places=1)
 
 
 if __name__ == "__main__":

@@ -394,15 +394,30 @@ def collect_summary(
     safety = safety or {}
     forbidden_ok = bool(safety.get("forbidden_content_diff_clean", forbidden_ok))
 
-    from tae_paper_execution import validate_portfolio_reconciliation
+    from tae_paper_execution import check_paper_profit_integrity, validate_portfolio_reconciliation
 
     paper_reconciliation = validate_portfolio_reconciliation(paper_portfolio) if paper_portfolio else {"ok": True, "status": "UNKNOWN"}
+    profit_integrity = check_paper_profit_integrity(
+        portfolio=paper_portfolio,
+        accounting=accounting,
+        write_report_flag=True,
+        update_validation_json=True,
+    )
     mtm_status = _mark_to_market_status(paper_mtm)
     broker_flag = bool(paper_portfolio.get("broker_executed")) or bool(paper_portfolio.get("live_money"))
     reconciliation_fail = not paper_reconciliation.get("ok")
+    profit_integrity_fail = not profit_integrity.get("ok")
     mtm_all_stale = mtm_status == "ALL_STALE" and len(paper_portfolio.get("positions") or {}) > 0
 
-    if not forbidden_ok or infra_fail or blocking_failed or reconciliation_fail or broker_flag or mtm_all_stale:
+    if (
+        not forbidden_ok
+        or infra_fail
+        or blocking_failed
+        or reconciliation_fail
+        or profit_integrity_fail
+        or broker_flag
+        or mtm_all_stale
+    ):
         final_verdict = "BLOCKED_WITH_REASONS"
     elif failed_steps or hist_stale_list or stale_sources or not infra_pass:
         final_verdict = "READY_WITH_WARNINGS"
@@ -485,6 +500,10 @@ def collect_summary(
         "paper_total_pnl": _f(paper_portfolio.get("total_pnl")),
         "paper_reconciliation_status": paper_reconciliation.get("status"),
         "paper_reconciliation_ok": paper_reconciliation.get("ok"),
+        "profit_integrity_status": profit_integrity.get("status"),
+        "profit_integrity_ok": profit_integrity.get("ok"),
+        "validation_capital_base": (profit_integrity.get("metrics") or {}).get("validation_capital_base"),
+        "profit_vs_capital_base": (profit_integrity.get("metrics") or {}).get("profit_vs_capital_base"),
         "paper_drawdown_pct": paper_portfolio.get("drawdown_pct"),
         "mark_to_market_stale_count": paper_mtm.get("stale_price_count"),
         "mark_to_market_live_count": paper_mtm.get("live_price_count"),
