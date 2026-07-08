@@ -23,6 +23,12 @@ bot_pid.txt
 
 # Keep source code and markdown tracked manually
 
+# TAE runtime SSOT (regenerated — never commit)
+runtime_outputs/
+
+# Editor / accidental backups
+*.save
+
 # Python cache
 __pycache__/
 *.pyc
