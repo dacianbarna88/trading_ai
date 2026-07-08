@@ -186,19 +186,26 @@ def rule_attribution_action_delta(action: str, attribution_doc: dict[str, Any] |
     rules = (attribution_doc or {}).get("rules") or {}
     if not rules:
         return 0.0, ""
-    action_token = action.replace("_PAPER", "")
     raw = 0.0
     matched: list[str] = []
     for rule_id, row in rules.items():
-        rid = _s(rule_id).upper()
-        if action_token not in rid and action not in rid:
+        assoc = _s(row.get("associated_action") or row.get("last_action")).upper()
+        if assoc and assoc != action:
+            rid = _s(rule_id).upper()
+            action_token = action.replace("_PAPER", "")
+            if action_token not in rid and action not in rid:
+                continue
+        influence = _f(row.get("recommended_influence_delta"))
+        if influence == 0.0:
+            influence = _f(row.get("weight_delta"))
+        if influence == 0.0:
             continue
-        raw += _f(row.get("weight_delta"))
-        matched.append(rid)
+        raw += influence
+        matched.append(_s(rule_id))
     if not matched:
         return 0.0, ""
     delta = clamp_delta(raw)
-    return delta, f"paper execution rule attribution {','.join(matched[:3])}"
+    return delta, f"actual rule outcomes {','.join(matched[:3])}"
 
 
 def compute_action_weight(

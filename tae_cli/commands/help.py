@@ -27,6 +27,8 @@ Available commands:
   paper-experiments
   paper-decisions
   paper-execution
+  paper-mark-to-market
+  canonical-vs-paper
   full-paper-cycle
   historical-refresh
   outcome-memory
@@ -61,6 +63,8 @@ Available commands:
   paper-experiments — run PAPER scoring experiments from hypothesis queue
   paper-decisions — explicit PAPER BUY/SELL/HOLD/REDUCE/PROTECT/ROTATE/SKIP decisions
   paper-execution — apply PDE decisions to isolated PAPER portfolio (no broker)
+  paper-mark-to-market — mark PAPER portfolio to market with live prices (no broker)
+  canonical-vs-paper — compare canonical accounting vs PAPER portfolio (read-only)
   full-paper-cycle — run complete PAPER intelligence loop (health → LTP → PDE → DPE → summary)
   historical-refresh — refresh stale historical/strategic SSOT before PAPER decisions
   outcome-memory — canonical longitudinal PAPER decision memory (ingest + checkpoints)

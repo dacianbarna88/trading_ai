@@ -46,6 +46,11 @@ SHADOW_JSON = Path("tae_profit_protection_shadow.json")
 LIFECYCLE_JSON = Path("tae_winner_lifecycle_profiler.json")
 LEDGER_JSON = Path("tae_opportunity_cost_ledger.json")
 ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
+PAPER_PORTFOLIO_JSON = Path("runtime_outputs/paper_execution/paper_portfolio.json")
+PAPER_TRADES_JSONL = Path("runtime_outputs/paper_execution/paper_trades.jsonl")
+PAPER_ORDERS_JSONL = Path("runtime_outputs/paper_execution/paper_orders.jsonl")
+PAPER_ATTRIBUTION_JSON = Path("runtime_outputs/paper_execution/rule_outcome_attribution.json")
+PAPER_MTM_JSON = Path("runtime_outputs/paper_execution/mark_to_market.json")
 
 CHECKPOINT_OFFSETS_DAYS: tuple[tuple[str, int], ...] = (
     ("+1d", 1),
@@ -71,6 +76,11 @@ OUTCOME_SOURCES: tuple[dict[str, Any], ...] = (
     {"id": "profit_context", "path": str(PCE_JSON), "producer": "tae_profit_context_engine.py", "consumer": "longitudinal_memory"},
     {"id": "winner_lifecycle", "path": str(LIFECYCLE_JSON), "producer": "tae_winner_lifecycle_profiler.py", "consumer": "longitudinal_memory"},
     {"id": "opportunity_ledger", "path": str(LEDGER_JSON), "producer": "tae_opportunity_cost_ledger.py", "consumer": "longitudinal_memory"},
+    {"id": "paper_portfolio", "path": str(PAPER_PORTFOLIO_JSON), "producer": "tae_paper_execution.py", "consumer": "longitudinal_memory"},
+    {"id": "paper_trades", "path": str(PAPER_TRADES_JSONL), "producer": "tae_paper_execution.py", "consumer": "longitudinal_memory"},
+    {"id": "paper_orders", "path": str(PAPER_ORDERS_JSONL), "producer": "tae_paper_execution.py", "consumer": "longitudinal_memory"},
+    {"id": "rule_outcome_attribution", "path": str(PAPER_ATTRIBUTION_JSON), "producer": "tae_paper_execution.py", "consumer": "longitudinal_memory"},
+    {"id": "paper_mark_to_market", "path": str(PAPER_MTM_JSON), "producer": "tae_paper_execution.py", "consumer": "longitudinal_memory"},
 )
 
 FORBIDDEN_WRITE_PREFIXES = (
@@ -308,6 +318,24 @@ def build_memory_record(
     return record
 
 
+def load_orders_by_decision() -> dict[str, dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    if not PAPER_ORDERS_JSONL.is_file():
+        return by_id
+    for line in PAPER_ORDERS_JSONL.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+            did = _s(row.get("decision_id"))
+            if did:
+                by_id[did] = row
+        except json.JSONDecodeError:
+            continue
+    return by_id
+
+
 def checkpoint_snapshot(
     ticker: str,
     *,
@@ -315,21 +343,59 @@ def checkpoint_snapshot(
     pce_row: dict[str, Any] | None,
     accounting: dict[str, Any] | None,
     market_regime: str,
+    paper_portfolio: dict[str, Any] | None = None,
+    mtm_doc: dict[str, Any] | None = None,
+    execution_order: dict[str, Any] | None = None,
+    record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     pos_pnl = None
     pos_pnl_pct = None
-    for pos in (accounting or {}).get("open_positions") or []:
-        if _s(pos.get("ticker")).upper() == ticker.upper():
-            pos_pnl = _f(pos.get("pnl"))
-            pos_pnl_pct = _f(pos.get("pnl_pct"))
+    price_proxy = None
+    mark_source = None
+
+    paper_pos = ((paper_portfolio or {}).get("positions") or {}).get(ticker.upper())
+    if paper_pos:
+        pos_pnl = _f(paper_pos.get("pnl"))
+        pos_pnl_pct = _f(paper_pos.get("unrealized_pct") or paper_pos.get("current_pct"))
+        price_proxy = _f(paper_pos.get("current_price"))
+        mark_source = paper_pos.get("mark_source")
+    else:
+        for pos in (accounting or {}).get("open_positions") or []:
+            if _s(pos.get("ticker")).upper() == ticker.upper():
+                pos_pnl = _f(pos.get("pnl"))
+                pos_pnl_pct = _f(pos.get("pnl_pct"))
+                break
+
+    for mtm_row in (mtm_doc or {}).get("positions") or []:
+        if _s(mtm_row.get("ticker")).upper() == ticker.upper():
+            price_proxy = _f(mtm_row.get("current_price")) or price_proxy
+            mark_source = mtm_row.get("mark_source") or mark_source
+            pos_pnl = _f(mtm_row.get("unrealized_pnl")) if mtm_row.get("unrealized_pnl") is not None else pos_pnl
             break
+
+    expected = _f((record or {}).get("expected_profit_delta"))
+    actual = pos_pnl if pos_pnl is not None else _f((execution_order or {}).get("simulated_pnl_impact"))
+    verdict = _s((record or {}).get("validation_verdict"))
+    if actual > 0 or (expected > 0 and actual >= expected * 0.5):
+        outcome = "success"
+    elif actual < 0:
+        outcome = "failure"
+    elif verdict == "NEEDS_MORE_DATA":
+        outcome = "needs_more_data"
+    else:
+        outcome = "needs_more_data"
+
     return {
         "recorded_at": _now(),
-        "price_proxy": None,
+        "price_proxy": price_proxy,
+        "price_source": mark_source,
         "pnl_usd": pos_pnl,
         "pnl_pct": pos_pnl_pct,
+        "actual_profit_delta": actual,
+        "expected_profit_delta": expected,
+        "profit_delta_gap": round(actual - expected, 4) if expected else actual,
         "drawdown_pct": _f((pce_row or {}).get("drawdown") or (gii_row or {}).get("drawdown")),
-        "run_up_pct": _f((gii_row or {}).get("high_pct")),
+        "run_up_pct": _f((paper_pos or {}).get("run_up_pct") or (gii_row or {}).get("high_pct")),
         "volatility_proxy": _f((gii_row or {}).get("collapse_probability")),
         "capital_efficiency": _f((gii_row or {}).get("capital_efficiency")),
         "opportunity_cost_usd": _f((gii_row or {}).get("missed_usd")),
@@ -337,6 +403,10 @@ def checkpoint_snapshot(
         "lifecycle_stage": _s((gii_row or {}).get("lifecycle_stage")),
         "horizon_alignment_score": None,
         "validation_status": "CHECKPOINT_RECORDED",
+        "rule_sources": (execution_order or {}).get("rule_sources") or [],
+        "action": (record or {}).get("action") or (execution_order or {}).get("action"),
+        "verdict": verdict,
+        "outcome": outcome,
     }
 
 
@@ -347,13 +417,19 @@ def update_checkpoints(
     pce_by: dict[str, dict[str, Any]],
     accounting: dict[str, Any] | None,
     market_regime: str,
+    paper_portfolio: dict[str, Any] | None = None,
+    mtm_doc: dict[str, Any] | None = None,
+    orders_by_decision: dict[str, dict[str, Any]] | None = None,
 ) -> int:
     now = datetime.now(timezone.utc)
     updated = 0
+    orders_by_decision = orders_by_decision or load_orders_by_decision()
     for record in records.values():
         ticker = record.get("ticker") or ""
+        did = _s(record.get("decision_id"))
         gii_row = gii_by.get(ticker.upper())
         pce_row = pce_by.get(ticker.upper())
+        execution_order = orders_by_decision.get(did)
         for cp in record.get("checkpoints") or []:
             if cp.get("status") == "RECORDED":
                 continue
@@ -365,6 +441,10 @@ def update_checkpoints(
                     pce_row=pce_row,
                     accounting=accounting,
                     market_regime=market_regime,
+                    paper_portfolio=paper_portfolio,
+                    mtm_doc=mtm_doc,
+                    execution_order=execution_order,
+                    record=record,
                 )
                 snap["horizon_alignment_score"] = record.get("horizon_alignment_score")
                 cp.update(snap)
@@ -449,12 +529,18 @@ def ingest_decisions(records: dict[str, dict[str, Any]]) -> tuple[int, int]:
             record["promotion_recommendation"] = prom.get("promotion_recommendation")
 
     accounting = load_json(ACCOUNTING_JSON)
+    paper_portfolio = load_json(PAPER_PORTFOLIO_JSON)
+    mtm_doc = load_json(PAPER_MTM_JSON)
+    orders_by = load_orders_by_decision()
     cp_updated = update_checkpoints(
         records,
         gii_by=gii_by,
         pce_by=pce_by,
         accounting=accounting,
         market_regime=market_regime,
+        paper_portfolio=paper_portfolio,
+        mtm_doc=mtm_doc,
+        orders_by_decision=orders_by,
     )
     return new_count, cp_updated
 
@@ -476,6 +562,37 @@ def aggregate_learning(records: dict[str, dict[str, Any]]) -> dict[str, Any]:
         action: {"count": len(rows), "success_rate_pct": success_rate(rows)}
         for action, rows in by_action.items()
     }
+    checkpoint_outcomes: list[dict[str, Any]] = []
+    for rec in records.values():
+        for cp in rec.get("checkpoints") or []:
+            if cp.get("status") == "RECORDED" and cp.get("outcome"):
+                checkpoint_outcomes.append(cp)
+
+    wins = [c for c in checkpoint_outcomes if c.get("outcome") == "success"]
+    losses = [c for c in checkpoint_outcomes if c.get("outcome") == "failure"]
+    win_pnls = [_f(c.get("actual_profit_delta")) for c in wins]
+    loss_pnls = [_f(c.get("actual_profit_delta")) for c in losses]
+    avg_winner = sum(win_pnls) / len(win_pnls) if win_pnls else 0.0
+    avg_loser = sum(loss_pnls) / len(loss_pnls) if loss_pnls else 0.0
+    win_rate = len(wins) / len(checkpoint_outcomes) if checkpoint_outcomes else 0.0
+    gross_win = sum(p for p in win_pnls if p > 0)
+    gross_loss = abs(sum(p for p in loss_pnls if p < 0))
+    profit_factor = round(gross_win / gross_loss, 4) if gross_loss > 0 else None
+    expectancy = round((win_rate * avg_winner) + ((1 - win_rate) * avg_loser), 4) if checkpoint_outcomes else 0.0
+
+    survival_metrics = {
+        "checkpoint_count": len(checkpoint_outcomes),
+        "win_rate": round(win_rate, 4),
+        "profit_factor": profit_factor,
+        "expectancy": expectancy,
+        "average_winner": round(avg_winner, 4),
+        "average_loser": round(avg_loser, 4),
+        "max_drawdown_pct": round(
+            max((_f(c.get("drawdown_pct")) for c in checkpoint_outcomes), default=0.0),
+            4,
+        ),
+    }
+
     philosophy_stats = {
         phil: {"count": len(rows), "success_rate_pct": success_rate(rows)}
         for phil, rows in by_philosophy.items()
@@ -490,6 +607,7 @@ def aggregate_learning(records: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "horizon_conflict_count": len(horizon_conflict),
         "horizon_aligned_count": len(horizon_aligned),
         "total_records": len(records),
+        "survival_metrics": survival_metrics,
     }
 
 

@@ -34,6 +34,8 @@ PROMOTION_JSON = OUTPUT_DIR / "promotion_gate.json"
 MEMORY_JSONL = Path("runtime_outputs/longitudinal_memory/decisions.jsonl")
 PAPER_EXEC_PORTFOLIO = Path("runtime_outputs/paper_execution/paper_portfolio.json")
 PAPER_EXEC_ATTRIBUTION = Path("runtime_outputs/paper_execution/rule_outcome_attribution.json")
+PAPER_EXEC_TRADES = Path("runtime_outputs/paper_execution/paper_trades.jsonl")
+PAPER_MTM_JSON = Path("runtime_outputs/paper_execution/mark_to_market.json")
 
 FORBIDDEN_SNAPSHOT = (
     "live_bot.py",
@@ -51,11 +53,12 @@ CYCLE_STEPS: list[tuple[str, list[str]]] = [
     ("health", [sys.executable, "tae.py", "health"]),
     ("morning_audit", [sys.executable, "tae.py", "morning-audit"]),
     ("learning_profit", [sys.executable, "tae.py", "learning-profit"]),
-    ("adaptive_weights", [sys.executable, "tae.py", "adaptive-weights"]),
     ("paper_decisions", [sys.executable, "tae.py", "paper-decisions"]),
     ("paper_execution", [sys.executable, "tae.py", "paper-execution"]),
+    ("paper_mark_to_market", [sys.executable, "tae.py", "paper-mark-to-market"]),
     ("paper_experiments", [sys.executable, "tae.py", "paper-experiments"]),
     ("outcome_memory", [sys.executable, "tae.py", "outcome-memory"]),
+    ("adaptive_weights", [sys.executable, "tae.py", "adaptive-weights"]),
     ("dpe_events", [sys.executable, "tae.py", "dpe-events"]),
     ("dpe_splitter", [sys.executable, "tae.py", "dpe-splitter"]),
     ("dpe_competitive", [sys.executable, "tae.py", "dpe-competitive"]),
@@ -63,6 +66,8 @@ CYCLE_STEPS: list[tuple[str, list[str]]] = [
     ("dpe_evaluator", [sys.executable, "tae.py", "dpe-evaluator"]),
     ("dpe_learning", [sys.executable, "tae.py", "dpe-learning"]),
     ("dpe_adaptive", [sys.executable, "tae.py", "dpe-adaptive"]),
+    ("strategy_survival", [sys.executable, "tae.py", "strategy-survival"]),
+    ("canonical_vs_paper", [sys.executable, "tae.py", "canonical-vs-paper"]),
 ]
 
 
@@ -248,6 +253,48 @@ def _f(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _load_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def _trades_today_count() -> int:
+    today = datetime.now(timezone.utc).date().isoformat()
+    count = 0
+    for row in _load_jsonl(PAPER_EXEC_TRADES):
+        ts = _s(row.get("timestamp") or row.get("executed_at") or row.get("generated_at"))
+        if ts.startswith(today):
+            count += 1
+    return count
+
+
+def _mark_to_market_status(mtm: dict[str, Any]) -> str:
+    live = int(_f(mtm.get("live_price_count")))
+    stale = int(_f(mtm.get("stale_price_count")))
+    if not mtm:
+        return "NOT_RUN"
+    if stale == 0 and live > 0:
+        return "LIVE"
+    if live > 0:
+        return "PARTIAL_STALE"
+    if stale > 0:
+        return "STALE"
+    return "EMPTY"
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def collect_summary(
     step_results: list[dict[str, Any]],
     *,
@@ -268,6 +315,21 @@ def collect_summary(
     ledger = _load_json(LEDGER_JSON) or {}
     paper_portfolio = _load_json(PAPER_EXEC_PORTFOLIO) or {}
     paper_attribution = _load_json(PAPER_EXEC_ATTRIBUTION) or {}
+    paper_mtm = _load_json(PAPER_MTM_JSON) or {}
+
+    canonical_value = _f(accounting.get("account_value_corrected") or accounting.get("total_account_value"))
+    paper_value = _f(paper_portfolio.get("total_value"))
+    rules = paper_attribution.get("rules") or {}
+    strengthened = [rid for rid, row in rules.items() if _f(row.get("recommended_influence_delta")) > 0]
+    weakened = [rid for rid, row in rules.items() if _f(row.get("recommended_influence_delta")) < 0]
+    top_profitable = sorted(
+        rules.items(),
+        key=lambda x: -_f(x[1].get("avg_actual_pnl")),
+    )[:3]
+    top_damaging = sorted(
+        rules.items(),
+        key=lambda x: _f(x[1].get("avg_actual_pnl")),
+    )[:3]
 
     decisions = decisions_doc.get("decisions") or []
     by_action: dict[str, list[dict[str, Any]]] = {}
@@ -369,6 +431,19 @@ def collect_summary(
         "paper_portfolio_positions": len(paper_portfolio.get("positions") or {}),
         "paper_execution_rules_tracked": len(paper_attribution.get("rules") or {}),
         "paper_broker_executed": paper_portfolio.get("broker_executed", False),
+        "paper_cash": _f(paper_portfolio.get("cash")),
+        "paper_realized_pnl": _f(paper_portfolio.get("realized_pnl")),
+        "paper_unrealized_pnl": _f(paper_portfolio.get("unrealized_pnl")),
+        "paper_drawdown_pct": paper_portfolio.get("drawdown_pct"),
+        "mark_to_market_stale_count": paper_mtm.get("stale_price_count"),
+        "mark_to_market_live_count": paper_mtm.get("live_price_count"),
+        "mark_to_market_status": _mark_to_market_status(paper_mtm),
+        "executed_trades_today": _trades_today_count(),
+        "canonical_vs_paper_value_delta": round(paper_value - canonical_value, 4),
+        "rules_strengthened": strengthened[:5],
+        "rules_weakened": weakened[:5],
+        "top_profitable_rules": [{"rule_id": k, "avg_actual_pnl": v.get("avg_actual_pnl")} for k, v in top_profitable],
+        "top_damaging_rules": [{"rule_id": k, "avg_actual_pnl": v.get("avg_actual_pnl")} for k, v in top_damaging],
         "final_verdict": final_verdict,
         "failed_steps": failed_steps,
     }
@@ -416,6 +491,30 @@ def write_report(summary: dict[str, Any]) -> None:
         f"- Forbidden content diff clean: **{summary.get('forbidden_content_diff_clean')}**",
         f"- Forbidden mtime drift detected: **{summary.get('forbidden_mtime_drift_detected')}**",
         f"- Forbidden files unchanged (content): **{summary.get('forbidden_files_unchanged')}**",
+        "",
+        "## PAPER execution intelligence",
+        "",
+        f"- PAPER portfolio value: **${summary.get('paper_portfolio_value', 0):,.2f}**",
+        f"- PAPER cash: **${summary.get('paper_cash', 0):,.2f}**",
+        f"- PAPER unrealized PnL: **${summary.get('paper_unrealized_pnl', 0):,.2f}**",
+        f"- PAPER realized PnL: **${summary.get('paper_realized_pnl', 0):,.2f}**",
+        f"- Canonical vs PAPER value delta: **${summary.get('canonical_vs_paper_value_delta', 0):,.2f}**",
+        f"- Mark-to-market status: **{summary.get('mark_to_market_status')}**",
+        f"- Mark-to-market live prices: **{summary.get('mark_to_market_live_count')}**",
+        f"- Mark-to-market stale prices: **{summary.get('mark_to_market_stale_count')}**",
+        f"- Executed trades today: **{summary.get('executed_trades_today', 0)}**",
+        f"- Rules strengthened: `{summary.get('rules_strengthened')}`",
+        f"- Rules weakened: `{summary.get('rules_weakened')}`",
+        f"- Top profitable rules: `{summary.get('top_profitable_rules')}`",
+        f"- Top damaging rules: `{summary.get('top_damaging_rules')}`",
+        "",
+        "## Top PAPER actions (by confidence)",
+        "",
+        f"- BUY_PAPER: `{summary.get('top_buy_paper')}`",
+        f"- SELL_PAPER: `{summary.get('top_sell_paper')}`",
+        f"- PROTECT_PAPER: `{summary.get('top_protect_paper')}`",
+        f"- ROTATE_PAPER: `{summary.get('top_rotate_paper')}`",
+        f"- HOLD_PAPER: `{summary.get('top_hold_paper')}`",
     ]
     if summary.get("forbidden_safety_note"):
         lines.append(f"- Note: {summary.get('forbidden_safety_note')}")
@@ -471,6 +570,8 @@ def main() -> int:
 
     exit_code = 0
     for name, cmd in CYCLE_STEPS:
+        if name == "paper_decisions":
+            run_pre_pde_feedback(root, step_results)
         result = run_step(name, cmd, cwd=root)
         step_results.append(result)
         if not result["ok"] and name in {

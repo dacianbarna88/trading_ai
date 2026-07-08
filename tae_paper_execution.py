@@ -21,10 +21,16 @@ PORTFOLIO_JSON = OUTPUT_DIR / "paper_portfolio.json"
 ORDERS_JSONL = OUTPUT_DIR / "paper_orders.jsonl"
 TRADES_JSONL = OUTPUT_DIR / "paper_trades.jsonl"
 ATTRIBUTION_JSON = OUTPUT_DIR / "rule_outcome_attribution.json"
+MTM_JSON = OUTPUT_DIR / "mark_to_market.json"
 REPORT_MD = Path("TAE_PAPER_EXECUTION_REPORT.md")
+MTM_REPORT_MD = Path("TAE_PAPER_MARK_TO_MARKET_REPORT.md")
+CANONICAL_VS_PAPER_MD = Path("TAE_CANONICAL_VS_PAPER_REPORT.md")
 
 DECISIONS_JSON = Path("runtime_outputs/paper_decisions/paper_decisions.json")
 ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
+VALIDATION_JSON = Path("runtime_outputs/paper_decisions/decision_validation_results.json")
+
+INFLUENCE_DELTA_CAP = 0.008
 
 FORBIDDEN_WRITE_PREFIXES = (
     "live_bot.py",
@@ -116,6 +122,11 @@ def recalc_portfolio(portfolio: dict[str, Any]) -> None:
         pos["pnl"] = round(pnl, 4)
         if avg_price > 0:
             pos["current_pct"] = round(((current_price - avg_price) / avg_price) * 100, 4)
+            pos["unrealized_pct"] = pos["current_pct"]
+            price_high = max(_f(pos.get("price_high")), current_price)
+            pos["price_high"] = round(price_high, 6)
+            if price_high > 0:
+                pos["drawdown_pct"] = round(((price_high - current_price) / price_high) * 100, 4)
         open_value += current_value
         unrealized += pnl
     cash = _f(portfolio.get("cash"))
@@ -779,6 +790,425 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     if write_report_flag:
         write_report(payload)
     return payload
+
+
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def _fetch_ticker_price(ticker: str) -> tuple[float | None, str, str]:
+    try:
+        from core.market_data_layer import get_market_price
+
+        result = get_market_price(ticker, purpose="risk")
+        if result.price is not None and result.price > 0:
+            return result.price, result.source or "yfinance", result.status
+    except Exception:
+        pass
+    return None, "UNAVAILABLE", "STALE"
+
+
+def _outcome_label(actual: float, expected: float, verdict: str | None) -> str:
+    if verdict in {"NEEDS_MORE_DATA"}:
+        return "needs_more_data"
+    if actual > 0 or (expected > 0 and actual >= expected * 0.5):
+        return "success"
+    if actual < 0 or (expected > 0 and actual < 0):
+        return "failure"
+    return "needs_more_data"
+
+
+def _order_counts_for_attribution(order: dict[str, Any]) -> bool:
+    explicit = order.get("executed")
+    if explicit is False:
+        return False
+    if explicit is True:
+        return True
+    status = _s(order.get("status")).upper()
+    if status in {"SKIPPED_NO_POSITION", "SKIPPED_NO_CASH"}:
+        return False
+    if status in {"EXECUTED", "NO_CHANGE"}:
+        return True
+    action = _s(order.get("action")).upper()
+    before = order.get("before_position") or {}
+    after = order.get("after_position") or {}
+    if action in {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"} and _f(before.get("shares")) <= 0:
+        return False
+    if action == "BUY_PAPER" and _f(after.get("shares")) <= _f(before.get("shares")):
+        return False
+    return bool(_s(order.get("decision_id")))
+
+
+def _actual_pnl_for_order(order: dict[str, Any], portfolio: dict[str, Any]) -> float:
+    ticker = _s(order.get("ticker")).upper()
+    pos = (portfolio.get("positions") or {}).get(ticker) or {}
+    if _f(pos.get("shares")) > 0:
+        return _f(pos.get("pnl"))
+    simulated = _f(order.get("simulated_pnl_impact"))
+    if simulated != 0:
+        return simulated
+    before = order.get("before_position") or {}
+    after = order.get("after_position") or {}
+    price = _f(order.get("price")) or _f(before.get("current_price"))
+    sold = _f(before.get("shares")) - _f(after.get("shares"))
+    if sold > 0 and price > 0:
+        avg = _f(before.get("avg_price"))
+        if avg > 0:
+            return round((price - avg) * sold, 4)
+    return simulated
+
+
+def refresh_rule_attribution_from_actual(
+    portfolio: dict[str, Any],
+    *,
+    orders: list[dict[str, Any]] | None = None,
+    validation: dict[str, Any] | None = None,
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    del previous  # rebuild from actual outcomes; do not incrementally merge v1 rows
+    orders = orders if orders is not None else load_jsonl(ORDERS_JSONL)
+    validation = validation if validation is not None else load_json(VALIDATION_JSON)
+    val_by = {
+        _s(r.get("decision_id")): r
+        for r in (validation or {}).get("results") or []
+        if r.get("decision_id")
+    }
+    by_decision: dict[str, dict[str, Any]] = {}
+    for order in orders:
+        did = _s(order.get("decision_id"))
+        if did:
+            by_decision[did] = order
+
+    rules: dict[str, dict[str, Any]] = {}
+    processed = 0
+    for order in by_decision.values():
+        if not _order_counts_for_attribution(order):
+            continue
+        processed += 1
+        did = _s(order.get("decision_id"))
+        ticker = _s(order.get("ticker")).upper()
+        action = _s(order.get("action"))
+        val = val_by.get(did) or {}
+        verdict = _s(val.get("verdict"))
+        expected = _f(order.get("expected_profit_delta"))
+        pos = (portfolio.get("positions") or {}).get(ticker) or {}
+        actual = _actual_pnl_for_order(order, portfolio)
+        drawdown = _f(pos.get("drawdown_pct"))
+        outcome = _outcome_label(actual, expected, verdict)
+        positive = outcome == "success"
+        influence = INFLUENCE_DELTA_CAP if positive else -INFLUENCE_DELTA_CAP
+        if outcome == "needs_more_data":
+            influence = 0.0
+
+        for rule_id in order.get("rule_sources") or []:
+            entry = rules.setdefault(
+                rule_id,
+                {
+                    "rule_id": rule_id,
+                    "total_decisions": 0,
+                    "executions": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "positive_outcomes": 0,
+                    "negative_outcomes": 0,
+                    "avg_actual_pnl": 0.0,
+                    "avg_drawdown": 0.0,
+                    "win_rate": 0.0,
+                    "net_pnl_impact": 0.0,
+                    "weight_delta": 0.0,
+                    "recommended_influence_delta": 0.0,
+                    "confidence_impact": 0.0,
+                    "last_action": None,
+                    "last_ticker": None,
+                    "last_outcome": None,
+                    "last_updated": None,
+                    "associated_action": None,
+                },
+            )
+            n = int(_f(entry.get("total_decisions"))) + 1
+            entry["total_decisions"] = n
+            entry["executions"] = n
+            entry["avg_actual_pnl"] = round(
+                (_f(entry.get("avg_actual_pnl")) * (n - 1) + actual) / n,
+                4,
+            )
+            entry["avg_drawdown"] = round(
+                (_f(entry.get("avg_drawdown")) * (n - 1) + drawdown) / n,
+                4,
+            )
+            entry["net_pnl_impact"] = round(_f(entry.get("net_pnl_impact")) + actual, 4)
+            if positive:
+                entry["wins"] = int(_f(entry.get("wins")) + 1)
+                entry["positive_outcomes"] = int(_f(entry.get("positive_outcomes")) + 1)
+            elif outcome == "failure":
+                entry["losses"] = int(_f(entry.get("losses")) + 1)
+                entry["negative_outcomes"] = int(_f(entry.get("negative_outcomes")) + 1)
+            wins = _f(entry.get("wins"))
+            entry["win_rate"] = round(wins / n, 4) if n else 0.0
+            entry["weight_delta"] = round(
+                max(-0.2, min(0.2, _f(entry.get("weight_delta")) + influence)),
+                4,
+            )
+            entry["recommended_influence_delta"] = round(
+                max(-INFLUENCE_DELTA_CAP, min(INFLUENCE_DELTA_CAP, influence)),
+                4,
+            )
+            entry["confidence_impact"] = round(entry["win_rate"] - 0.5, 4)
+            entry["last_action"] = action
+            entry["last_ticker"] = ticker
+            entry["last_outcome"] = outcome
+            entry["last_updated"] = _now()
+            entry["associated_action"] = action
+
+    return {
+        "schema": "tae.rule_outcome_attribution.v2",
+        "mode": MODE,
+        "broker_executed": False,
+        "live_money": False,
+        "generated_at": _now(),
+        "rules": rules,
+        "orders_processed": processed,
+        "source": "actual_mtm_outcomes",
+    }
+
+
+def run_paper_mark_to_market(*, write_report_flag: bool = True) -> dict[str, Any]:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    portfolio = load_json(PORTFOLIO_JSON)
+    if not portfolio:
+        return {"ok": False, "error": f"missing {PORTFOLIO_JSON}"}
+
+    peak_value = _f(portfolio.get("peak_value") or portfolio.get("starting_value") or portfolio.get("total_value"))
+    position_rows: list[dict[str, Any]] = []
+    stale_count = 0
+    live_count = 0
+
+    for ticker, pos in sorted((portfolio.get("positions") or {}).items()):
+        price, source, status = _fetch_ticker_price(ticker)
+        avg_price = _f(pos.get("avg_price"))
+        if price is None or price <= 0:
+            price = _f(pos.get("current_price"))
+            if price <= 0 and avg_price > 0:
+                price = avg_price
+            source = "FALLBACK_STALE"
+            status = "STALE"
+            stale_count += 1
+        else:
+            live_count += 1
+
+        shares = _f(pos.get("shares"))
+        price_high = max(_f(pos.get("price_high")), price)
+        pos["current_price"] = round(price, 6)
+        pos["price_high"] = round(price_high, 6)
+        pos["mark_source"] = source
+        pos["mark_status"] = status
+        if avg_price > 0:
+            pos["unrealized_pct"] = round(((price - avg_price) / avg_price) * 100, 4)
+            pos["run_up_pct"] = round(((price_high - avg_price) / avg_price) * 100, 4)
+        else:
+            pos["unrealized_pct"] = 0.0
+            pos["run_up_pct"] = 0.0
+
+        position_rows.append(
+            {
+                "ticker": ticker,
+                "shares": shares,
+                "avg_price": avg_price,
+                "current_price": price,
+                "current_value": round(shares * price, 4),
+                "unrealized_pnl": round((price - avg_price) * shares, 4) if avg_price > 0 else 0.0,
+                "unrealized_pct": pos["unrealized_pct"],
+                "run_up_pct": pos["run_up_pct"],
+                "mark_source": source,
+                "mark_status": status,
+            }
+        )
+
+    recalc_portfolio(portfolio)
+    total_value = _f(portfolio.get("total_value"))
+    peak_value = max(peak_value, total_value)
+    portfolio["peak_value"] = round(peak_value, 4)
+    drawdown_pct = round(((peak_value - total_value) / peak_value) * 100, 4) if peak_value > 0 else 0.0
+    portfolio["drawdown_pct"] = drawdown_pct
+    open_value = _f(portfolio.get("open_positions_value"))
+    portfolio["capital_efficiency"] = round(
+        _f(portfolio.get("unrealized_pnl")) / open_value if open_value > 0 else 0.0,
+        4,
+    )
+    portfolio["last_mark_to_market_at"] = _now()
+    save_json(PORTFOLIO_JSON, portfolio)
+
+    attribution = refresh_rule_attribution_from_actual(portfolio, orders=load_jsonl(ORDERS_JSONL))
+    save_json(ATTRIBUTION_JSON, attribution)
+
+    mtm_doc = {
+        "schema": "tae.paper_mark_to_market.v1",
+        "mode": MODE,
+        "generated_at": _now(),
+        "positions_marked": len(position_rows),
+        "live_price_count": live_count,
+        "stale_price_count": stale_count,
+        "total_value": total_value,
+        "cash": _f(portfolio.get("cash")),
+        "realized_pnl": _f(portfolio.get("realized_pnl")),
+        "unrealized_pnl": _f(portfolio.get("unrealized_pnl")),
+        "drawdown_pct": drawdown_pct,
+        "capital_efficiency": portfolio.get("capital_efficiency"),
+        "positions": position_rows,
+    }
+    save_json(MTM_JSON, mtm_doc)
+
+    if write_report_flag:
+        lines = [
+            "# TAE PAPER Mark-to-Market Report",
+            "",
+            f"**Generated:** {mtm_doc['generated_at']}",
+            f"**Mode:** {MODE} — NO_BROKER",
+            "",
+            f"- Positions marked: **{len(position_rows)}**",
+            f"- Live prices: **{live_count}**",
+            f"- Stale/fallback prices: **{stale_count}**",
+            f"- Total value: **${total_value:,.2f}**",
+            f"- Unrealized PnL: **${_f(portfolio.get('unrealized_pnl')):,.2f}**",
+            f"- Realized PnL: **${_f(portfolio.get('realized_pnl')):,.2f}**",
+            f"- Drawdown: **{drawdown_pct}%**",
+            f"- Capital efficiency: **{portfolio.get('capital_efficiency')}**",
+            "",
+            "## Positions",
+            "",
+            "| ticker | price | source | unrealized | run-up |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for row in position_rows[:30]:
+            lines.append(
+                f"| {row['ticker']} | {row['current_price']} | {row['mark_source']} | "
+                f"${row['unrealized_pnl']:,.2f} | {row['run_up_pct']}% |"
+            )
+        MTM_REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    return {
+        "ok": True,
+        "mtm": mtm_doc,
+        "portfolio": portfolio,
+        "attribution_rules": len(attribution.get("rules") or {}),
+        "stale_price_count": stale_count,
+    }
+
+
+def compare_canonical_vs_paper(*, write_report_flag: bool = True) -> dict[str, Any]:
+    accounting = load_json(ACCOUNTING_JSON) or {}
+    paper = load_json(PORTFOLIO_JSON) or {}
+    mtm = load_json(MTM_JSON) or {}
+
+    canonical_value = _f(accounting.get("account_value_corrected") or accounting.get("total_account_value"))
+    canonical_cash = _f(accounting.get("cash_available"))
+    canonical_positions = accounting.get("open_positions_count") or len(accounting.get("open_positions") or [])
+    canonical_realized = _f(accounting.get("realized_pnl"))
+    canonical_unrealized = _f(accounting.get("unrealized_pnl"))
+    canonical_total_pnl = _f(accounting.get("total_pnl")) or canonical_realized + canonical_unrealized
+
+    paper_value = _f(paper.get("total_value"))
+    paper_cash = _f(paper.get("cash"))
+    paper_positions = len(paper.get("positions") or {})
+    paper_realized = _f(paper.get("realized_pnl"))
+    paper_unrealized = _f(paper.get("unrealized_pnl"))
+    paper_total_pnl = paper_realized + paper_unrealized
+
+    delta_value = round(paper_value - canonical_value, 4)
+    delta_cash = round(paper_cash - canonical_cash, 4)
+    delta_positions = paper_positions - int(canonical_positions)
+    delta_pnl = round(paper_total_pnl - canonical_total_pnl, 4)
+
+    explanation = (
+        f"PAPER portfolio diverges by ${delta_value:,.2f} total value "
+        f"({delta_positions:+d} positions, ${delta_cash:,.2f} cash delta) "
+        f"after isolated PAPER execution and mark-to-market."
+    )
+
+    payload = {
+        "schema": "tae.canonical_vs_paper.v1",
+        "mode": MODE,
+        "generated_at": _now(),
+        "canonical": {
+            "total_value": canonical_value,
+            "cash": canonical_cash,
+            "open_positions": canonical_positions,
+            "realized_pnl": canonical_realized,
+            "unrealized_pnl": canonical_unrealized,
+            "total_pnl": canonical_total_pnl,
+        },
+        "paper": {
+            "total_value": paper_value,
+            "cash": paper_cash,
+            "open_positions": paper_positions,
+            "realized_pnl": paper_realized,
+            "unrealized_pnl": paper_unrealized,
+            "total_pnl": paper_total_pnl,
+            "drawdown_pct": paper.get("drawdown_pct"),
+            "mark_to_market_stale_count": mtm.get("stale_price_count"),
+        },
+        "delta": {
+            "total_value": delta_value,
+            "cash": delta_cash,
+            "open_positions": delta_positions,
+            "total_pnl": delta_pnl,
+        },
+        "explanation": explanation,
+    }
+
+    if write_report_flag:
+        lines = [
+            "# TAE Canonical vs PAPER Portfolio Report",
+            "",
+            f"**Generated:** {payload['generated_at']}",
+            f"**Mode:** {MODE} — READ_ONLY comparison",
+            "",
+            "| metric | canonical | PAPER | delta |",
+            "| --- | --- | --- | --- |",
+            f"| total value | ${canonical_value:,.2f} | ${paper_value:,.2f} | ${delta_value:,.2f} |",
+            f"| cash | ${canonical_cash:,.2f} | ${paper_cash:,.2f} | ${delta_cash:,.2f} |",
+            f"| open positions | {canonical_positions} | {paper_positions} | {delta_positions:+d} |",
+            f"| total PnL | ${canonical_total_pnl:,.2f} | ${paper_total_pnl:,.2f} | ${delta_pnl:,.2f} |",
+            "",
+            f"**Explanation:** {explanation}",
+        ]
+        CANONICAL_VS_PAPER_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    return {"ok": True, **payload}
+
+
+def run_rule_outcome_attribution(*, write_report_flag: bool = False) -> dict[str, Any]:
+    portfolio = load_json(PORTFOLIO_JSON)
+    if not portfolio:
+        return {"ok": False, "error": f"missing {PORTFOLIO_JSON}"}
+    attribution = refresh_rule_attribution_from_actual(portfolio, orders=load_jsonl(ORDERS_JSONL))
+    save_json(ATTRIBUTION_JSON, attribution)
+    strengthened = [
+        rid for rid, row in (attribution.get("rules") or {}).items()
+        if _f(row.get("recommended_influence_delta")) > 0
+    ]
+    weakened = [
+        rid for rid, row in (attribution.get("rules") or {}).items()
+        if _f(row.get("recommended_influence_delta")) < 0
+    ]
+    return {
+        "ok": True,
+        "rules": len(attribution.get("rules") or {}),
+        "strengthened": strengthened[:5],
+        "weakened": weakened[:5],
+        "attribution": attribution,
+    }
 
 
 def main() -> int:

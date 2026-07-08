@@ -214,7 +214,107 @@ class PaperExecutionTest(unittest.TestCase):
                         self.assertGreater(pe._f(row.get("fill_shares") or row.get("shares")), 0)
 
 
-    def test_sanitize_trades_file(self) -> None:
+    def test_mtm_uses_live_price_not_avg(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "runtime_outputs/paper_execution"
+            out_dir.mkdir(parents=True)
+            portfolio_path = out_dir / "paper_portfolio.json"
+            portfolio_path.write_text(
+                json.dumps(
+                    {
+                        "cash": 1000.0,
+                        "realized_pnl": 0.0,
+                        "starting_value": 2000.0,
+                        "positions": {
+                            "AAPL": {
+                                "ticker": "AAPL",
+                                "shares": 10.0,
+                                "avg_price": 100.0,
+                                "current_price": 100.0,
+                                "status": "OPEN",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(pe, "OUTPUT_DIR", out_dir), mock.patch.object(
+                pe, "PORTFOLIO_JSON", portfolio_path
+            ), mock.patch.object(pe, "ATTRIBUTION_JSON", out_dir / "rule_outcome_attribution.json"            ), mock.patch.object(
+                pe, "MTM_JSON", out_dir / "mark_to_market.json"
+            ), mock.patch.object(pe, "MTM_REPORT_MD", Path(tmp) / "TAE_PAPER_MARK_TO_MARKET_REPORT.md"), mock.patch.object(
+                pe, "ORDERS_JSONL", out_dir / "paper_orders.jsonl"
+            ), mock.patch.object(pe, "VALIDATION_JSON", out_dir / "validation.json"), mock.patch.object(
+                pe, "_fetch_ticker_price", return_value=(110.0, "yfinance", "LIVE")
+            ):
+                result = pe.run_paper_mark_to_market(write_report_flag=False)
+            self.assertTrue(result["ok"])
+            portfolio = json.loads(portfolio_path.read_text(encoding="utf-8"))
+            pos = portfolio["positions"]["AAPL"]
+            self.assertEqual(pos["current_price"], 110.0)
+            self.assertEqual(pos["mark_status"], "LIVE")
+            self.assertAlmostEqual(portfolio["unrealized_pnl"], 100.0, places=2)
+
+    def test_compare_canonical_vs_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            accounting = root / "tae_accounting_snapshot.json"
+            out_dir = root / "runtime_outputs/paper_execution"
+            out_dir.mkdir(parents=True)
+            accounting.write_text(
+                json.dumps({"cash_available": 500.0, "account_value_corrected": 1500.0, "open_positions_count": 1}),
+                encoding="utf-8",
+            )
+            (out_dir / "paper_portfolio.json").write_text(
+                json.dumps({"cash": 400.0, "total_value": 1600.0, "realized_pnl": 50.0, "unrealized_pnl": 25.0, "positions": {"X": {}}}),
+                encoding="utf-8",
+            )
+            with mock.patch.object(pe, "ACCOUNTING_JSON", accounting), mock.patch.object(
+                pe, "PORTFOLIO_JSON", out_dir / "paper_portfolio.json"
+            ), mock.patch.object(pe, "CANONICAL_VS_PAPER_MD", root / "TAE_CANONICAL_VS_PAPER_REPORT.md"):
+                result = pe.compare_canonical_vs_paper(write_report_flag=False)
+            self.assertTrue(result["ok"])
+            self.assertAlmostEqual(result["delta"]["total_value"], 100.0, places=2)
+
+    def test_order_counts_legacy_without_executed_flag(self) -> None:
+        legacy = {
+            "decision_id": "PDEC-LEG-1",
+            "ticker": "AAPL",
+            "action": "HOLD_PAPER",
+            "before_position": {"shares": 5.0},
+            "after_position": {"shares": 5.0},
+        }
+        skipped = {
+            "decision_id": "PDEC-LEG-2",
+            "ticker": "AZN.L",
+            "action": "SELL_PAPER",
+            "before_position": {"shares": 0.0},
+        }
+        self.assertTrue(pe._order_counts_for_attribution(legacy))
+        self.assertFalse(pe._order_counts_for_attribution(skipped))
+
+    def test_refresh_rule_attribution_from_actual(self) -> None:
+        portfolio = {
+            "positions": {
+                "AAPL": {"shares": 5.0, "pnl": 20.0, "drawdown_pct": 1.0},
+            }
+        }
+        orders = [
+            {
+                "executed": True,
+                "decision_id": "D1",
+                "ticker": "AAPL",
+                "action": "BUY_PAPER",
+                "expected_profit_delta": 10.0,
+                "rule_sources": ["RULE-WIN"],
+            }
+        ]
+        attr = pe.refresh_rule_attribution_from_actual(portfolio, orders=orders)
+        rule = attr["rules"]["RULE-WIN"]
+        self.assertEqual(rule["wins"], 1)
+        self.assertAlmostEqual(rule["avg_actual_pnl"], 20.0, places=2)
+        self.assertGreater(rule["recommended_influence_delta"], 0)
+
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "paper_trades.jsonl"
             rows = [

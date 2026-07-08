@@ -193,7 +193,7 @@ def baseline_metrics_for_tickers(tickers: list[str], ctx: dict[str, Any]) -> dic
         missed += _f(row.get("missed_usd") or sh.get("missed_opportunity_usd"))
         capture += _f(row.get("profit_capture_efficiency"))
         cap_eff += _f(row.get("capital_efficiency"))
-        risk += _f(row.get("collapse_probability") or row.get("opportunity_score") / 100)
+        risk += _f(row.get("collapse_probability") or (_f(row.get("opportunity_score")) / 100))
     if count == 0:
         port = ctx.get("portfolio_gii") or {}
         return {
