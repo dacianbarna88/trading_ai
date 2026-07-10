@@ -8,9 +8,9 @@
 
 | Item | Value |
 |------|--------|
-| **Current approved milestone** | **Main Decision Brain Closure** — `MAIN_DECISION_BRAIN_CLOSED` |
+| **Current approved milestone** | **Operational Consistency Closure** — `TAE_OPERATIONALLY_CLOSED` |
 | **Branch** | `cursor/x12b-legacy-archive-hotfix` |
-| **Base commits** | `59982ee` decision state · `d39ec35` stabilization |
+| **Base commits** | `9d816de` profit integrity guard · `295303f` capital base fix |
 | **Canonical live runtime** | `live_bot.py` |
 | **TAE PAPER brain** | `tae_paper_decision_engine.py` (PDE) — single final action per ticker |
 | **TAE PAPER integration** | Structural governance 19-step → `full-paper-cycle` |
@@ -25,21 +25,33 @@ Run **once per market session**:
 ```bash
 cd /Users/book/Desktop/trading_ai
 python3 tae.py full-paper-cycle
+python3 tae.py morning-audit
 ```
 
-Expected verdict: `READY_FOR_PAPER_DAY` · reconciliation `PASS` · `live_promotion_allowed=false`
+Expected morning-audit: **READY** · operational contract all OK · `PAPER_PROFIT_INTEGRITY: PASS` · `validation_capital_base: 30000`
 
-Audit reference: `TAE_MAIN_DECISION_BRAIN_CLOSURE_AUDIT.md` · `tae_main_decision_brain_closure_audit.json`
+Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `tae_operational_consistency_closure_audit.json`
 
-**Main decision brain:** PDE (`tae_paper_decision_engine.py`) produces ONE final action per ticker. Hard risk first. Decision state gates switches. Conflict resolution is evidence-only. Execution requires authorization.
+**SSOT boundaries (do not merge):**
+
+| Portfolio | Source | Used for |
+|-----------|--------|----------|
+| **CANONICAL** | `tae_accounting_snapshot.json` / `portfolio.csv` | Live bot reporting, corrected accounting |
+| **PAPER VALIDATION** | `runtime_outputs/paper_execution/paper_portfolio.json` | 30-day profit validation, integrity guard |
+
+**Main decision brain:** PDE produces ONE final action per ticker. Hard risk first. Decision state gates switches. Execution requires authorization.
 
 **Do not** run multiple full cycles in rapid succession — high-EV tickers (AMAT/HD) may oscillate with **authorized** switches during stress testing.
 
 ---
 
-## Current state (2026-07-08)
+## Current state (2026-07-10)
 
-- **Main decision brain closed** — PDE is sole final authority; no Master Decision Authority module
+- **Operational consistency closed** — `full-paper-cycle` refreshes accounting, PPG, APPE, GII, protect, infra before PDE/DPE chain
+- **Morning audit READY** — dual CANONICAL / PAPER VALIDATION sections; no mixed SSOT
+- **PAPER profit integrity guard** — `validation_capital_base` = $30,000; synthetic fill contamination = 0
+- **Capital base CONFIRMED** — virtual $10k DEPOSIT excluded; effective contributed capital $30,000
+- **DPE idempotent** — repeat cycles append 0 new unique events/jobs
 - **Decision state wired** — `59982ee`: active decisions → PDE → conflict resolution → execution → memory
 - **Anti-churn gates active** — unauthorized BUY→SELL blocked (AIR.PA/DIA/GE → HOLD + `SKIPPED_SWITCH_NOT_AUTHORIZED`)
 - **STOP_REENTRY_CHURN enforced** — 30m cooldown after SELL; strong EV bypass only

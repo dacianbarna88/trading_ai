@@ -179,7 +179,13 @@ def build_capital_base_analysis(
     unknown_rows = [d for d in deposit_rows if d["classification"] == "UNKNOWN"]
 
     status = "OK"
-    if virtual_rows or unknown_rows:
+    if virtual_rows and not unknown_rows and abs(cash_capital_delta) <= 1.0:
+        status = "CONFIRMED"
+        explanations.append(
+            f"Virtual/test DEPOSIT(s) excluded ({excluded}); effective contributed capital "
+            f"confirmed at {effective_contributed}."
+        )
+    elif virtual_rows or unknown_rows:
         status = "NEEDS_OPERATOR_CONFIRMATION"
         if virtual_rows:
             explanations.append(

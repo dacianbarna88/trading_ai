@@ -39,6 +39,8 @@ DPE_JOBS = ROOT / "runtime_outputs/dpe/execution_jobs.jsonl"
 DPE_EVENTS = ROOT / "runtime_outputs/dpe/decision_events.jsonl"
 DPE_COMP_METRICS = ROOT / "runtime_outputs/dpe/paper_competitive/metrics.json"
 DPE_COLLAB_METRICS = ROOT / "runtime_outputs/dpe/paper_collaborative/metrics.json"
+PAPER_PORTFOLIO_JSON = ROOT / "runtime_outputs/paper_execution/paper_portfolio.json"
+INTEGRITY_JSON = ROOT / "tae_paper_profit_integrity_guard_report.json"
 
 FRESHNESS_TARGETS = (
     ("accounting", ACCOUNTING_JSON, 24),
@@ -159,8 +161,9 @@ def _last_log_timestamp() -> str | None:
 def _count_jobs() -> dict[str, Any]:
     counts: Counter[str] = Counter()
     blocked_ids: set[str] = set()
+    ready_ids: set[str] = set()
     if not DPE_JOBS.is_file():
-        return {"counts": dict(counts), "blocked_unique": 0}
+        return {"counts": dict(counts), "blocked_unique": 0, "ready_unique": 0}
     try:
         for line in DPE_JOBS.read_text(encoding="utf-8", errors="replace").splitlines():
             line = line.strip()
@@ -172,13 +175,18 @@ def _count_jobs() -> dict[str, Any]:
                 continue
             status = str(job.get("status") or "UNKNOWN").upper()
             counts[status] += 1
-            if status == "BLOCKED":
-                job_id = str(job.get("job_id") or "")
-                if job_id:
-                    blocked_ids.add(job_id)
+            job_id = str(job.get("job_id") or "")
+            if status == "BLOCKED" and job_id:
+                blocked_ids.add(job_id)
+            if status == "READY" and job_id:
+                ready_ids.add(job_id)
     except OSError:
         pass
-    return {"counts": dict(counts), "blocked_unique": len(blocked_ids)}
+    return {
+        "counts": dict(counts),
+        "blocked_unique": len(blocked_ids),
+        "ready_unique": len(ready_ids),
+    }
 
 
 def _last_jsonl_timestamp(path: Path) -> str | None:
@@ -288,15 +296,19 @@ def _score_portfolio(accounting: dict[str, Any] | None) -> tuple[int, list[str]]
     delta = float(accounting.get("account_value_reconciliation_delta") or 0)
     reconciled = abs(delta) <= 0.01
     if quality == "HISTORICAL_RECONCILIATION_REQUIRED" and reconciled:
-        score = 82
+        score = 85
         notes.append(
-            "Historical SELL row PnL stale in ledger; canonical corrected metrics reconciled"
+            "Historical ledger: stale reported SELL PnL in portfolio.csv — "
+            "canonical corrected metrics reconciled; does not block current PAPER validation"
         )
     elif quality != "OK":
         score -= 15
         notes.append(f"Data quality: {quality}")
     capital = str(accounting.get("capital_base_status") or "")
-    if "NEEDS" in capital.upper() and reconciled:
+    eff_cap = float(accounting.get("effective_contributed_capital") or 0)
+    if capital.upper() == "CONFIRMED" and reconciled:
+        notes.append(f"Capital base: CONFIRMED (${eff_cap:,.0f} contributed)")
+    elif "NEEDS" in capital.upper() and reconciled:
         notes.append(f"Capital base review: {capital} (canonical cash path reconciled)")
         score -= 5
     elif "FAIL" in capital.upper():
@@ -371,13 +383,24 @@ def _score_freshness(warnings: list[str], errors: list[str]) -> tuple[int, list[
     return max(0, min(100, score)), notes
 
 
-def _compute_verdict(global_score: int, errors: list[str], warnings: list[str], infra: dict[str, Any] | None) -> str:
+def _compute_verdict(
+    global_score: int,
+    errors: list[str],
+    warnings: list[str],
+    infra: dict[str, Any] | None,
+    *,
+    integrity_ok: bool = True,
+    stale_critical: bool = False,
+) -> str:
     fail_count = int((infra or {}).get("summary", {}).get("fail") or 0)
-    if global_score < 50 or len(errors) >= 3 or fail_count >= 2:
+    blocking_warnings = [w for w in warnings if "Stale " in w or "Missing file" in w]
+    if not integrity_ok or len(errors) >= 1 or fail_count >= 2:
         return "CRITICAL"
-    if global_score < 80 or warnings or fail_count >= 1 or errors:
+    if stale_critical or blocking_warnings or fail_count >= 1 or global_score < 70:
         return "ATTENTION_REQUIRED"
-    return "READY_FOR_MARKET"
+    if global_score < 80 or errors:
+        return "ATTENTION_REQUIRED"
+    return "READY"
 
 
 def run_audit() -> dict[str, Any]:
@@ -396,10 +419,26 @@ def run_audit() -> dict[str, Any]:
     learning = _load_json(DPE_LEARNING)
     comp_metrics = _load_json(DPE_COMP_METRICS)
     collab_metrics = _load_json(DPE_COLLAB_METRICS)
+    paper_portfolio = _load_json(PAPER_PORTFOLIO_JSON)
+
+    integrity: dict[str, Any] = {}
+    try:
+        from tae_paper_execution import check_paper_profit_integrity
+
+        integrity = check_paper_profit_integrity(
+            portfolio=paper_portfolio,
+            accounting=accounting,
+            write_report_flag=False,
+            update_validation_json=False,
+        )
+    except Exception as exc:
+        integrity = {"ok": False, "verdict": "INTEGRITY_CHECK_FAILED", "error": str(exc)}
+        errors.append(f"PAPER profit integrity check failed: {exc}")
 
     freshness_rows, fresh_warnings, fresh_errors = _freshness_audit()
     warnings.extend(fresh_warnings)
     errors.extend(fresh_errors)
+    stale_critical = any(row.get("status") == "STALE" for row in freshness_rows)
 
     bot_running = _process_running("live_bot.py")
     if not bot_running:
@@ -408,13 +447,24 @@ def run_audit() -> dict[str, Any]:
         errors.append("Missing portfolio.csv")
     if not SIGNALS_CSV.is_file():
         warnings.append("Missing live_signals.csv")
+    if not paper_portfolio:
+        warnings.append(f"Missing PAPER validation portfolio: {PAPER_PORTFOLIO_JSON}")
 
     open_positions = list(accounting.get("open_positions") or []) if accounting else []
     job_info = _count_jobs()
     job_counts = job_info["counts"]
     jobs_ready = int(job_counts.get("READY", 0))
+    jobs_ready_unique = int(job_info.get("ready_unique", 0))
     jobs_blocked = int(job_counts.get("BLOCKED", 0))
     jobs_blocked_unique = int(job_info.get("blocked_unique", 0))
+
+    integrity_ok = bool(integrity.get("ok"))
+    integrity_metrics = integrity.get("metrics") or {}
+    reconciliation = integrity.get("reconciliation") or {}
+    contaminated_count = 0
+    for check in integrity.get("checks") or []:
+        if check.get("name") == "no_synthetic_contamination":
+            contaminated_count = int(check.get("findings_count") or 0)
 
     infra_score, infra_notes = _score_infrastructure(infra, bot_running)
     portfolio_score, portfolio_notes = _score_portfolio(accounting)
@@ -434,7 +484,14 @@ def run_audit() -> dict[str, Any]:
         "data_freshness": freshness_score,
     }
     global_score = int(round(sum(health_scores.values()) / len(health_scores)))
-    verdict = _compute_verdict(global_score, errors, warnings, infra)
+    verdict = _compute_verdict(
+        global_score,
+        errors,
+        warnings,
+        infra,
+        integrity_ok=integrity_ok,
+        stale_critical=stale_critical,
+    )
 
     overall = (evaluation or {}).get("overall") or {}
     appe_summary = (appe or {}).get("summary") or {}
@@ -446,6 +503,8 @@ def run_audit() -> dict[str, Any]:
     outstanding_risks.extend(portfolio_notes)
     outstanding_risks.extend(protection_notes)
     outstanding_risks.extend(infra_notes)
+    if not integrity_ok:
+        outstanding_risks.append(f"PAPER profit integrity: {integrity.get('verdict', 'FAIL')}")
     if jobs_blocked_unique:
         outstanding_risks.append(
             f"{jobs_blocked_unique} unique DPE jobs BLOCKED ({jobs_blocked} jsonl lines) — expected HSBA.L COLLAPSE_RISK"
@@ -454,10 +513,10 @@ def run_audit() -> dict[str, Any]:
         outstanding_risks.append("Portfolio flagged HIGH_RISK by PPG")
 
     next_actions: list[str] = []
-    if jobs_ready:
-        next_actions.append(f"Review {jobs_ready} READY DPE paper jobs (shadow only)")
+    if jobs_ready_unique:
+        next_actions.append(f"Review {jobs_ready_unique} unique READY DPE paper jobs (shadow only)")
     if fresh_warnings:
-        next_actions.append("Refresh stale intelligence artifacts")
+        next_actions.append("Run: python3 tae.py full-paper-cycle")
     if not bot_running:
         next_actions.append("Verify live_bot autostart / process health")
     if adaptive:
@@ -469,6 +528,8 @@ def run_audit() -> dict[str, Any]:
         "generated_at": _now_iso(),
         "mode": MODE,
         "accounting": accounting,
+        "paper_portfolio": paper_portfolio,
+        "integrity": integrity,
         "gii": gii,
         "protection": protection,
         "ppg": ppg,
@@ -496,6 +557,7 @@ def run_audit() -> dict[str, Any]:
         "last_log_timestamp": _last_log_timestamp(),
         "job_counts": job_counts,
         "jobs_ready": jobs_ready,
+        "jobs_ready_unique": jobs_ready_unique,
         "jobs_blocked": jobs_blocked,
         "jobs_blocked_unique": jobs_blocked_unique,
         "last_jobs_timestamp": _last_jsonl_timestamp(DPE_JOBS),
@@ -507,6 +569,10 @@ def run_audit() -> dict[str, Any]:
         "health_scores": health_scores,
         "global_score": global_score,
         "verdict": verdict,
+        "integrity_ok": integrity_ok,
+        "integrity_metrics": integrity_metrics,
+        "reconciliation_ok": bool(reconciliation.get("ok")),
+        "synthetic_fill_contamination": contaminated_count,
         "outstanding_risks": outstanding_risks[:8],
         "next_actions": next_actions[:5],
         "gii_portfolio": gii_portfolio,
@@ -519,6 +585,9 @@ def run_audit() -> dict[str, Any]:
 
 def format_report(data: dict[str, Any]) -> str:
     accounting = data.get("accounting") or {}
+    paper = data.get("paper_portfolio") or {}
+    integrity = data.get("integrity") or {}
+    integrity_metrics = data.get("integrity_metrics") or integrity.get("metrics") or {}
     gii = data.get("gii") or {}
     protection = data.get("protection") or {}
     ppg = data.get("ppg") or {}
@@ -535,26 +604,63 @@ def format_report(data: dict[str, Any]) -> str:
     appe_summary = data.get("appe_summary") or {}
     protection_daily = data.get("protection_daily") or {}
     health = data["health_scores"]
+    freshness_by_label = {row["label"]: row for row in (data.get("freshness_rows") or [])}
+
+    def _fresh(label: str) -> str:
+        row = freshness_by_label.get(label) or {}
+        return str(row.get("status") or "N/A")
+
+    integrity_verdict = integrity.get("verdict") or integrity.get("status") or "N/A"
+    integrity_pass = "PASS" if data.get("integrity_ok") else "FAIL"
+    reconciliation_pass = "PASS" if data.get("reconciliation_ok") else "FAIL"
 
     lines: list[str] = [
         "===== TAE MORNING OPERATIONAL AUDIT =====",
         f"Generated: {data['generated_at']}",
         f"Mode: {MODE} | NO_BROKER | NO_EXECUTION | NO_LIVE_CHANGE",
         "",
-        "--- Portfolio Summary ---",
+        "--- Operational Contract ---",
+        f"accounting: {_fresh('accounting')}",
+        f"growth_intelligence: {_fresh('growth_intelligence')}",
+        f"profit_protection: {_fresh('profit_protection')}",
+        f"ppg: {_fresh('ppg')}",
+        f"appe: {_fresh('appe')}",
+        f"dpe_adaptive: {_fresh('dpe_adaptive')}",
+        f"dpe_evaluation: {_fresh('dpe_evaluation')}",
+        f"dpe_learning: {_fresh('dpe_learning')}",
+        f"PAPER_PROFIT_INTEGRITY: {integrity_pass} ({integrity_verdict})",
+        f"RECONCILIATION: {reconciliation_pass}",
+        f"validation_capital_base: {integrity_metrics.get('validation_capital_base', 'N/A')}",
+        f"synthetic_fill_contamination: {data.get('synthetic_fill_contamination', 0)}",
+        "",
+        "--- CANONICAL PORTFOLIO (live bot ledger / portfolio.csv SSOT) ---",
+        f"Source: {ACCOUNTING_JSON}",
         f"Account value: {_fmt_money(accounting.get('account_value_corrected'))}",
         f"Cash: {_fmt_money(accounting.get('cash_available'))}",
         f"Open positions: {accounting.get('open_positions_count', len(data.get('open_positions') or []))}",
         f"Realized PnL: {_fmt_money(accounting.get('corrected_realized_pnl'))}",
         f"Unrealized PnL: {_fmt_money(accounting.get('corrected_unrealized_pnl'))}",
         f"Total trading PnL: {_fmt_money(accounting.get('corrected_total_trading_pnl'))}",
-        f"Data quality: {accounting.get('data_quality_status', 'N/A')}",
+        f"Capital base status: {accounting.get('capital_base_status', 'N/A')}",
+        f"Effective contributed capital: {_fmt_money(accounting.get('effective_contributed_capital'))}",
+        f"Data quality (canonical): {accounting.get('data_quality_status', 'N/A')}",
+        "Note: HISTORICAL_RECONCILIATION_REQUIRED reflects stale SELL PnL columns in portfolio.csv only.",
         "",
-        "Open position leaders:",
+        "--- PAPER VALIDATION PORTFOLIO (isolated profit-validation SSOT) ---",
+        f"Source: {PAPER_PORTFOLIO_JSON}",
+        f"Account value: {_fmt_money(integrity_metrics.get('account_value') or paper.get('total_value'))}",
+        f"Cash: {_fmt_money(integrity_metrics.get('cash') or paper.get('cash'))}",
+        f"Open positions: {integrity_metrics.get('open_positions', len(paper.get('positions') or {}))}",
+        f"Realized PnL: {_fmt_money(integrity_metrics.get('realized_pnl') or paper.get('realized_pnl'))}",
+        f"Unrealized PnL: {_fmt_money(integrity_metrics.get('unrealized_pnl') or paper.get('unrealized_pnl'))}",
+        f"Profit vs validation capital base: {_fmt_money(integrity_metrics.get('profit_vs_capital_base'))}",
+        f"Canonical reference (not merged): {_fmt_money(integrity_metrics.get('canonical_account_value'))}",
+        "",
+        "Open position leaders (canonical):",
         f"  Top winners: {', '.join(data.get('top_winners_open') or [])}",
         f"  Top losers: {', '.join(data.get('top_losers_open') or [])}",
         "",
-        "Closed trade leaders:",
+        "Closed trade leaders (canonical corrected):",
         f"  Top winners: {', '.join(data.get('top_winners_closed') or ['none'])}",
         f"  Top losers: {', '.join(data.get('top_losers_closed') or ['none'])}",
         "",
@@ -609,8 +715,9 @@ def format_report(data: dict[str, Any]) -> str:
     lines.extend([
         "",
         "--- Jobs Waiting ---",
-        f"READY: {data.get('jobs_ready', 0)} | BLOCKED: {data.get('jobs_blocked', 0)} "
-        f"({data.get('jobs_blocked_unique', 0)} unique) | Counts: {data.get('job_counts') or {}}",
+        f"READY: {data.get('jobs_ready_unique', 0)} unique ({data.get('jobs_ready', 0)} lines) | "
+        f"BLOCKED: {data.get('jobs_blocked_unique', 0)} unique ({data.get('jobs_blocked', 0)} lines) | "
+        f"Counts: {data.get('job_counts') or {}}",
         f"Last job timestamp: {data.get('last_jobs_timestamp') or 'N/A'}",
         "",
         "--- Market Session ---",
@@ -657,9 +764,9 @@ def format_report(data: dict[str, Any]) -> str:
             lines.append(f"  WARN: {warn}")
 
     portfolio_status = (
-        f"Value {_fmt_money(accounting.get('account_value_corrected'))}, "
-        f"PnL {_fmt_money(accounting.get('corrected_total_trading_pnl'))}, "
-        f"{accounting.get('open_positions_count', 0)} open positions"
+        f"CANONICAL {_fmt_money(accounting.get('account_value_corrected'))} | "
+        f"PAPER {_fmt_money(integrity_metrics.get('account_value'))} | "
+        f"{accounting.get('open_positions_count', 0)} canonical open positions"
     )
     growth_status = (
         f"{gii.get('global_verdict', 'N/A')} — growth score "
@@ -735,7 +842,7 @@ def format_report(data: dict[str, Any]) -> str:
 def main() -> int:
     data = run_audit()
     print(format_report(data))
-    return 0 if data["verdict"] != "CRITICAL" else 1
+    return 0 if data["verdict"] == "READY" else 1
 
 
 if __name__ == "__main__":

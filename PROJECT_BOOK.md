@@ -1,14 +1,15 @@
 # Trading AI — PROJECT BOOK (Canonical Journal)
 
-**Last updated:** 2026-07-08  
-**Latest sprint:** **Main Decision Brain Closure** — PDE single final authority closed (`MAIN_DECISION_BRAIN_CLOSED`)  
-**Previous milestones:** `d39ec35` PAPER stabilization · `59982ee` decision state wiring · `50ebc0b` X.Decision checkpoint  
+**Last updated:** 2026-07-10  
+**Latest sprint:** **Operational Consistency Closure** — `TAE_OPERATIONALLY_CLOSED`  
+**Previous milestones:** Main Decision Brain Closure · PAPER Profit Integrity Guard (`9d816de`) · capital base fix (`295303f`)  
 **Branch:** `cursor/x12b-legacy-archive-hotfix`  
 **Governance mode:** PAPER_ONLY · ADVISORY_ONLY · NO_BROKER · NO_LIVE_PROMOTION  
 **Canonical runtime:** `live_bot.py` (not `live_bot_v5_1.py`)
 
-> **Read first each session:** `SESSION_START.md` → `TAE_MAIN_DECISION_BRAIN_CLOSURE_AUDIT.md`  
-> **PAPER daily operator command:** `python3 tae.py full-paper-cycle` (once per session)  
+> **Read first each session:** `SESSION_START.md` → `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md`  
+> **PAPER daily operator command:** `python3 tae.py full-paper-cycle` then `python3 tae.py morning-audit` (expect **READY**)  
+> **SSOT rule:** Canonical = `tae_accounting_snapshot.json` · PAPER validation = `runtime_outputs/paper_execution/paper_portfolio.json` — never merge PnL
 > **End each sprint:** `bash tae_checkpoint.sh` then update this file + commit
 
 ---

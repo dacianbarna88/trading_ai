@@ -82,9 +82,10 @@ def _s(value: Any) -> str | None:
 
 
 def stable_event_id(timestamp: str, ticker: str, event_type: str) -> str:
-    raw = f"{timestamp}|{ticker.upper()}|{event_type}|{SCHEMA_VERSION}"
+    batch_day = timestamp[:10] if timestamp else "unknown"
+    raw = f"{batch_day}|{ticker.upper()}|{event_type}|{SCHEMA_VERSION}"
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-    return f"{timestamp.replace(':', '').replace('-', '')}_{ticker.upper()}_{event_type}_{digest}"
+    return f"{batch_day.replace('-', '')}_{ticker.upper()}_{event_type}_{digest}"
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -533,13 +534,25 @@ def build_events() -> tuple[list[dict[str, Any]], dict[str, bool], list[str]]:
 
 def append_events(events: list[dict[str, Any]]) -> tuple[int, int, set[str]]:
     DPE_DIR.mkdir(parents=True, exist_ok=True)
+    existing: set[str] = set()
+    if EVENT_LOG.is_file():
+        try:
+            for line in EVENT_LOG.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                eid = _s(row.get("event_id"))
+                if eid:
+                    existing.add(eid)
+        except (json.JSONDecodeError, OSError):
+            pass
     seen: set[str] = set()
     written = 0
     skipped = 0
     with EVENT_LOG.open("a", encoding="utf-8") as handle:
         for event in events:
             eid = event["event_id"]
-            if eid in seen:
+            if eid in seen or eid in existing:
                 skipped += 1
                 continue
             seen.add(eid)

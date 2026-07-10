@@ -379,13 +379,25 @@ def split_all_events(
 
 def append_jobs(jobs: list[dict[str, Any]]) -> tuple[int, int, set[str]]:
     DPE_DIR.mkdir(parents=True, exist_ok=True)
+    existing: set[str] = set()
+    if JOBS_LOG.is_file():
+        try:
+            for line in JOBS_LOG.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                jid = _s(row.get("job_id"))
+                if jid:
+                    existing.add(jid)
+        except (json.JSONDecodeError, OSError):
+            pass
     seen: set[str] = set()
     written = 0
     skipped = 0
     with JOBS_LOG.open("a", encoding="utf-8") as handle:
         for job in jobs:
             jid = job["job_id"]
-            if jid in seen:
+            if jid in seen or jid in existing:
                 skipped += 1
                 continue
             seen.add(jid)

@@ -696,6 +696,14 @@ if _accounting_snapshot is None:
         _accounting_snapshot = {}
         _acct_status = "ERROR"
 
+_paper_portfolio_path = Path("runtime_outputs/paper_execution/paper_portfolio.json")
+_paper_portfolio_snapshot: dict = {}
+if _paper_portfolio_path.is_file():
+    try:
+        _paper_portfolio_snapshot = json.loads(_paper_portfolio_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        _paper_portfolio_snapshot = {}
+
 tabs = st.tabs([
     "🏠 TAE Command Center",
     "📊 Dashboard",
@@ -1332,6 +1340,26 @@ with tabs[7]:
             if losers:
                 st.markdown("**Top losers (corrected realized)**")
                 st.dataframe(pd.DataFrame(losers[:5]), width="stretch", hide_index=True)
+
+        st.subheader("🧪 PAPER Validation Portfolio (isolated SSOT — not merged with canonical)")
+        st.caption(f"Source: {_paper_portfolio_path} — profit validation only; do not use for live bot decisions")
+        if _paper_portfolio_snapshot:
+            pv1, pv2, pv3, pv4 = st.columns(4)
+            pv1.metric(
+                "PAPER Account Value",
+                f"${float(_paper_portfolio_snapshot.get('total_value') or 0):,.2f}",
+            )
+            pv2.metric("PAPER Cash", f"${float(_paper_portfolio_snapshot.get('cash') or 0):,.2f}")
+            pv3.metric(
+                "Validation Capital Base",
+                f"${float(_paper_portfolio_snapshot.get('validation_capital_base') or 30000):,.2f}",
+            )
+            pv4.metric(
+                "Profit vs Capital Base",
+                f"${float(_paper_portfolio_snapshot.get('total_value') or 0) - float(_paper_portfolio_snapshot.get('validation_capital_base') or 30000):,.2f}",
+            )
+        else:
+            st.warning("PAPER validation portfolio missing — run full-paper-cycle")
 
         with st.expander("LEGACY / DEPRECATED metrics (do not use for decisions)", expanded=False):
             st.warning(

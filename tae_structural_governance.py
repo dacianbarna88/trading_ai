@@ -514,6 +514,32 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     if not s1.ok:
         exit_code = 1
 
+    # Operational dependency refresh — required by morning-audit and PDE upstream chain
+    operational_refresh: list[tuple[str, list[str]]] = [
+        ("accounting_snapshot", [py, "tae_accounting_snapshot.py"]),
+        ("protect_shadow", [py, "tae.py", "protect"]),
+        ("portfolio_protect", [py, "tae.py", "portfolio-protect"]),
+        ("adaptive_policy", [py, "tae.py", "policy"]),
+        ("growth_intelligence", [py, "tae.py", "growth-intelligence"]),
+        ("infrastructure_health", [py, "tae_infrastructure_health.py"]),
+    ]
+    for step_name, cmd in operational_refresh:
+        r_refresh = run_cli_step(step_name, cmd, cwd=root)
+        cli_steps.append(r_refresh)
+        steps.append(
+            step_from_cli(
+                1,
+                step_name,
+                step_name.replace("_", " ").upper(),
+                "HARD",
+                r_refresh,
+                inputs=["portfolio.csv", "upstream shadow chain"],
+                outputs=[step_name],
+            )
+        )
+        if not r_refresh["ok"]:
+            exit_code = r_refresh["exit_code"] or 1
+
     # Rank 2 — ACCOUNTING RECONCILIATION (pre-cycle)
     s2 = gate_accounting_reconciliation()
     steps.append(s2)
