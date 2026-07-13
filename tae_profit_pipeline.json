@@ -1,0 +1,1871 @@
+{
+  "schema": "tae_profit_pipeline",
+  "version": "v1",
+  "mode": "PAPER_ONLY",
+  "read_only": true,
+  "no_broker": true,
+  "no_portfolio_mutation": true,
+  "generated_at": "2026-07-13T23:56:57+00:00",
+  "cycle_generated_at": "2026-07-13T23:54:32+00:00",
+  "summary": {
+    "opportunities_detected": 25,
+    "signals_generated": 25,
+    "final_decisions": 25,
+    "final_buy": 1,
+    "final_sell": 0,
+    "final_hold": 6,
+    "final_skip": 13,
+    "final_protect": 5,
+    "actionable_decisions": 6,
+    "orders_created": 0,
+    "orders_executed": 0,
+    "orders_blocked_skipped": 12,
+    "trades_written": 0,
+    "realized_pnl": -451.5956,
+    "unrealized_pnl": -74.6234,
+    "total_value": 29814.7014,
+    "validation_capital_base": 30000.0,
+    "profit_vs_validation_capital_base": -185.3
+  },
+  "conversion_metrics": {
+    "opportunity_to_signal": {
+      "numerator": 16,
+      "denominator": 25,
+      "rate": 0.64
+    },
+    "signal_to_actionable_decision": {
+      "numerator": 6,
+      "denominator": 25,
+      "rate": 0.24
+    },
+    "actionable_decision_to_order": {
+      "numerator": 0,
+      "denominator": 6,
+      "rate": 0.0
+    },
+    "order_to_execution": {
+      "numerator": 0,
+      "denominator": 0,
+      "rate": 0.0
+    },
+    "execution_to_profitable_outcome": {
+      "numerator": 0,
+      "denominator": 0,
+      "rate": 0.0
+    }
+  },
+  "block_reason_rollup": {
+    "same_action": 6,
+    "other": 4,
+    "cooldown_reentry_churn": 2,
+    "policy_skip": 13
+  },
+  "timelines": [
+    {
+      "decision_id": "PDEC-HD-0010",
+      "ticker": "HD",
+      "join_method": "decision_id",
+      "join_confidence": "INFERRED_NO_ORDER",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "HD",
+        "time": "2026-07-14 02:28:53",
+        "price": 337.11,
+        "score": 100.0,
+        "signal": "STRONG BUY",
+        "rsi": 57.06,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "BUY_PAPER",
+        "confidence": 0.281,
+        "expected_profit_delta": 15.0,
+        "evidence": "signal=STRONG BUY score=100.0; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "MEDIUM",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "BUY_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "skipped_same_action",
+        "executed": false,
+        "block_bucket": "same_action",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": "skipped_same_action"
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 15.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-HSBA.L-0011",
+      "ticker": "HSBA.L",
+      "join_method": "decision_id",
+      "join_confidence": "INFERRED_NO_ORDER",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 235.96,
+        "category": "MARKET_CONTEXT_REVERSAL",
+        "growth_score": 3.4,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "HSBA.L",
+        "time": "2026-07-14 02:28:30",
+        "price": 0.0,
+        "score": 60.0,
+        "signal": "WAIT",
+        "rsi": 59.84,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "PROTECT_PAPER",
+        "confidence": 0.945,
+        "expected_profit_delta": 37.38,
+        "evidence": "low capital_efficiency=0.0; weak lifecycle=COLLAPSED; protection posture/signal=TRAIL_SHADOW/NO_PROTECTION; horizon: long-term positive \u2014 treat short weakness as pullback; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, ",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "PROTECT_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "skipped_same_action",
+        "executed": false,
+        "block_bucket": "same_action",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": "skipped_same_action"
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -9.2735,
+        "current_pnl": -9.2735
+      },
+      "validation": {
+        "verdict": "PROMISING",
+        "profit_delta": 53.07
+      },
+      "rule_attribution": [],
+      "memory_verdict": "PROMISING"
+    },
+    {
+      "decision_id": "PDEC-QQQ-0020",
+      "ticker": "QQQ",
+      "join_method": "decision_id",
+      "join_confidence": "INFERRED_NO_ORDER",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 7.86,
+        "category": "UNKNOWN",
+        "growth_score": 30.3,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "QQQ",
+        "time": "2026-07-14 02:28:33",
+        "price": 711.74,
+        "score": 40.0,
+        "signal": "WAIT",
+        "rsi": 41.27,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "PROTECT_PAPER",
+        "confidence": 0.747,
+        "expected_profit_delta": 1.97,
+        "evidence": "weak lifecycle=WEAKENING; GII strategy=PROTECT_PROFIT_SHADOW; horizon BUY gate: short/medium not aligned \u2014 7D=NEGATIVE(-1.1%); 1M=NEGATIVE(-4.2%); 1Y=POSITIVE(28.6%); 2Y=POSITIVE(43.5%); 5Y=POSITIVE(96.0%); 10Y=POSITIVE(535.6%); horizon: sh",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "PROTECT_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "skipped_same_action",
+        "executed": false,
+        "block_bucket": "same_action",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": "skipped_same_action"
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -5.4054,
+        "current_pnl": -5.4054
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 1.97
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-AAPL-0001",
+      "ticker": "AAPL",
+      "join_method": "decision_id",
+      "join_confidence": "INFERRED_NO_ORDER",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 9.72,
+        "category": "REENTRY_MISSED",
+        "growth_score": 46.1,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "AAPL",
+        "time": "2026-07-14 02:28:37",
+        "price": 317.31,
+        "score": 80.0,
+        "signal": "STRONG BUY",
+        "rsi": 63.73,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "PROTECT_PAPER",
+        "confidence": 0.414,
+        "expected_profit_delta": 14.08,
+        "evidence": "monitor strategy=HOLD_AND_MONITOR_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION, SC",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "MEDIUM",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "PROTECT_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "skipped_same_action",
+        "executed": false,
+        "block_bucket": "same_action",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": "skipped_same_action"
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 35.2363,
+        "current_pnl": 35.2363
+      },
+      "validation": {
+        "verdict": "CONTINUE_TESTING",
+        "profit_delta": 14.08
+      },
+      "rule_attribution": [],
+      "memory_verdict": "CONTINUE_TESTING"
+    },
+    {
+      "decision_id": "PDEC-GE-0009",
+      "ticker": "GE",
+      "join_method": "decision_id",
+      "join_confidence": "INFERRED_NO_ORDER",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 0.0,
+        "category": "UNKNOWN",
+        "growth_score": 32.8,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "GE",
+        "time": "2026-07-14 02:28:51",
+        "price": 353.42,
+        "score": 80.0,
+        "signal": "STRONG BUY",
+        "rsi": 48.58,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "PROTECT_PAPER",
+        "confidence": 0.413,
+        "expected_profit_delta": 5.0,
+        "evidence": "monitor strategy=HOLD_AND_MONITOR_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION, SC",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "non_trade_or_allowed",
+        "churn_risk": "HIGH",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "PROTECT_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "skipped_same_action",
+        "executed": false,
+        "block_bucket": "same_action",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": "skipped_same_action"
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -7.2393,
+        "current_pnl": -7.2393
+      },
+      "validation": {
+        "verdict": "CONTINUE_TESTING",
+        "profit_delta": 5.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "CONTINUE_TESTING"
+    },
+    {
+      "decision_id": "PDEC-LLY-0012",
+      "ticker": "LLY",
+      "join_method": "decision_id",
+      "join_confidence": "INFERRED_NO_ORDER",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 45.64,
+        "category": "UNKNOWN",
+        "growth_score": 67.7,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "LLY",
+        "time": "2026-07-14 02:28:42",
+        "price": 1181.87,
+        "score": 80.0,
+        "signal": "STRONG BUY",
+        "rsi": 63.59,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "PROTECT_PAPER",
+        "confidence": 0.403,
+        "expected_profit_delta": 4.96,
+        "evidence": "monitor strategy=HOLD_AND_MONITOR_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION, SC",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "PROTECT_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "skipped_same_action",
+        "executed": false,
+        "block_bucket": "same_action",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": "skipped_same_action"
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -35.1205,
+        "current_pnl": -35.1205
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 4.96
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-MRK-0014",
+      "ticker": "MRK",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 1.76,
+        "category": "UNKNOWN",
+        "growth_score": 94.2,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "MRK",
+        "time": "2026-07-14 02:28:46",
+        "price": 124.03,
+        "score": 80.0,
+        "signal": "STRONG BUY",
+        "rsi": 63.05,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "HOLD_PAPER",
+        "confidence": 0.766,
+        "expected_profit_delta": 0.32,
+        "evidence": "healthy winner lifecycle=SURVIVED; horizon: candidate alignment beats weakest held position; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: D",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "HOLD_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "other",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -39.1512,
+        "current_pnl": -39.1512
+      },
+      "validation": {
+        "verdict": "REJECT",
+        "profit_delta": 0.32
+      },
+      "rule_attribution": [],
+      "memory_verdict": "REJECT"
+    },
+    {
+      "decision_id": "PDEC-PG-0018",
+      "ticker": "PG",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 4.47,
+        "category": "UNKNOWN",
+        "growth_score": 94.1,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "PG",
+        "time": "2026-07-14 02:28:48",
+        "price": 148.37,
+        "score": 100.0,
+        "signal": "STRONG BUY",
+        "rsi": 51.21,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "HOLD_PAPER",
+        "confidence": 0.766,
+        "expected_profit_delta": 3.62,
+        "evidence": "healthy winner lifecycle=SURVIVED; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION, SCORE_DEC",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "HOLD_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "other",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 16.6722,
+        "current_pnl": 16.6722
+      },
+      "validation": {
+        "verdict": "CONTINUE_TESTING",
+        "profit_delta": 3.62
+      },
+      "rule_attribution": [],
+      "memory_verdict": "CONTINUE_TESTING"
+    },
+    {
+      "decision_id": "PDEC-SPY-0024",
+      "ticker": "SPY",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 22.02,
+        "category": "UNKNOWN",
+        "growth_score": 83.9,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "SPY",
+        "time": "2026-07-14 02:28:33",
+        "price": 749.17,
+        "score": 100.0,
+        "signal": "STRONG BUY",
+        "rsi": 53.68,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "HOLD_PAPER",
+        "confidence": 0.671,
+        "expected_profit_delta": 8.13,
+        "evidence": "healthy winner lifecycle=EARLY_WINNER; horizon: candidate alignment beats weakest held position; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rule",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "HOLD_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "other",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -6.33,
+        "current_pnl": -6.33
+      },
+      "validation": {
+        "verdict": "CONTINUE_TESTING",
+        "profit_delta": 8.13
+      },
+      "rule_attribution": [],
+      "memory_verdict": "CONTINUE_TESTING"
+    },
+    {
+      "decision_id": "PDEC-PM-0019",
+      "ticker": "PM",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 22.25,
+        "category": "UNKNOWN",
+        "growth_score": 87.7,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "PM",
+        "time": "2026-07-14 02:28:49",
+        "price": 180.19,
+        "score": 80.0,
+        "signal": "STRONG BUY",
+        "rsi": 60.48,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "HOLD_PAPER",
+        "confidence": 0.59,
+        "expected_profit_delta": 4.27,
+        "evidence": "healthy winner lifecycle=EARLY_WINNER; horizon: candidate alignment beats weakest held position; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rule",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "HOLD_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "other",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -27.4632,
+        "current_pnl": -27.4632
+      },
+      "validation": {
+        "verdict": "CONTINUE_TESTING",
+        "profit_delta": 4.27
+      },
+      "rule_attribution": [],
+      "memory_verdict": "CONTINUE_TESTING"
+    },
+    {
+      "decision_id": "PDEC-AIR.PA-0003",
+      "ticker": "AIR.PA",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 0.0,
+        "category": "UNKNOWN",
+        "growth_score": 32.8,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "AIR.PA",
+        "time": "2026-07-14 02:28:30",
+        "price": 0.0,
+        "score": 60.0,
+        "signal": "WAIT",
+        "rsi": 55.43,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "HOLD_PAPER",
+        "confidence": 0.527,
+        "expected_profit_delta": 2.34,
+        "evidence": "monitor strategy=HOLD_AND_MONITOR_SHADOW; horizon BUY gate: short/medium not aligned \u2014 7D=NEGATIVE(-2.1%); 1M=NEUTRAL(-0.9%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNO; knowledge base rules: MISSED_PR",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "non_trade_or_allowed",
+        "churn_risk": "HIGH",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "HOLD_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "cooldown_reentry_churn",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -0.298,
+        "current_pnl": -0.298
+      },
+      "validation": {
+        "verdict": "CONTINUE_TESTING",
+        "profit_delta": 2.34
+      },
+      "rule_attribution": [],
+      "memory_verdict": "CONTINUE_TESTING"
+    },
+    {
+      "decision_id": "PDEC-MC.PA-0013",
+      "ticker": "MC.PA",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 10.5,
+        "category": "REENTRY_MISSED",
+        "growth_score": 68.2,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "MC.PA",
+        "time": "2026-07-14 02:28:35",
+        "price": 0.0,
+        "score": 60.0,
+        "signal": "WAIT",
+        "rsi": 54.04,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "HOLD_PAPER",
+        "confidence": 0.525,
+        "expected_profit_delta": 2.67,
+        "evidence": "monitor strategy=HOLD_AND_MONITOR_SHADOW; horizon: candidate alignment beats weakest held position; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence r",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "MEDIUM",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "HOLD_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "cooldown_reentry_churn",
+        "fill_price": 0.0,
+        "mark_source": "FALLBACK_STALE",
+        "mark_status": "STALE",
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 3.7492,
+        "current_pnl": 3.7492
+      },
+      "validation": {
+        "verdict": "CONTINUE_TESTING",
+        "profit_delta": 2.67
+      },
+      "rule_attribution": [],
+      "memory_verdict": "CONTINUE_TESTING"
+    },
+    {
+      "decision_id": "PDEC-ULVR.L-0025",
+      "ticker": "ULVR.L",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 0.0,
+        "category": "UNKNOWN",
+        "growth_score": 32.8,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "ULVR.L",
+        "time": "2026-07-14 02:28:36",
+        "price": 0.0,
+        "score": 40.0,
+        "signal": "WAIT",
+        "rsi": 60.03,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.686,
+        "expected_profit_delta": 3.9,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; horizon BUY gate: short/medium not aligned \u2014 7D=NEGATIVE(-1.0%); 1M=NEUTRAL(0.3%); 1Y=POSITIVE(19.7%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOW; knowledge base rules: MISSE",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-AMAT-0005",
+      "ticker": "AMAT",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 222.51,
+        "category": "MARKET_CONTEXT_REVERSAL",
+        "growth_score": 5.1,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "AMAT",
+        "time": "2026-07-14 02:28:44",
+        "price": 575.39,
+        "score": 80.0,
+        "signal": "STRONG BUY",
+        "rsi": 43.74,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.534,
+        "expected_profit_delta": 35.25,
+        "evidence": "signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSE",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "non_trade_or_allowed",
+        "churn_risk": "HIGH",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-MU-0016",
+      "ticker": "MU",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 226.61,
+        "category": "MARKET_CONTEXT_REVERSAL",
+        "growth_score": 5.1,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "MU",
+        "time": "2026-07-14 02:28:47",
+        "price": 937.0,
+        "score": 40.0,
+        "signal": "WAIT",
+        "rsi": 32.26,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.534,
+        "expected_profit_delta": 35.9,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "non_trade_or_allowed",
+        "churn_risk": "MEDIUM",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-ABBV-0002",
+      "ticker": "ABBV",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "ABBV",
+        "time": "2026-07-14 02:28:43",
+        "price": 248.0,
+        "score": 40.0,
+        "signal": "WAIT",
+        "rsi": 67.77,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.528,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-ALV.DE-0004",
+      "ticker": "ALV.DE",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "ALV.DE",
+        "time": "2026-07-14 02:28:30",
+        "price": 0.0,
+        "score": 0.0,
+        "signal": "TAKE PROFIT",
+        "rsi": 78.67,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.528,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-AZN.L-0006",
+      "ticker": "AZN.L",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "AZN.L",
+        "time": "2026-07-14 02:28:40",
+        "price": 0.0,
+        "score": 40.0,
+        "signal": "WAIT",
+        "rsi": 40.8,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.528,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-BP.L-0007",
+      "ticker": "BP.L",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "BP.L",
+        "time": "2026-07-14 02:28:39",
+        "price": 0.0,
+        "score": 40.0,
+        "signal": "WAIT",
+        "rsi": 41.78,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.528,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-MSFT-0015",
+      "ticker": "MSFT",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "MSFT",
+        "time": "2026-07-14 02:28:39",
+        "price": 390.99,
+        "score": 40.0,
+        "signal": "WAIT",
+        "rsi": 62.69,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.528,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-NVDA-0017",
+      "ticker": "NVDA",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "NVDA",
+        "time": "2026-07-14 02:28:36",
+        "price": 203.53,
+        "score": 40.0,
+        "signal": "WAIT",
+        "rsi": 45.36,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.528,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-SAP.DE-0021",
+      "ticker": "SAP.DE",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "SAP.DE",
+        "time": "2026-07-14 02:28:39",
+        "price": 0.0,
+        "score": 60.0,
+        "signal": "WAIT",
+        "rsi": 55.05,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.528,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-SHEL.L-0022",
+      "ticker": "SHEL.L",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": false,
+        "missed_usd": 0.0,
+        "category": null,
+        "growth_score": 0.0,
+        "join_confidence": "LOW_CONFIDENCE_JOIN"
+      },
+      "signal": {
+        "ticker": "SHEL.L",
+        "time": "2026-07-14 02:28:40",
+        "price": 0.0,
+        "score": 60.0,
+        "signal": "WAIT",
+        "rsi": 53.66,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.528,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "LOW",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-SIE.DE-0023",
+      "ticker": "SIE.DE",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 20.42,
+        "category": "UNKNOWN",
+        "growth_score": 46.9,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "SIE.DE",
+        "time": "2026-07-14 02:28:36",
+        "price": 0.0,
+        "score": 60.0,
+        "signal": "WAIT",
+        "rsi": 50.45,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.527,
+        "expected_profit_delta": 0.0,
+        "evidence": "policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSED_PROFIT_PROTECTION",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "non_trade_or_allowed",
+        "churn_risk": "MEDIUM",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    },
+    {
+      "decision_id": "PDEC-DIA-0008",
+      "ticker": "DIA",
+      "join_method": "decision_id",
+      "join_confidence": "HIGH",
+      "opportunity": {
+        "has_opportunity": true,
+        "missed_usd": 0.0,
+        "category": "UNKNOWN",
+        "growth_score": 38.3,
+        "join_confidence": "TICKER"
+      },
+      "signal": {
+        "ticker": "DIA",
+        "time": "2026-07-14 02:28:40",
+        "price": 524.47,
+        "score": 80.0,
+        "signal": "STRONG BUY",
+        "rsi": 62.92,
+        "join_confidence": "TICKER"
+      },
+      "pde_decision": {
+        "action": "SKIP_PAPER",
+        "confidence": 0.25,
+        "expected_profit_delta": 0.0,
+        "evidence": "signal=STRONG BUY; policy=HIGH_RISK/CAPITAL_PRESERVATION_SHADOW; knowledge base rules: MISSED_PROFIT_PROTECTION, SCORE_DECAY_SHADOW, STOP_REENTRY_CHURN, TRAILING_1_PROTECTION_HYPOTHESIS; named confidence rules: DO_NOT_PROMOTE_TO_LIVE, MISSE",
+        "created_at": "2026-07-13T23:54:32+00:00"
+      },
+      "gate_result": {
+        "decision_switch_authorized": true,
+        "switch_reason": "same_action_or_no_prior",
+        "churn_risk": "MEDIUM",
+        "cooldown_active": false,
+        "hard_risk_override": false,
+        "conflict_winner": null,
+        "state_last_action": "SKIP_PAPER"
+      },
+      "order": {
+        "timestamp": null,
+        "status": "MISSING",
+        "executed": false,
+        "block_bucket": "policy_skip",
+        "fill_price": 0.0,
+        "mark_source": null,
+        "mark_status": null,
+        "reason": null
+      },
+      "trade": {
+        "exists": false,
+        "realized_pnl": 0.0,
+        "fill_shares": 0.0
+      },
+      "pnl": {
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "current_pnl": 0.0
+      },
+      "validation": {
+        "verdict": "NEEDS_MORE_DATA",
+        "profit_delta": 0.0
+      },
+      "rule_attribution": [],
+      "memory_verdict": "NEEDS_MORE_DATA"
+    }
+  ],
+  "profit_attribution": {
+    "top_profit_contributors": [],
+    "top_loss_contributors": [
+      {
+        "rule_id": "LTB-DPE-PHIL-001",
+        "total_decisions": 4,
+        "executions": 4,
+        "wins": 0,
+        "losses": 2,
+        "positive_outcomes": 0,
+        "negative_outcomes": 2,
+        "avg_actual_pnl": -14.2597,
+        "avg_drawdown": 1.6902,
+        "win_rate": 0.0,
+        "net_pnl_impact": -57.0387,
+        "weight_delta": -0.016,
+        "recommended_influence_delta": 0.0,
+        "confidence_impact": -0.5,
+        "last_action": "PROTECT_PAPER",
+        "last_ticker": "QQQ",
+        "last_outcome": "needs_more_data",
+        "last_updated": "2026-07-13T23:54:45+00:00",
+        "associated_action": "PROTECT_PAPER"
+      },
+      {
+        "rule_id": "LTB-STALE-001",
+        "total_decisions": 4,
+        "executions": 4,
+        "wins": 0,
+        "losses": 2,
+        "positive_outcomes": 0,
+        "negative_outcomes": 2,
+        "avg_actual_pnl": -14.2597,
+        "avg_drawdown": 1.6902,
+        "win_rate": 0.0,
+        "net_pnl_impact": -57.0387,
+        "weight_delta": -0.016,
+        "recommended_influence_delta": 0.0,
+        "confidence_impact": -0.5,
+        "last_action": "PROTECT_PAPER",
+        "last_ticker": "QQQ",
+        "last_outcome": "needs_more_data",
+        "last_updated": "2026-07-13T23:54:45+00:00",
+        "associated_action": "PROTECT_PAPER"
+      },
+      {
+        "rule_id": "LTB-CONF-SCORE_PERSISTENCE_AFTER_",
+        "total_decisions": 4,
+        "executions": 4,
+        "wins": 0,
+        "losses": 2,
+        "positive_outcomes": 0,
+        "negative_outcomes": 2,
+        "avg_actual_pnl": -14.2597,
+        "avg_drawdown": 1.6902,
+        "win_rate": 0.0,
+        "net_pnl_impact": -57.0387,
+        "weight_delta": -0.016,
+        "recommended_influence_delta": 0.0,
+        "confidence_impact": -0.5,
+        "last_action": "PROTECT_PAPER",
+        "last_ticker": "QQQ",
+        "last_outcome": "needs_more_data",
+        "last_updated": "2026-07-13T23:54:45+00:00",
+        "associated_action": "PROTECT_PAPER"
+      },
+      {
+        "rule_id": "LTB-CONF-STOP_REENTRY_CHURN",
+        "total_decisions": 4,
+        "executions": 4,
+        "wins": 0,
+        "losses": 2,
+        "positive_outcomes": 0,
+        "negative_outcomes": 2,
+        "avg_actual_pnl": -14.2597,
+        "avg_drawdown": 1.6902,
+        "win_rate": 0.0,
+        "net_pnl_impact": -57.0387,
+        "weight_delta": -0.016,
+        "recommended_influence_delta": 0.0,
+        "confidence_impact": -0.5,
+        "last_action": "PROTECT_PAPER",
+        "last_ticker": "QQQ",
+        "last_outcome": "needs_more_data",
+        "last_updated": "2026-07-13T23:54:45+00:00",
+        "associated_action": "PROTECT_PAPER"
+      },
+      {
+        "rule_id": "LTB-CONF-MISSED_PROFIT_PROTECTION",
+        "total_decisions": 4,
+        "executions": 4,
+        "wins": 0,
+        "losses": 2,
+        "positive_outcomes": 0,
+        "negative_outcomes": 2,
+        "avg_actual_pnl": -14.2597,
+        "avg_drawdown": 1.6902,
+        "win_rate": 0.0,
+        "net_pnl_impact": -57.0387,
+        "weight_delta": -0.016,
+        "recommended_influence_delta": 0.0,
+        "confidence_impact": -0.5,
+        "last_action": "PROTECT_PAPER",
+        "last_ticker": "QQQ",
+        "last_outcome": "needs_more_data",
+        "last_updated": "2026-07-13T23:54:45+00:00",
+        "associated_action": "PROTECT_PAPER"
+      }
+    ],
+    "profitable_decisions": [
+      {
+        "decision_id": "PDEC-AAPL-0001",
+        "ticker": "AAPL",
+        "pnl": 35.2363
+      },
+      {
+        "decision_id": "PDEC-PG-0018",
+        "ticker": "PG",
+        "pnl": 16.6722
+      },
+      {
+        "decision_id": "PDEC-MC.PA-0013",
+        "ticker": "MC.PA",
+        "pnl": 3.7492
+      }
+    ],
+    "losing_decisions": [
+      {
+        "decision_id": "PDEC-MRK-0014",
+        "ticker": "MRK",
+        "pnl": -39.1512
+      },
+      {
+        "decision_id": "PDEC-LLY-0012",
+        "ticker": "LLY",
+        "pnl": -35.1205
+      },
+      {
+        "decision_id": "PDEC-PM-0019",
+        "ticker": "PM",
+        "pnl": -27.4632
+      },
+      {
+        "decision_id": "PDEC-HSBA.L-0011",
+        "ticker": "HSBA.L",
+        "pnl": -9.2735
+      },
+      {
+        "decision_id": "PDEC-GE-0009",
+        "ticker": "GE",
+        "pnl": -7.2393
+      },
+      {
+        "decision_id": "PDEC-SPY-0024",
+        "ticker": "SPY",
+        "pnl": -6.33
+      },
+      {
+        "decision_id": "PDEC-QQQ-0020",
+        "ticker": "QQQ",
+        "pnl": -5.4054
+      },
+      {
+        "decision_id": "PDEC-AIR.PA-0003",
+        "ticker": "AIR.PA",
+        "pnl": -0.298
+      }
+    ],
+    "blocked_avoided_loss_count": 0,
+    "blocked_missed_profit_count": 9,
+    "unresolved_outcomes_count": 16
+  },
+  "data_quality": {
+    "join_coverage": {
+      "decision_id": 0,
+      "ticker_cycle": 0,
+      "ticker_only": 0,
+      "low_confidence_joins": 6,
+      "total_decisions": 25,
+      "decision_id_coverage_pct": 0.0
+    },
+    "missing_stages": {
+      "order": 25
+    },
+    "stale_or_fallback_marks": 11,
+    "profit_integrity_status": "PAPER_PROFIT_INTEGRITY_CLOSED",
+    "profit_integrity_ok": true,
+    "reconciliation_status": "PASS",
+    "reconciliation_ok": true,
+    "promotion_lock": false,
+    "duplicate_timeline_rows": 0
+  },
+  "sources": {
+    "live_signals.csv": true,
+    "tae_growth_intelligence.json": true,
+    "tae_opportunity_cost_ledger.json": true,
+    "paper_decisions.json": true,
+    "active_decisions.json": true,
+    "conflicts.json": true,
+    "paper_orders.jsonl": true,
+    "paper_trades.jsonl": true,
+    "paper_portfolio.json": true,
+    "decision_validation_results.json": true,
+    "longitudinal_memory/decisions.jsonl": true,
+    "rule_outcome_attribution.json": true
+  }
+}

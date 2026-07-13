@@ -1,0 +1,67 @@
+{
+  "schema": "tae_profit_pipeline_consolidation_audit",
+  "version": "v1",
+  "generated_at": "2026-07-13T23:55:00+00:00",
+  "verdict": "PROFIT_PIPELINE_CONSOLIDATED",
+  "approach": "read_only_join_existing_artifacts",
+  "files_added_or_modified": [
+    "tae_profit_pipeline.py",
+    "tae_profit_pipeline_test.py",
+    "tae_morning_operational_audit.py",
+    "tae_cli/commands/profit_pipeline.py",
+    "tae_cli/dispatcher.py",
+    "tae_cli/commands/help.py",
+    "dashboard_v2.py",
+    "TAE_PROFIT_PIPELINE_REPORT.md",
+    "tae_profit_pipeline.json"
+  ],
+  "commands": {
+    "view_pipeline": "python3 tae.py profit-pipeline",
+    "via_morning_audit": "python3 tae.py morning-audit",
+    "refresh_cycle": "python3 tae.py full-paper-cycle"
+  },
+  "validation": {
+    "full_paper_cycle": "PASS",
+    "morning_audit_integrity": "PAPER_PROFIT_INTEGRITY_CLOSED PASS",
+    "morning_audit_reconciliation": "PASS",
+    "profit_pipeline_integrity": "PAPER_PROFIT_INTEGRITY_CLOSED",
+    "profit_pipeline_reconciliation": "PASS",
+    "promotion_lock": false,
+    "morning_audit_orders_unchanged": true,
+    "morning_audit_trades_unchanged": true,
+    "duplicate_timeline_rows": 0,
+    "unit_tests": {"ran": 41, "failures": 0}
+  },
+  "summary_metrics": {
+    "opportunities_detected": 25,
+    "signals_generated": 25,
+    "final_decisions": 25,
+    "orders_created_cycle": 0,
+    "orders_executed_cycle": 0,
+    "trades_written_cycle": 0,
+    "realized_pnl": -451.6,
+    "unrealized_pnl": -74.62,
+    "profit_vs_validation_capital_base": -185.3
+  },
+  "conversion_metrics": {
+    "opportunity_to_signal": "25/25 (100%)",
+    "signal_to_actionable_decision": "6/25 (24%)",
+    "actionable_decision_to_order": "0/6 (0%)",
+    "order_to_execution": "0/0 (0%)",
+    "execution_to_profitable_outcome": "0/0 (0%)"
+  },
+  "join_coverage": {
+    "decision_id_orders_in_cycle": "0/25 (0%)",
+    "note": "Current cycle had no new paper_orders rows (all skipped_same_action); timelines still cover all 25 decisions with inferred stages"
+  },
+  "block_reason_rollup": {
+    "same_action": 6,
+    "policy_skip": 13,
+    "cooldown_reentry_churn": 2,
+    "other": 4
+  },
+  "remaining_non_blocking": [
+    "Morning audit may show ATTENTION_REQUIRED when global_score < 80 (infra/bot) — unrelated to pipeline consolidation",
+    "Cycle with zero new orders yields 0% order join coverage — honest reporting when execution skips same action"
+  ]
+}

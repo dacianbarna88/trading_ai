@@ -704,6 +704,14 @@ if _paper_portfolio_path.is_file():
     except (json.JSONDecodeError, OSError):
         _paper_portfolio_snapshot = {}
 
+_profit_pipeline_snapshot: dict = {}
+_profit_pipeline_path = Path("tae_profit_pipeline.json")
+if _profit_pipeline_path.is_file():
+    try:
+        _profit_pipeline_snapshot = json.loads(_profit_pipeline_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        _profit_pipeline_snapshot = {}
+
 tabs = st.tabs([
     "🏠 TAE Command Center",
     "📊 Dashboard",
@@ -1360,6 +1368,46 @@ with tabs[7]:
             )
         else:
             st.warning("PAPER validation portfolio missing — run full-paper-cycle")
+
+        st.subheader("📈 Profit Pipeline (read-only consolidation)")
+        st.caption(
+            "Source: tae_profit_pipeline.json — joins existing artifacts only; "
+            "does not execute trades or mutate portfolio"
+        )
+        if _profit_pipeline_snapshot:
+            ps = _profit_pipeline_snapshot.get("summary") or {}
+            cm = _profit_pipeline_snapshot.get("conversion_metrics") or {}
+            dq = _profit_pipeline_snapshot.get("data_quality") or {}
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Opportunities", ps.get("opportunities_detected", 0))
+            p2.metric("Signals", ps.get("signals_generated", 0))
+            p3.metric("Orders executed", ps.get("orders_executed", 0))
+            p4.metric("Trades", ps.get("trades_written", 0))
+            p5, p6, p7, p8 = st.columns(4)
+            p5.metric("Realized PnL", f"${float(ps.get('realized_pnl') or 0):,.2f}")
+            p6.metric("Unrealized PnL", f"${float(ps.get('unrealized_pnl') or 0):,.2f}")
+            p7.metric("Vs capital base", f"${float(ps.get('profit_vs_validation_capital_base') or 0):,.2f}")
+            order_exec = cm.get("order_to_execution") or {}
+            p8.metric(
+                "Order→Execution",
+                f"{order_exec.get('numerator', 0)}/{order_exec.get('denominator', 0)}",
+            )
+            st.caption(
+                f"Integrity: {dq.get('profit_integrity_status', 'N/A')} | "
+                f"Reconciliation: {dq.get('reconciliation_status', 'N/A')} | "
+                f"Join coverage: {(dq.get('join_coverage') or {}).get('decision_id_coverage_pct', 'N/A')}%"
+            )
+            timeline_df = pd.DataFrame(_profit_pipeline_snapshot.get("timelines") or [])
+            if not timeline_df.empty:
+                display_cols = [
+                    c
+                    for c in ["ticker", "decision_id", "join_confidence"]
+                    if c in timeline_df.columns
+                ]
+                if display_cols:
+                    st.dataframe(timeline_df[display_cols].head(12), width="stretch", hide_index=True)
+        else:
+            st.info("Run `python3 tae.py profit-pipeline` or `morning-audit` to build the pipeline view.")
 
         with st.expander("LEGACY / DEPRECATED metrics (do not use for decisions)", expanded=False):
             st.warning(

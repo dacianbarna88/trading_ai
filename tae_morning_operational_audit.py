@@ -435,6 +435,15 @@ def run_audit() -> dict[str, Any]:
         integrity = {"ok": False, "verdict": "INTEGRITY_CHECK_FAILED", "error": str(exc)}
         errors.append(f"PAPER profit integrity check failed: {exc}")
 
+    profit_pipeline: dict[str, Any] = {}
+    try:
+        from tae_profit_pipeline import build_profit_pipeline
+
+        profit_pipeline = build_profit_pipeline(write_outputs=True)
+    except Exception as exc:
+        profit_pipeline = {"error": str(exc)}
+        warnings.append(f"Profit pipeline consolidation failed: {exc}")
+
     freshness_rows, fresh_warnings, fresh_errors = _freshness_audit()
     warnings.extend(fresh_warnings)
     errors.extend(fresh_errors)
@@ -573,6 +582,7 @@ def run_audit() -> dict[str, Any]:
         "integrity_metrics": integrity_metrics,
         "reconciliation_ok": bool(reconciliation.get("ok")),
         "synthetic_fill_contamination": contaminated_count,
+        "profit_pipeline": profit_pipeline,
         "outstanding_risks": outstanding_risks[:8],
         "next_actions": next_actions[:5],
         "gii_portfolio": gii_portfolio,
@@ -633,6 +643,17 @@ def format_report(data: dict[str, Any]) -> str:
         f"validation_capital_base: {integrity_metrics.get('validation_capital_base', 'N/A')}",
         f"synthetic_fill_contamination: {data.get('synthetic_fill_contamination', 0)}",
         "",
+    ]
+    pipeline = data.get("profit_pipeline") or {}
+    if pipeline and not pipeline.get("error"):
+        try:
+            from tae_profit_pipeline import format_pipeline_section
+
+            lines.extend(format_pipeline_section(pipeline))
+            lines.append("")
+        except Exception:
+            pass
+    lines.extend([
         "--- CANONICAL PORTFOLIO (live bot ledger / portfolio.csv SSOT) ---",
         f"Source: {ACCOUNTING_JSON}",
         f"Account value: {_fmt_money(accounting.get('account_value_corrected'))}",
@@ -709,7 +730,7 @@ def format_report(data: dict[str, Any]) -> str:
         f"Recommendation: {adaptive.get('recommendation', 'N/A')}",
         "",
         "--- Outstanding Risks ---",
-    ]
+    ])
     for risk in data.get("outstanding_risks") or ["none identified"]:
         lines.append(f"  - {risk}")
     lines.extend([
