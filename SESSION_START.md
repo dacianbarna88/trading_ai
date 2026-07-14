@@ -55,6 +55,7 @@ Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_P
 - **Capital base CONFIRMED** — virtual $10k DEPOSIT excluded; effective contributed capital $30,000
 - **Profit pipeline consolidated** — `python3 tae.py profit-pipeline` joins opportunity→signal→PDE→gate→order→trade→PnL→validation (read-only)
 - **Profit optimization audit** — `python3 tae.py profit-optimization` verdict `CURRENT_BRAIN_RETAINED_INSUFFICIENT_EVIDENCE` (4 closed outcomes; no calibration promoted)
+- **Profit Target Adapter promoted** — PTA wired into PDE (`apply_profit_target_adapter_bias`) for held-position HOLD/PROTECT/REDUCE scoring; verdict `PROFIT_TARGET_PROMOTED`
 - **Decision state wired** — `59982ee`: active decisions → PDE → conflict resolution → execution → memory
 - **Anti-churn gates active** — unauthorized BUY→SELL blocked (AIR.PA/DIA/GE → HOLD + `SKIPPED_SWITCH_NOT_AUTHORIZED`)
 - **STOP_REENTRY_CHURN enforced** — 30m cooldown after SELL; strong EV bypass only

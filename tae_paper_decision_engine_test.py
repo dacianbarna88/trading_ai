@@ -15,6 +15,7 @@ from tae_paper_decision_engine import (
     apply_knowledge_base_bias,
     apply_named_confidence_rules,
     apply_named_rule,
+    apply_profit_target_adapter_bias,
     apply_rule_lifecycle_bias,
     build_decision,
     build_decisions,
@@ -265,6 +266,33 @@ class PaperDecisionEngineTest(unittest.TestCase):
         }
         apply_rule_lifecycle_bias(scores, evidence, ctx, ["SCORE_DECAY_SHADOW"])
         self.assertLess(scores["SKIP_PAPER"], 20.0)
+
+    def test_profit_target_adapter_boosts_reduce_on_critical_held(self) -> None:
+        scores = {a: 10.0 for a in PAPER_ACTIONS}
+        evidence: list[str] = []
+        ctx = {
+            "profit_target_by": {
+                "HSBA.L": {
+                    "exit_window_urgency": "CRITICAL",
+                    "recommended_shadow_strategy": "REDUCE_EXPOSURE_SHADOW",
+                    "suggested_partial_size_pct": 50,
+                    "target_confidence": 1.0,
+                    "dynamic_partial_tp_pct": None,
+                    "recovery_exit_management_only": False,
+                }
+            },
+            "paper_positions": {"HSBA.L": {"shares": 1.0, "current_pct": -0.4}},
+        }
+        result = apply_profit_target_adapter_bias("HSBA.L", scores, evidence, ctx, held=True)
+        self.assertTrue(result["applied"])
+        self.assertGreater(scores["REDUCE_PAPER"], scores["HOLD_PAPER"])
+        self.assertEqual(scores["BUY_PAPER"], 10.0)
+
+    def test_profit_target_adapter_skips_when_not_held(self) -> None:
+        scores = {a: 10.0 for a in PAPER_ACTIONS}
+        ctx = {"profit_target_by": {"SPY": {"exit_window_urgency": "CRITICAL", "target_confidence": 1.0}}}
+        result = apply_profit_target_adapter_bias("SPY", scores, [], ctx, held=False)
+        self.assertFalse(result["applied"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,71 @@
+{
+  "schema": "tae_profit_target_promotion_audit",
+  "version": "v1",
+  "mode": "PAPER_ONLY",
+  "generated_at": "2026-07-14T00:30:00+00:00",
+  "verdict": "PROFIT_TARGET_PROMOTED",
+  "adapter_module": "tae_profit_target_adapter.py",
+  "adapter_artifact": "tae_profit_target_adapter.json",
+  "pde_wiring": "tae_paper_decision_engine.py:apply_profit_target_adapter_bias",
+  "phase1_outputs_verified": {
+    "per_ticker_fields": [
+      "dynamic_partial_tp_pct",
+      "dynamic_trailing_pct",
+      "dynamic_profit_lock_pct",
+      "hold_ceiling_pct",
+      "min_capture_pct",
+      "exit_window_urgency",
+      "suggested_partial_size_pct",
+      "target_confidence",
+      "recommended_shadow_strategy",
+      "recovery_exit_management_only",
+      "growth_score",
+      "explanation"
+    ],
+    "portfolio_fields": [
+      "portfolio_target_policy",
+      "dominant_target_mode",
+      "average_dynamic_partial_tp_pct",
+      "expected_capture_improvement_hint"
+    ],
+    "ticker_count": 16,
+    "global_verdict": "PROFIT_TARGET_ADAPTER_READY"
+  },
+  "phase2_pde_influence": {
+    "allowed_actions": ["HOLD_PAPER", "PROTECT_PAPER", "REDUCE_PAPER", "SELL_PAPER"],
+    "forbidden": ["BUY_PAPER creation", "hard_risk bypass", "decision_state bypass", "conflict_resolution bypass"],
+    "applied_when": "held position only",
+    "score_caps": {"MAX_PROFIT_TARGET_SCORE_DELTA": 22.0}
+  },
+  "phase3_replay": {
+    "baseline_profit_vs_base": -185.2986,
+    "integrated_profit_vs_base": -182.4094,
+    "delta_profit_vs_base": 2.8892,
+    "baseline_drawdown_pct": 1.7344,
+    "integrated_drawdown_pct": 1.7248,
+    "profit_factor_baseline": 0.0,
+    "profit_factor_integrated": 0.0,
+    "missed_profit_avoided_usd": 2.8892,
+    "tickers_helped": ["QQQ", "HSBA.L"]
+  },
+  "phase4_promotion_checks": {
+    "higher_profit": true,
+    "drawdown_equal_or_lower": true,
+    "integrity_ok": true,
+    "reconciliation_ok": true,
+    "churn_regression": false,
+    "promotion_lock": false
+  },
+  "validation": {
+    "full_paper_cycle": "PASS",
+    "profit_pipeline": "PASS",
+    "morning_audit_integrity": "PAPER_PROFIT_INTEGRITY_CLOSED PASS",
+    "unit_tests": 49
+  },
+  "files_changed": [
+    "tae_paper_decision_engine.py",
+    "tae_paper_decision_engine_test.py",
+    "tae_profit_target_promotion.py",
+    "tae_profit_target_promotion_test.py"
+  ]
+}

@@ -31,6 +31,7 @@ PPG_JSON = Path("tae_portfolio_profit_governor.json")
 APPE_JSON = Path("tae_adaptive_profit_policy_engine.json")
 SHADOW_JSON = Path("tae_profit_protection_shadow.json")
 SHADOW_VALIDATION_JSON = Path("tae_profit_protection_validation.json")
+PROFIT_TARGET_JSON = Path("tae_profit_target_adapter.json")
 DPE_EVAL_JSON = Path("runtime_outputs/dpe/result_evaluator/evaluation.json")
 DPE_ADAPTIVE_JSON = Path("runtime_outputs/dpe/adaptive/adaptive.json")
 ACCOUNTING_JSON = Path("tae_accounting_snapshot.json")
@@ -103,6 +104,22 @@ PAPER_SAFE_KB_RECOMMENDATIONS = frozenset(
 )
 FORBIDDEN_KB_RECOMMENDATIONS = frozenset({"BUY", "SELL", "STOP", "TAKE_PROFIT", "PROMOTE_TO_LIVE"})
 MAX_KNOWLEDGE_SCORE_DELTA = 8.0
+MAX_PROFIT_TARGET_SCORE_DELTA = 22.0
+
+PROFIT_TARGET_URGENCY_DELTAS: dict[str, dict[str, float]] = {
+    "CRITICAL": {"REDUCE_PAPER": 18.0, "PROTECT_PAPER": 14.0, "HOLD_PAPER": -12.0, "SELL_PAPER": 6.0},
+    "HIGH": {"PROTECT_PAPER": 14.0, "REDUCE_PAPER": 10.0, "HOLD_PAPER": -8.0},
+    "MEDIUM": {"PROTECT_PAPER": 6.0, "HOLD_PAPER": 4.0, "REDUCE_PAPER": 4.0},
+    "LOW": {"HOLD_PAPER": 6.0},
+}
+
+PROFIT_TARGET_STRATEGY_DELTAS: dict[str, dict[str, float]] = {
+    "REDUCE_EXPOSURE_SHADOW": {"REDUCE_PAPER": 12.0, "PROTECT_PAPER": 6.0},
+    "PROTECT_PROFIT_SHADOW": {"PROTECT_PAPER": 12.0, "REDUCE_PAPER": 6.0},
+    "TIGHTEN_TRAIL_SHADOW": {"PROTECT_PAPER": 10.0, "REDUCE_PAPER": 4.0},
+    "KEEP_GROWING_SHADOW": {"HOLD_PAPER": 8.0},
+    "HOLD_AND_MONITOR_SHADOW": {"HOLD_PAPER": 5.0, "PROTECT_PAPER": 3.0},
+}
 
 NAMED_RULE_SCORE_DELTAS: dict[str, dict[str, float]] = {
     "SCORE_DECAY_SHADOW": {"BUY_PAPER": -8.0, "SKIP_PAPER": 5.0},
@@ -1048,6 +1065,7 @@ def build_context() -> dict[str, Any]:
     paper_action_weights = load_json(ADAPTIVE_WEIGHTS_JSON)
     knowledge_base = load_json(KNOWLEDGE_JSON)
     longitudinal_knowledge = load_json(LONGITUDINAL_KNOWLEDGE_JSON)
+    profit_targets = load_json(PROFIT_TARGET_JSON)
 
     portfolio_rows = read_csv_rows(PORTFOLIO_CSV) if PORTFOLIO_CSV.is_file() else []
     signal_rows = read_csv_rows(SIGNALS_CSV) if SIGNALS_CSV.is_file() else []
@@ -1122,6 +1140,8 @@ def build_context() -> dict[str, Any]:
         "paper_action_weights": paper_action_weights,
         "knowledge_base": knowledge_base,
         "longitudinal_knowledge": longitudinal_knowledge,
+        "profit_targets": profit_targets,
+        "profit_target_by": index_profit_targets(profit_targets),
         "pattern_discovery_present": PATTERN_DISCOVERY_TXT.is_file(),
         "live_positions": live_positions,
         "paper_positions": paper_positions,
@@ -1168,6 +1188,7 @@ def build_context() -> dict[str, Any]:
             "hard_risk": HARD_RISK_JSON.is_file(),
             "conflict_resolution": CONFLICTS_JSON.is_file(),
             "active_decisions": ACTIVE_DECISIONS_JSON.is_file(),
+            "profit_target_adapter": PROFIT_TARGET_JSON.is_file(),
         },
     }
 
@@ -1263,6 +1284,100 @@ def hypotheses_for_ticker(ticker: str, hypotheses_doc: dict[str, Any] | None) ->
         if not tickers or ticker in tickers:
             matched.append(hyp)
     return matched
+
+
+def index_profit_targets(doc: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    by: dict[str, dict[str, Any]] = {}
+    for row in (doc or {}).get("tickers") or []:
+        if isinstance(row, dict):
+            ticker = _s(row.get("ticker")).upper()
+            if ticker:
+                by[ticker] = row
+    return by
+
+
+def apply_profit_target_adapter_bias(
+    ticker: str,
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+    *,
+    held: bool,
+) -> dict[str, Any]:
+    """Apply existing Profit Target Adapter outputs to held-position exit scoring only."""
+    if not held:
+        return {"applied": False, "reason": "not_held"}
+
+    row = (ctx.get("profit_target_by") or {}).get(ticker.upper())
+    if not row:
+        return {"applied": False, "reason": "no_profit_target_row"}
+
+    confidence = _f(row.get("target_confidence"), 0.5)
+    if confidence < 0.35:
+        return {"applied": False, "reason": "low_target_confidence", "target_confidence": confidence}
+
+    scale = max(0.5, min(1.0, confidence))
+    urgency = _s(row.get("exit_window_urgency"), "MEDIUM").upper()
+    strategy = _s(row.get("recommended_shadow_strategy"))
+    partial_size = _f(row.get("suggested_partial_size_pct"))
+    partial_tp = row.get("dynamic_partial_tp_pct")
+    recovery_only = bool(row.get("recovery_exit_management_only"))
+
+    deltas_applied: dict[str, float] = {}
+
+    def _apply(action: str, raw: float) -> None:
+        if action not in scores or raw == 0.0:
+            return
+        bounded = max(-MAX_PROFIT_TARGET_SCORE_DELTA, min(MAX_PROFIT_TARGET_SCORE_DELTA, raw * scale))
+        scores[action] += bounded
+        deltas_applied[action] = round(deltas_applied.get(action, 0.0) + bounded, 2)
+
+    if recovery_only:
+        for action, raw in {
+            "REDUCE_PAPER": 20.0,
+            "PROTECT_PAPER": 15.0,
+            "HOLD_PAPER": -15.0,
+        }.items():
+            _apply(action, raw)
+    else:
+        for action, raw in (PROFIT_TARGET_URGENCY_DELTAS.get(urgency) or {}).items():
+            _apply(action, raw)
+        for action, raw in (PROFIT_TARGET_STRATEGY_DELTAS.get(strategy) or {}).items():
+            _apply(action, raw)
+        if partial_size >= 33.0:
+            _apply("REDUCE_PAPER", 8.0)
+        if partial_size >= 50.0:
+            _apply("REDUCE_PAPER", 12.0)
+
+        paper_pos = (ctx.get("paper_positions") or {}).get(ticker.upper()) or {}
+        current_pct = _f(paper_pos.get("current_pct") or paper_pos.get("unrealized_pct"))
+        if partial_tp is not None and current_pct >= _f(partial_tp):
+            _apply("PROTECT_PAPER", 12.0)
+            _apply("REDUCE_PAPER", 8.0)
+            evidence.append(
+                f"profit target: partial TP threshold {partial_tp}% reached at {current_pct:.1f}%"
+            )
+
+    if deltas_applied:
+        evidence.append(
+            f"profit target adapter: urgency={urgency} strategy={strategy} "
+            f"partial_size={partial_size:.0f}% conf={confidence:.2f}"
+        )
+
+    return {
+        "applied": bool(deltas_applied),
+        "ticker": ticker.upper(),
+        "exit_window_urgency": urgency,
+        "recommended_shadow_strategy": strategy,
+        "suggested_partial_size_pct": partial_size,
+        "dynamic_partial_tp_pct": partial_tp,
+        "target_confidence": confidence,
+        "recovery_exit_management_only": recovery_only,
+        "score_deltas": deltas_applied,
+        "source": str(PROFIT_TARGET_JSON),
+        "mode": MODE,
+        "live_promotion_allowed": False,
+    }
 
 
 def protection_validation_bias(
@@ -1508,23 +1623,27 @@ def score_actions_for_ticker(
     dpe_evaluator_evidence = apply_dpe_evaluator_bias(scores, evidence, ctx, held=held)
     apply_learning_evidence_bias(scores, evidence, ctx)
     adaptive_weight_detail = apply_adaptive_paper_weights(scores, evidence, ctx, ticker)
-    consumption_evidence = {
-        "knowledge_evidence": knowledge_evidence,
-        "longitudinal_knowledge_evidence": longitudinal_knowledge_evidence,
-        "dpe_evaluator_evidence": dpe_evaluator_evidence,
-        "adaptive_weight_evidence": adaptive_weight_detail,
-    }
-
     prot_boost, reduce_boost, sell_penalty, gates_passed = protection_validation_bias(
         ticker, ctx.get("shadow_validation"),
     )
     scores["PROTECT_PAPER"] += prot_boost
     scores["REDUCE_PAPER"] += reduce_boost
     scores["SELL_PAPER"] -= sell_penalty
+    profit_target_evidence = apply_profit_target_adapter_bias(
+        ticker, scores, evidence, ctx, held=held
+    )
     if not gates_passed:
         evidence.append("protection validation gates not passed")
     else:
         evidence.append("protection validation gates passed")
+
+    consumption_evidence = {
+        "knowledge_evidence": knowledge_evidence,
+        "longitudinal_knowledge_evidence": longitudinal_knowledge_evidence,
+        "dpe_evaluator_evidence": dpe_evaluator_evidence,
+        "adaptive_weight_evidence": adaptive_weight_detail,
+        "profit_target_evidence": profit_target_evidence,
+    }
 
     for action_key in scores:
         scores[action_key] += exp_boost * (
@@ -1642,6 +1761,8 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         sources.append("tae_confidence_evolution.json")
     if ctx.get("adaptation_hints"):
         sources.append("runtime_outputs/longitudinal_memory/adaptation_hints.json")
+    if ctx.get("profit_targets"):
+        sources.append("tae_profit_target_adapter.json")
     if ctx.get("paper_action_weights"):
         sources.append("runtime_outputs/adaptive_weights/paper_action_weights.json")
     if ctx.get("knowledge_base"):
@@ -1719,6 +1840,7 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "longitudinal_knowledge_evidence": consumption_evidence.get("longitudinal_knowledge_evidence"),
         "dpe_evaluator_evidence": consumption_evidence.get("dpe_evaluator_evidence"),
         "adaptive_weight_evidence": adaptive_weight_detail,
+        "profit_target_evidence": consumption_evidence.get("profit_target_evidence"),
         "rule_lifecycle_evidence": consumption_evidence.get("rule_lifecycle_evidence"),
         "position_discipline": position_discipline,
         "loss_discipline": loss_discipline,
