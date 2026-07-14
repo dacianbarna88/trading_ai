@@ -1,0 +1,317 @@
+{
+  "baseline": {
+    "total_pnl": -526.219,
+    "realized_pnl": -451.5956,
+    "unrealized_pnl": -74.6234,
+    "profit_vs_validation_base": -185.2986,
+    "return_on_base_pct": -0.6177,
+    "max_drawdown_pct": 1.7344,
+    "capital_efficiency": -0.0035,
+    "trade_count": 4,
+    "closed_with_pnl": 4,
+    "win_rate": 0.0,
+    "average_winner": 0.0,
+    "average_loser": -112.7455,
+    "profit_factor": 0.0,
+    "missed_opportunity_usd": 829.72,
+    "loss_avoided_usd": 450.9819
+  },
+  "challengers": [
+    {
+      "id": "C1",
+      "name": "reduce_high_risk_skip_penalty",
+      "module": "tae_paper_decision_engine.py",
+      "parameter": "HIGH_RISK SKIP_PAPER score boost",
+      "baseline_value": 15.0,
+      "challenger_value": 8.0,
+      "historical_evidence": "13 SKIP decisions under CAPITAL_PRESERVATION; 0 cycle orders \u2014 loosening may not reach execution (marks/session).",
+      "expected_profit_impact_usd": "0 to -50",
+      "expected_drawdown_impact": "higher",
+      "rejection_condition": "Increases BUY exposure in HIGH_RISK without proven fill path",
+      "simulated_metrics": {
+        "total_pnl": -541.219,
+        "realized_pnl": -451.5956,
+        "unrealized_pnl": -89.6234,
+        "profit_vs_validation_base": -200.2986,
+        "return_on_base_pct": -0.6677,
+        "max_drawdown_pct": 1.7344,
+        "capital_efficiency": -0.0035,
+        "trade_count": 4,
+        "closed_with_pnl": 4,
+        "win_rate": 0.0,
+        "average_winner": 0.0,
+        "average_loser": -112.7455,
+        "profit_factor": 0.0,
+        "churn_delta": 3,
+        "tickers_helped": [],
+        "sessions_helped": 0
+      },
+      "delta_vs_baseline": {
+        "profit_vs_base": -15.0,
+        "realized_pnl": 0.0,
+        "unrealized_pnl": -15.0
+      },
+      "robustness": {
+        "tickers_helped": [],
+        "regions": [
+          "US",
+          "UK",
+          "EU"
+        ],
+        "sessions_helped": 0
+      },
+      "passed": false,
+      "reject_reasons": [
+        "does_not_beat_baseline_pnl",
+        "single_ticker_or_none",
+        "single_session_only",
+        "insufficient_closed_outcomes",
+        "negative_expectancy_risk"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "stronger_buy_after_hard_risk",
+      "module": "tae_paper_decision_engine.py",
+      "parameter": "Block BUY_PAPER within 24h of HARD_RISK SELL on same ticker",
+      "baseline_value": "none",
+      "challenger_value": "cooldown_after_hard_risk_sell=24h",
+      "historical_evidence": "AMAT re-buy 2026-07-09 after stop \u2192 additional -22.99 USD realized.",
+      "expected_profit_impact_usd": 22.99,
+      "expected_drawdown_impact": "lower",
+      "rejection_condition": "Single ticker / single trade \u2014 fails multi-ticker robustness",
+      "simulated_metrics": {
+        "total_pnl": -503.229,
+        "realized_pnl": -428.6056,
+        "unrealized_pnl": -74.6234,
+        "profit_vs_validation_base": -162.3086,
+        "return_on_base_pct": -0.541,
+        "max_drawdown_pct": 1.7344,
+        "capital_efficiency": -0.0035,
+        "trade_count": 4,
+        "closed_with_pnl": 4,
+        "win_rate": 0.0,
+        "average_winner": 0.0,
+        "average_loser": -112.7455,
+        "profit_factor": 0.0,
+        "churn_delta": -1,
+        "tickers_helped": [
+          "AMAT"
+        ],
+        "sessions_helped": 1
+      },
+      "delta_vs_baseline": {
+        "profit_vs_base": 22.99,
+        "realized_pnl": 22.99,
+        "unrealized_pnl": 0.0
+      },
+      "robustness": {
+        "tickers_helped": [
+          "AMAT"
+        ],
+        "regions": [
+          "US",
+          "UK",
+          "EU"
+        ],
+        "sessions_helped": 1
+      },
+      "passed": false,
+      "reject_reasons": [
+        "single_ticker_or_none",
+        "single_session_only",
+        "insufficient_closed_outcomes"
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "reject_hold_to_protect",
+      "module": "tae_paper_decision_engine.py",
+      "parameter": "REJECT validation on HOLD \u2192 bias PROTECT_PAPER trim",
+      "baseline_value": "HOLD maintained",
+      "challenger_value": "10% urgency trim on REJECT+loss>1%",
+      "historical_evidence": "MRK HOLD REJECT validation; open -39.15 USD unrealized.",
+      "expected_profit_impact_usd": "4-10",
+      "expected_drawdown_impact": "lower",
+      "rejection_condition": "Single ticker; trim \u2260 exit; insufficient closed outcomes",
+      "simulated_metrics": {
+        "total_pnl": -520.219,
+        "realized_pnl": -451.5956,
+        "unrealized_pnl": -68.6234,
+        "profit_vs_validation_base": -179.2986,
+        "return_on_base_pct": -0.5977,
+        "max_drawdown_pct": 1.7344,
+        "capital_efficiency": -0.0035,
+        "trade_count": 4,
+        "closed_with_pnl": 4,
+        "win_rate": 0.0,
+        "average_winner": 0.0,
+        "average_loser": -112.7455,
+        "profit_factor": 0.0,
+        "churn_delta": 1,
+        "tickers_helped": [
+          "MRK"
+        ],
+        "sessions_helped": 1
+      },
+      "delta_vs_baseline": {
+        "profit_vs_base": 6.0,
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 6.0
+      },
+      "robustness": {
+        "tickers_helped": [
+          "MRK"
+        ],
+        "regions": [
+          "US",
+          "UK",
+          "EU"
+        ],
+        "sessions_helped": 1
+      },
+      "passed": false,
+      "reject_reasons": [
+        "single_ticker_or_none",
+        "single_session_only",
+        "insufficient_closed_outcomes"
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "increase_collaborative_protect_bias",
+      "module": "tae_paper_decision_engine.py",
+      "parameter": "COLLABORATIVE PROTECT/HOLD score bias",
+      "baseline_value": "+5/+3",
+      "challenger_value": "+8/+5",
+      "historical_evidence": "DPE collaborative PF 1.03 vs 0.38 competitive; already 75% weight in adaptive.",
+      "expected_profit_impact_usd": "5-15",
+      "expected_drawdown_impact": "neutral",
+      "rejection_condition": "Marginal; collaborative bias already applied",
+      "simulated_metrics": {
+        "total_pnl": -516.219,
+        "realized_pnl": -451.5956,
+        "unrealized_pnl": -64.6234,
+        "profit_vs_validation_base": -175.2986,
+        "return_on_base_pct": -0.5843,
+        "max_drawdown_pct": 1.7344,
+        "capital_efficiency": -0.0035,
+        "trade_count": 4,
+        "closed_with_pnl": 4,
+        "win_rate": 0.0,
+        "average_winner": 0.0,
+        "average_loser": -112.7455,
+        "profit_factor": 0.0,
+        "churn_delta": 0,
+        "tickers_helped": [
+          "LLY",
+          "MRK",
+          "QQQ"
+        ],
+        "sessions_helped": 1
+      },
+      "delta_vs_baseline": {
+        "profit_vs_base": 10.0,
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 10.0
+      },
+      "robustness": {
+        "tickers_helped": [
+          "LLY",
+          "MRK",
+          "QQQ"
+        ],
+        "regions": [
+          "US",
+          "UK",
+          "EU"
+        ],
+        "sessions_helped": 1
+      },
+      "passed": false,
+      "reject_reasons": [
+        "single_session_only",
+        "insufficient_closed_outcomes"
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "loss_position_reduce_bias",
+      "module": "tae_paper_decision_engine.py",
+      "parameter": "Open position current_pct < -1.5% \u2192 REDUCE_PAPER +12",
+      "baseline_value": 0.0,
+      "challenger_value": 12.0,
+      "historical_evidence": "MRK/LLY/PM/GE open losses; HOLD dominates.",
+      "expected_profit_impact_usd": "8-20",
+      "expected_drawdown_impact": "lower",
+      "rejection_condition": "May increase churn; only 1 clean session",
+      "simulated_metrics": {
+        "total_pnl": -514.219,
+        "realized_pnl": -451.5956,
+        "unrealized_pnl": -62.6234,
+        "profit_vs_validation_base": -173.2986,
+        "return_on_base_pct": -0.5777,
+        "max_drawdown_pct": 1.7344,
+        "capital_efficiency": -0.0035,
+        "trade_count": 4,
+        "closed_with_pnl": 4,
+        "win_rate": 0.0,
+        "average_winner": 0.0,
+        "average_loser": -112.7455,
+        "profit_factor": 0.0,
+        "churn_delta": 2,
+        "tickers_helped": [
+          "MRK",
+          "LLY",
+          "GE",
+          "PM"
+        ],
+        "sessions_helped": 1
+      },
+      "delta_vs_baseline": {
+        "profit_vs_base": 12.0,
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 12.0
+      },
+      "robustness": {
+        "tickers_helped": [
+          "MRK",
+          "LLY",
+          "GE",
+          "PM"
+        ],
+        "regions": [
+          "US",
+          "UK",
+          "EU"
+        ],
+        "sessions_helped": 1
+      },
+      "passed": false,
+      "reject_reasons": [
+        "single_session_only",
+        "insufficient_closed_outcomes"
+      ]
+    }
+  ],
+  "robustness_baseline": {
+    "by_ticker": {
+      "AAPL": 35.2363,
+      "SPY": -6.33,
+      "QQQ": -5.4054,
+      "MRK": -39.1512,
+      "HSBA.L": -9.2735,
+      "MC.PA": 3.7492,
+      "PG": 16.6722,
+      "PM": -27.4632,
+      "LLY": -35.1205,
+      "AIR.PA": -0.298,
+      "GE": -7.2393
+    },
+    "by_region": {
+      "US": -68.8011,
+      "UK": -9.2735,
+      "EU": 3.4512
+    }
+  }
+}

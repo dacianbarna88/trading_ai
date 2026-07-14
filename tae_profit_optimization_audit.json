@@ -1,0 +1,307 @@
+{
+  "schema": "tae_profit_optimization",
+  "version": "v1",
+  "mode": "PAPER_ONLY",
+  "generated_at": "2026-07-14T00:11:51+00:00",
+  "verdict": "CURRENT_BRAIN_RETAINED_INSUFFICIENT_EVIDENCE",
+  "evidence_set": {
+    "clean_window_start": "2026-07-08T20:57:01+00:00",
+    "usable_sessions": 4,
+    "usable_decisions": 25,
+    "usable_executions": 16,
+    "usable_closed_outcomes": 4,
+    "exclusion_counts": {
+      "synthetic_100_fill": 2,
+      "duplicate_order_superseded": 27
+    }
+  },
+  "baseline_performance": {
+    "total_pnl": -526.219,
+    "realized_pnl": -451.5956,
+    "unrealized_pnl": -74.6234,
+    "profit_vs_validation_base": -185.2986,
+    "return_on_base_pct": -0.6177,
+    "max_drawdown_pct": 1.7344,
+    "capital_efficiency": -0.0035,
+    "trade_count": 4,
+    "closed_with_pnl": 4,
+    "win_rate": 0.0,
+    "average_winner": 0.0,
+    "average_loser": -112.7455,
+    "profit_factor": 0.0,
+    "missed_opportunity_usd": 829.72,
+    "loss_avoided_usd": 450.9819
+  },
+  "top_blockers": [
+    {
+      "rank": 1,
+      "blocker": "open_loser_hold_drag",
+      "expected_dollar_impact": 130.28,
+      "evidence_strength": "MODERATE",
+      "intervention_risk": "LOW",
+      "reversibility": "HIGH"
+    },
+    {
+      "rank": 2,
+      "blocker": "hard_risk_crystallized_realized_losses",
+      "expected_dollar_impact": 450.98,
+      "evidence_strength": "HIGH",
+      "intervention_risk": "HIGH",
+      "reversibility": "LOW",
+      "note": "Do not weaken hard risk"
+    },
+    {
+      "rank": 3,
+      "blocker": "policy_skip_capital_preservation",
+      "expected_dollar_impact": 124.46,
+      "evidence_strength": "LOW",
+      "intervention_risk": "MEDIUM",
+      "reversibility": "HIGH"
+    },
+    {
+      "rank": 4,
+      "blocker": "stale_mark_blocks_buy",
+      "expected_dollar_impact": 0.0,
+      "evidence_strength": "MODERATE",
+      "intervention_risk": "LOW",
+      "reversibility": "HIGH",
+      "note": "HD BUY blocked 3x \u2014 mark infra not calibration"
+    },
+    {
+      "rank": 5,
+      "blocker": "post_stop_rebuy_churn",
+      "expected_dollar_impact": 22.99,
+      "evidence_strength": "MODERATE",
+      "intervention_risk": "LOW",
+      "reversibility": "HIGH",
+      "note": "AMAT re-buy after hard stop"
+    }
+  ],
+  "diagnostic_answers": {
+    "1_buy_selection_weak": {
+      "answer": "PARTIALLY",
+      "evidence": "Hard-risk crystallized AMAT/MU/SIE.DE losses (-428 USD realized). Re-buy AMAT after stop lost -23 USD more. BUY weight already at floor 0.85.",
+      "strength": "MODERATE"
+    },
+    "2_exits_too_late": {
+      "answer": "YES",
+      "evidence": "Open losers MRK/LLY/PM sum -130.28 USD unrealized while HOLD/PROTECT maintained.",
+      "strength": "MODERATE"
+    },
+    "3_hard_risk_crystallizes_losses": {
+      "answer": "YES_BUT_NECESSARY",
+      "evidence": "Hard risk sells realized -450.98 USD; prevented deeper drawdown on AMAT/MU/SIE.DE.",
+      "strength": "HIGH"
+    },
+    "4_too_conservative_policy_skip": {
+      "answer": "PARTIALLY",
+      "evidence": "13/25 current-cycle decisions SKIP under PORTFOLIO_HIGH_RISK / CAPITAL_PRESERVATION_SHADOW; 0 cycle orders created.",
+      "strength": "MODERATE"
+    },
+    "5_same_action_preserves_or_suppresses": {
+      "answer": "PRESERVES_VALID",
+      "evidence": "31 NO_CHANGE orders; 6 actionable decisions skipped same_action without duplicate execution churn.",
+      "strength": "HIGH"
+    },
+    "6_cooldown_prevents_churn": {
+      "answer": "INSUFFICIENT_DATA",
+      "evidence": "Only 2 cooldown/reentry blocks in pipeline; no closed counterfactual re-entry outcomes.",
+      "strength": "LOW"
+    },
+    "7_collaborative_outperforms": {
+      "answer": "YES",
+      "evidence": "DPE evaluator: COLLABORATIVE total_pnl +8.46 vs COMPETITIVE -309.50; PF 1.03 vs 0.38; drawdown 2.88% vs 5.97%.",
+      "strength": "HIGH"
+    },
+    "8_positive_expectancy_segments": {
+      "answer": {
+        "tickers": [
+          [
+            "AAPL",
+            35.2363
+          ],
+          [
+            "PG",
+            16.6722
+          ],
+          [
+            "MC.PA",
+            3.7492
+          ]
+        ],
+        "regions": {
+          "US": -68.8011,
+          "UK": -9.2735,
+          "EU": 3.4512
+        }
+      },
+      "evidence": "AAPL/PG/MC.PA positive open; US mixed, EU slightly positive.",
+      "strength": "MODERATE"
+    },
+    "9_negative_expectancy_rules": {
+      "answer": [
+        {
+          "rule_id": "LTB-DPE-PHIL-001",
+          "net_pnl_impact": -57.0387,
+          "win_rate": 0.0,
+          "executions": 4,
+          "sample_size": 4
+        },
+        {
+          "rule_id": "LTB-STALE-001",
+          "net_pnl_impact": -57.0387,
+          "win_rate": 0.0,
+          "executions": 4,
+          "sample_size": 4
+        },
+        {
+          "rule_id": "LTB-CONF-SCORE_PERSISTENCE_AFTER_",
+          "net_pnl_impact": -57.0387,
+          "win_rate": 0.0,
+          "executions": 4,
+          "sample_size": 4
+        },
+        {
+          "rule_id": "LTB-CONF-STOP_REENTRY_CHURN",
+          "net_pnl_impact": -57.0387,
+          "win_rate": 0.0,
+          "executions": 4,
+          "sample_size": 4
+        },
+        {
+          "rule_id": "LTB-CONF-MISSED_PROFIT_PROTECTION",
+          "net_pnl_impact": -57.0387,
+          "win_rate": 0.0,
+          "executions": 4,
+          "sample_size": 4
+        },
+        {
+          "rule_id": "LTB-REPLAY-04",
+          "net_pnl_impact": -57.0387,
+          "win_rate": 0.0,
+          "executions": 4,
+          "sample_size": 4
+        },
+        {
+          "rule_id": "MISSED_PROFIT_PROTECTION",
+          "net_pnl_impact": -47.7652,
+          "win_rate": 0.0,
+          "executions": 3,
+          "sample_size": 3
+        },
+        {
+          "rule_id": "LTB-LIFE-LLY-05",
+          "net_pnl_impact": -35.1205,
+          "win_rate": 0.0,
+          "executions": 1,
+          "sample_size": 1
+        }
+      ],
+      "evidence": "All 12 tracked LTB/knowledge rules show net_pnl_impact <= 0 on 4 executions.",
+      "strength": "MODERATE"
+    },
+    "10_blocked_became_profitable": {
+      "answer": [
+        {
+          "ticker": "HD",
+          "bucket": "no_mark_price",
+          "verdict": "NEEDS_MORE_DATA"
+        },
+        {
+          "ticker": "MRK",
+          "bucket": "cooldown_reentry_churn",
+          "verdict": "REJECT"
+        },
+        {
+          "ticker": "AIR.PA",
+          "bucket": "cooldown_reentry_churn",
+          "verdict": "CONTINUE_TESTING"
+        },
+        {
+          "ticker": "DIA",
+          "bucket": "cooldown_reentry_churn",
+          "verdict": "NEEDS_MORE_DATA"
+        },
+        {
+          "ticker": "GE",
+          "bucket": "cooldown_reentry_churn",
+          "verdict": "CONTINUE_TESTING"
+        },
+        {
+          "ticker": "SPY",
+          "bucket": "cooldown_reentry_churn",
+          "verdict": "CONTINUE_TESTING"
+        },
+        {
+          "ticker": "PM",
+          "bucket": "cooldown_reentry_churn",
+          "verdict": "CONTINUE_TESTING"
+        },
+        {
+          "ticker": "PG",
+          "bucket": "cooldown_reentry_churn",
+          "verdict": "CONTINUE_TESTING"
+        },
+        {
+          "ticker": "QQQ",
+          "bucket": "policy_skip",
+          "verdict": "NEEDS_MORE_DATA"
+        },
+        {
+          "ticker": "ABBV",
+          "bucket": "policy_skip",
+          "verdict": "NEEDS_MORE_DATA"
+        }
+      ],
+      "evidence": "Opportunity ledger missed USD 829.72 (shadow; not all blocked BUY).",
+      "strength": "LOW"
+    },
+    "11_allowed_decisions_lost": {
+      "answer": [
+        {
+          "ticker": "HSBA.L",
+          "pnl": -9.2735
+        },
+        {
+          "ticker": "LLY",
+          "pnl": -35.1205
+        },
+        {
+          "ticker": "QQQ",
+          "pnl": -5.4054
+        },
+        {
+          "ticker": "GE",
+          "pnl": -7.2393
+        },
+        {
+          "ticker": "GE",
+          "pnl": -7.2393
+        }
+      ],
+      "evidence": "MRK HOLD (REJECT validation) -39 USD; LLY PROTECT -35 USD.",
+      "strength": "MODERATE"
+    },
+    "12_highest_improvement_per_risk": {
+      "answer": "Tighter loss-response on REJECT-validated HOLD positions + avoid post-hard-risk re-BUY",
+      "evidence": "Estimated 30-60 USD upside with low churn risk; not proven across sessions.",
+      "strength": "LOW"
+    }
+  },
+  "challenger_count": 5,
+  "challengers_passed": 0,
+  "selection": {
+    "verdict": "CURRENT_BRAIN_RETAINED_INSUFFICIENT_EVIDENCE",
+    "selected": null,
+    "reason": "No challenger beat baseline PnL with multi-ticker/multi-session robustness on clean evidence.",
+    "evidence_confidence": "LOW"
+  },
+  "integrity": {
+    "verdict": "PAPER_PROFIT_INTEGRITY_CLOSED",
+    "ok": true,
+    "reconciliation": {
+      "status": "PASS"
+    },
+    "promotion_lock": false
+  }
+}

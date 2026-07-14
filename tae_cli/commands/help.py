@@ -43,6 +43,7 @@ Available commands:
   promotion-lock
   morning-audit
   profit-pipeline
+  profit-optimization
   investment-council
   status
   help
@@ -83,6 +84,7 @@ Available commands:
   promotion-lock — Phase 9 live promotion hard-lock audit
   morning-audit — consolidated read-only morning operational brief (includes profit pipeline)
   profit-pipeline — end-to-end PAPER profit pipeline read-only consolidation
+  profit-optimization — evidence-based profit audit, challenger replay, calibration selection
   investment-council — synthesis-only operator brief from existing PDE/GII/DPE/governance artifacts
 ================================="""
 

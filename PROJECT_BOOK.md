@@ -10,6 +10,7 @@
 > **Read first each session:** `SESSION_START.md` → `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md`  
 > **PAPER daily operator command:** `python3 tae.py full-paper-cycle` then `python3 tae.py morning-audit` (expect **READY**)  
 > **Profit pipeline view:** `python3 tae.py profit-pipeline` (read-only join of existing artifacts)  
+> **Profit optimization audit:** `python3 tae.py profit-optimization` (evidence-based challenger replay; read-only)  
 > **SSOT rule:** Canonical = `tae_accounting_snapshot.json` · PAPER validation = `runtime_outputs/paper_execution/paper_portfolio.json` — never merge PnL
 > **End each sprint:** `bash tae_checkpoint.sh` then update this file + commit
 

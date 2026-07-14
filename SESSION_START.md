@@ -27,11 +27,12 @@ cd /Users/book/Desktop/trading_ai
 python3 tae.py full-paper-cycle
 python3 tae.py morning-audit
 python3 tae.py profit-pipeline   # optional: standalone end-to-end pipeline view
+python3 tae.py profit-optimization   # evidence-based calibration audit (read-only)
 ```
 
 Expected morning-audit: **READY** · operational contract all OK · `PAPER_PROFIT_INTEGRITY: PASS` · `validation_capital_base: 30000`
 
-Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_PIPELINE_CONSOLIDATION_AUDIT.md`
+Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_PIPELINE_CONSOLIDATION_AUDIT.md` · `TAE_PROFIT_OPTIMIZATION_AUDIT.md`
 
 **SSOT boundaries (do not merge):**
 
@@ -53,6 +54,7 @@ Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_P
 - **PAPER profit integrity guard** — `validation_capital_base` = $30,000; synthetic fill contamination = 0
 - **Capital base CONFIRMED** — virtual $10k DEPOSIT excluded; effective contributed capital $30,000
 - **Profit pipeline consolidated** — `python3 tae.py profit-pipeline` joins opportunity→signal→PDE→gate→order→trade→PnL→validation (read-only)
+- **Profit optimization audit** — `python3 tae.py profit-optimization` verdict `CURRENT_BRAIN_RETAINED_INSUFFICIENT_EVIDENCE` (4 closed outcomes; no calibration promoted)
 - **Decision state wired** — `59982ee`: active decisions → PDE → conflict resolution → execution → memory
 - **Anti-churn gates active** — unauthorized BUY→SELL blocked (AIR.PA/DIA/GE → HOLD + `SKIPPED_SWITCH_NOT_AUTHORIZED`)
 - **STOP_REENTRY_CHURN enforced** — 30m cooldown after SELL; strong EV bypass only
