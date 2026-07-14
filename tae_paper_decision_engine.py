@@ -51,6 +51,7 @@ DECISIONS_JSONL = OUTPUT_DIR / "paper_decisions.jsonl"
 REPORT_MD = Path("TAE_PAPER_DECISION_ENGINE_REPORT.md")
 DISCIPLINE_REPORT_MD = Path("TAE_DECISION_DISCIPLINE_REPORT.md")
 PAPER_PORTFOLIO_JSON = Path("runtime_outputs/paper_execution/paper_portfolio.json")
+ORDERS_JSONL = Path("runtime_outputs/paper_execution/paper_orders.jsonl")
 RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
 HARD_RISK_JSON = Path("runtime_outputs/governance/hard_risk.json")
 CONFLICTS_JSON = Path("runtime_outputs/conflict_resolution/conflicts.json")
@@ -79,6 +80,9 @@ FORBIDDEN_WRITE_PREFIXES = (
 
 HEALTHY_LIFECYCLE = frozenset({"SURVIVED", "EARLY_WINNER", "MATURE_WINNER", "PEAK_WINNER"})
 WEAK_LIFECYCLE = frozenset({"PROFIT_DECAY", "COLLAPSED", "WEAKENING"})
+PRE_ENTRY_CRITICAL_COLLAPSE = 0.95
+PRE_ENTRY_SOFT_COLLAPSE = 0.55
+PRE_ENTRY_NEAR_STOP_PCT = -2.5
 
 HISTORICAL_INTELLIGENCE_CSV = Path("historical_intelligence.csv")
 MULTI_HORIZON_BACKTEST_CSV = Path("multi_horizon_backtest.csv")
@@ -154,6 +158,251 @@ def load_paper_positions(portfolio_doc: dict[str, Any] | None) -> dict[str, dict
 def paper_position_held(ticker: str, ctx: dict[str, Any]) -> bool:
     pos = (ctx.get("paper_positions") or {}).get(ticker.upper())
     return bool(pos and _f(pos.get("shares")) > 0)
+
+
+def position_has_exposure(ticker: str, ctx: dict[str, Any]) -> bool:
+    ticker = ticker.upper()
+    if paper_position_held(ticker, ctx):
+        return True
+    live = (ctx.get("live_positions") or {}).get(ticker) or {}
+    return _f(live.get("shares")) > 0
+
+
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+            if isinstance(row, dict):
+                rows.append(row)
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def index_recent_hard_stops(orders: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Latest hard-risk SELL per ticker from existing paper order artifacts."""
+    out: dict[str, dict[str, Any]] = {}
+    for order in orders:
+        ticker = _s(order.get("ticker")).upper()
+        action = _s(order.get("action")).upper()
+        if not ticker or action != "SELL_PAPER":
+            continue
+        reason_blob = " ".join(
+            _s(order.get(key))
+            for key in ("reason", "execution_reason", "order_reason", "evidence", "notes")
+        ).upper()
+        hard = bool(order.get("hard_risk_override")) or "HARD RISK" in reason_blob or "HARD_RISK" in reason_blob
+        if not hard:
+            continue
+        ts = _s(order.get("timestamp"))
+        prev = out.get(ticker)
+        if not prev or ts >= _s(prev.get("timestamp")):
+            out[ticker] = {
+                "timestamp": ts,
+                "reason": reason_blob[:240],
+                "hard_rule": _s(order.get("hard_rule")),
+                "order_id": _s(order.get("order_id") or order.get("decision_id")),
+            }
+    return out
+
+
+def has_valid_mark_price(ticker: str, ctx: dict[str, Any]) -> bool:
+    ticker = ticker.upper()
+    paper = (ctx.get("paper_positions") or {}).get(ticker) or {}
+    if _f(paper.get("current_price")) > 0 or _f(paper.get("avg_price")) > 0:
+        return True
+    gii = (ctx.get("gii_by") or {}).get(ticker) or {}
+    if _f(gii.get("current_price")) > 0:
+        return True
+    if gii.get("current_pct") is not None and _s(gii.get("lifecycle_stage")):
+        return True
+    shadow = (ctx.get("shadow_by") or {}).get(ticker) or {}
+    if _f(shadow.get("current_price")) > 0 or shadow.get("current_pct") is not None:
+        return True
+    signal = (ctx.get("signals") or {}).get(ticker) or {}
+    if _f(signal.get("price")) > 0 or _f(signal.get("last_price")) > 0:
+        return True
+    return False
+
+
+def evaluate_pre_entry_hard_risk_compatibility(
+    ticker: str,
+    ctx: dict[str, Any],
+    *,
+    held: bool | None = None,
+) -> dict[str, Any]:
+    """Reuse existing Hard Risk / GII / PPG / decision-state evidence — evidence only, no execution."""
+    ticker = ticker.upper()
+    if held is None:
+        held = paper_position_held(ticker, ctx)
+    exposure = position_has_exposure(ticker, ctx)
+
+    gii = (ctx.get("gii_by") or {}).get(ticker) or {}
+    ppg_row = (ctx.get("ppg_by") or {}).get(ticker) or {}
+    hard_row = (ctx.get("hard_risk_by") or {}).get(ticker) or {}
+    policy_state = _s(ctx.get("policy_state"))
+    suggested = _s(ctx.get("suggested_policy")).upper()
+    ppg_verdict = _s((ctx.get("ppg") or {}).get("portfolio_verdict"))
+
+    lifecycle = _s(gii.get("lifecycle_stage"))
+    collapse = _f(gii.get("collapse_probability"))
+    strategy = _s(gii.get("recommended_shadow_strategy"))
+    posture = _s(ppg_row.get("governor_posture"))
+    pnl_pct = _f(hard_row.get("pnl_pct"))
+    hr_status = _s(hard_row.get("status"))
+    high_risk = (
+        policy_state == "HIGH_RISK"
+        or "HIGH_RISK" in ppg_verdict.upper()
+        or "PRESERVATION" in suggested
+    )
+
+    recent = (ctx.get("recent_hard_stops_by_ticker") or {}).get(ticker) or {}
+    recent_hard_stop = bool(recent.get("timestamp"))
+    state = (ctx.get("active_decisions_by_ticker") or {}).get(ticker) or {}
+    cooldown = state.get("cooldown_status") or {}
+
+    reasons: list[str] = []
+    hard_block = False
+    reentry_allowed = True
+    risk_level = "LOW"
+
+    if exposure and hr_status in {"STOP_LOSS_BREACHED", "CRITICAL_LOSS"}:
+        hard_block = True
+        risk_level = "CRITICAL"
+        reasons.append(f"active_hard_risk_breach:{hr_status}")
+
+    if recent_hard_stop and cooldown.get("active"):
+        hard_block = True
+        reentry_allowed = False
+        risk_level = "CRITICAL"
+        reasons.append("hard_stop_reentry_cooldown_active")
+
+    if recent_hard_stop and not cooldown.get("active"):
+        if collapse >= PRE_ENTRY_CRITICAL_COLLAPSE and lifecycle in WEAK_LIFECYCLE:
+            hard_block = True
+            reentry_allowed = False
+            risk_level = "CRITICAL"
+            reasons.append("persistent_critical_risk_after_hard_stop")
+
+    if collapse >= PRE_ENTRY_CRITICAL_COLLAPSE and lifecycle in WEAK_LIFECYCLE and high_risk:
+        hard_block = True
+        risk_level = "CRITICAL"
+        reasons.append("critical_collapse_profit_decay_high_risk")
+
+    if strategy in {"TIGHTEN_TRAIL_SHADOW", "PROTECT_PROFIT_SHADOW"} and collapse >= PRE_ENTRY_CRITICAL_COLLAPSE:
+        hard_block = True
+        risk_level = "CRITICAL"
+        reasons.append("tighten_trail_critical_collapse")
+
+    if exposure and lifecycle in WEAK_LIFECYCLE and collapse >= PRE_ENTRY_CRITICAL_COLLAPSE:
+        hard_block = True
+        risk_level = "CRITICAL"
+        reasons.append("existing_exposure_structural_decay")
+
+    if exposure and pnl_pct <= PRE_ENTRY_NEAR_STOP_PCT:
+        hard_block = True
+        risk_level = "CRITICAL"
+        reasons.append(f"insufficient_hard_risk_cushion:{pnl_pct:.2f}%")
+
+    if not has_valid_mark_price(ticker, ctx):
+        hard_block = True
+        risk_level = "CRITICAL"
+        reasons.append("missing_valid_mark")
+
+    soft_delta = 0.0
+    if not hard_block:
+        if high_risk and collapse >= PRE_ENTRY_SOFT_COLLAPSE:
+            risk_level = "HIGH"
+            soft_delta = -18.0
+            reasons.append("high_risk_elevated_collapse_soft_penalty")
+        elif high_risk and lifecycle in WEAK_LIFECYCLE:
+            risk_level = "MODERATE"
+            soft_delta = -12.0
+            reasons.append("high_risk_weak_lifecycle_soft_penalty")
+        elif strategy in {"TIGHTEN_TRAIL_SHADOW", "PROTECT_PROFIT_SHADOW"} and collapse >= PRE_ENTRY_SOFT_COLLAPSE:
+            risk_level = "MODERATE"
+            soft_delta = -10.0
+            reasons.append("protection_strategy_elevated_collapse_soft_penalty")
+
+    return {
+        "compatible": not hard_block,
+        "hard_block": hard_block,
+        "risk_level": risk_level,
+        "reasons": reasons,
+        "source_fields": {
+            "hard_risk_status": hr_status or "OK",
+            "pnl_pct": round(pnl_pct, 4),
+            "collapse_probability": round(collapse, 4),
+            "lifecycle_stage": lifecycle,
+            "recommended_shadow_strategy": strategy,
+            "governor_posture": posture,
+            "policy_state": policy_state,
+            "suggested_policy": _s(ctx.get("suggested_policy")),
+            "portfolio_verdict": ppg_verdict,
+            "high_risk_context": high_risk,
+            "position_exposure": exposure,
+            "paper_held": held,
+            "cooldown_active": bool(cooldown.get("active")),
+            "last_hard_stop_at": recent.get("timestamp"),
+        },
+        "recent_hard_stop": recent_hard_stop,
+        "reentry_allowed": reentry_allowed and not hard_block,
+        "soft_score_delta": soft_delta,
+    }
+
+
+def apply_pre_entry_hard_risk_sync(
+    ticker: str,
+    scores: dict[str, float],
+    evidence: list[str],
+    pre_entry: dict[str, Any],
+    *,
+    held: bool,
+) -> dict[str, Any]:
+    """Adjust BUY scoring from pre-entry compatibility — does not execute trades."""
+    buy_before = _f(scores.get("BUY_PAPER"))
+    if pre_entry.get("hard_block"):
+        scores["BUY_PAPER"] = 0.0
+        scores["SKIP_PAPER"] += max(45.0, buy_before + 30.0)
+        if held:
+            scores["HOLD_PAPER"] += 20.0
+            scores["PROTECT_PAPER"] += 15.0
+        evidence.append(
+            "pre-entry hard risk sync: BUY blocked — "
+            + "; ".join((pre_entry.get("reasons") or [])[:4])
+        )
+        return {
+            "risk_score_delta": round(-buy_before, 2),
+            "decision_coherence_status": "BLOCKED_HARD_RISK_CONFLICT",
+            "buy_blocked": True,
+        }
+
+    soft_delta = _f(pre_entry.get("soft_score_delta"))
+    if soft_delta < 0 and buy_before > 0:
+        applied = max(soft_delta, -buy_before)
+        scores["BUY_PAPER"] = max(0.0, buy_before + applied)
+        scores["SKIP_PAPER"] += min(15.0, abs(applied) * 0.6)
+        evidence.append(
+            f"pre-entry hard risk sync: BUY soft penalty {applied:.1f} "
+            f"(risk_level={pre_entry.get('risk_level')})"
+        )
+        return {
+            "risk_score_delta": round(applied, 2),
+            "decision_coherence_status": "SOFT_RISK_CONFLICT_RESOLVED",
+            "buy_blocked": False,
+        }
+
+    return {
+        "risk_score_delta": 0.0,
+        "decision_coherence_status": "COHERENT",
+        "buy_blocked": False,
+    }
 
 
 def collect_rules_applied(consumption: dict[str, Any], named_rules: list[str]) -> list[str]:
@@ -1115,6 +1364,8 @@ def build_context() -> dict[str, Any]:
             if t:
                 hard_risk_by[t] = row
 
+    recent_hard_stops_by_ticker = index_recent_hard_stops(load_jsonl(ORDERS_JSONL))
+
     return {
         "gii": gii,
         "gii_by": gii_by,
@@ -1149,6 +1400,7 @@ def build_context() -> dict[str, Any]:
         "rule_lifecycle": rule_lifecycle,
         "hard_risk": hard_risk_doc,
         "hard_risk_by": hard_risk_by,
+        "recent_hard_stops_by_ticker": recent_hard_stops_by_ticker,
         "conflict_resolution": conflict_doc,
         "conflict_resolution_by_ticker": conflict_by,
         "active_decisions": active_doc,
@@ -1186,6 +1438,7 @@ def build_context() -> dict[str, Any]:
             "paper_portfolio": PAPER_PORTFOLIO_JSON.is_file(),
             "rule_lifecycle": RULE_LIFECYCLE_JSON.is_file(),
             "hard_risk": HARD_RISK_JSON.is_file(),
+            "paper_orders": ORDERS_JSONL.is_file(),
             "conflict_resolution": CONFLICTS_JSON.is_file(),
             "active_decisions": ACTIVE_DECISIONS_JSON.is_file(),
             "profit_target_adapter": PROFIT_TARGET_JSON.is_file(),
@@ -1660,6 +1913,11 @@ def score_actions_for_ticker(
     )
     consumption_evidence["hard_risk_discipline"] = hard_risk_discipline
 
+    pre_entry = evaluate_pre_entry_hard_risk_compatibility(ticker, ctx, held=held)
+    risk_sync = apply_pre_entry_hard_risk_sync(ticker, scores, evidence, pre_entry, held=held)
+    consumption_evidence["pre_entry_hard_risk"] = pre_entry
+    consumption_evidence["risk_sync"] = risk_sync
+
     from tae_conflict_resolution import apply_conflict_resolution_bias
     from tae_decision_state import apply_decision_state_gate
 
@@ -1686,6 +1944,14 @@ def score_actions_for_ticker(
     if not state_detail.get("decision_switch_authorized") and not hard_risk_discipline.get("override"):
         gate = state_detail.get("decision_state_evidence") or {}
         best = _s(gate.get("final_action"), best)
+
+    if best == "BUY_PAPER" and pre_entry.get("hard_block"):
+        best = "SKIP_PAPER" if not held else "HOLD_PAPER"
+        scores[best] = max(scores.get(best, 0.0), scores.get("BUY_PAPER", 0.0) + 30.0)
+        scores["BUY_PAPER"] = 0.0
+        evidence.append("pre-entry hard risk: final BUY veto — incompatible with Hard Risk evidence")
+        risk_sync["decision_coherence_status"] = "BLOCKED_HARD_RISK_CONFLICT"
+        consumption_evidence["risk_sync"] = risk_sync
 
     if scores[best] < 18.0:
         best = "SKIP_PAPER"
@@ -1790,7 +2056,15 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
 
     conflict_resolution_evidence = consumption_evidence.get("conflict_resolution_evidence") or {}
     decision_state_detail = consumption_evidence.get("decision_state_evidence") or {}
+    pre_entry = consumption_evidence.get("pre_entry_hard_risk") or {}
+    risk_sync = consumption_evidence.get("risk_sync") or {}
     gate = decision_state_detail.get("decision_state_evidence") or decision_state_detail
+
+    coherence_status = _s(risk_sync.get("decision_coherence_status"), "COHERENT")
+    if hard_risk_discipline.get("override"):
+        coherence_status = "HARD_RISK_OVERRIDE"
+    elif action == "BUY_PAPER" and pre_entry.get("hard_block"):
+        coherence_status = "BLOCKED_HARD_RISK_CONFLICT"
 
     ts = _now()
     decision_id = f"PDEC-{ticker.upper()}-{seq:04d}"
@@ -1861,6 +2135,13 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "ev_margin_required": gate.get("ev_margin_required"),
         "hard_rule_override": bool(hard_risk_discipline.get("override")),
         "paper_position_held": paper_position_held(ticker.upper(), ctx),
+        "pre_entry_hard_risk_compatible": bool(pre_entry.get("compatible")),
+        "pre_entry_hard_risk_level": pre_entry.get("risk_level"),
+        "pre_entry_hard_risk_reasons": pre_entry.get("reasons") or [],
+        "recent_hard_stop": bool(pre_entry.get("recent_hard_stop")),
+        "reentry_authorized": bool(pre_entry.get("reentry_allowed")),
+        "risk_score_delta": _f(risk_sync.get("risk_score_delta")),
+        "decision_coherence_status": coherence_status,
         "created_at": ts,
     }
 

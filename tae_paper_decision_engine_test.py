@@ -15,13 +15,16 @@ from tae_paper_decision_engine import (
     apply_knowledge_base_bias,
     apply_named_confidence_rules,
     apply_named_rule,
+    apply_pre_entry_hard_risk_sync,
     apply_profit_target_adapter_bias,
     apply_rule_lifecycle_bias,
     build_decision,
     build_decisions,
     build_horizon_context,
+    enforce_hard_risk_discipline,
     enforce_loss_discipline,
     enforce_position_discipline,
+    evaluate_pre_entry_hard_risk_compatibility,
     score_actions_for_ticker,
 )
 
@@ -293,6 +296,216 @@ class PaperDecisionEngineTest(unittest.TestCase):
         ctx = {"profit_target_by": {"SPY": {"exit_window_urgency": "CRITICAL", "target_confidence": 1.0}}}
         result = apply_profit_target_adapter_bias("SPY", scores, [], ctx, held=False)
         self.assertFalse(result["applied"])
+
+
+class TestPreEntryHardRiskSynchronization(unittest.TestCase):
+    def _forensic_amat_ctx(self) -> dict:
+        ctx = {
+            "gii_by": {
+                "AMAT": {
+                    "ticker": "AMAT",
+                    "lifecycle_stage": "PROFIT_DECAY",
+                    "collapse_probability": 1.0,
+                    "recommended_shadow_strategy": "TIGHTEN_TRAIL_SHADOW",
+                    "growth_score": 5.1,
+                    "current_pct": 0.05,
+                    "capital_efficiency": 30.0,
+                }
+            },
+            "shadow_by": {},
+            "ppg_by": {"AMAT": {"governor_posture": "TRAIL_SHADOW"}},
+            "live_positions": {"AMAT": {"shares": 4.1457}},
+            "paper_positions": {},
+            "signals": {"AMAT": {"signal": "STRONG BUY", "score": 100.0, "price": 598.7}},
+            "top_growth": ["AMAT"],
+            "policy_state": "HIGH_RISK",
+            "suggested_policy": "CAPITAL_PRESERVATION_SHADOW",
+            "ppg": {"portfolio_verdict": "HIGH_RISK"},
+            "preferred_philosophy": "COLLABORATIVE",
+            "cash_hint": 5000.0,
+            "exp_by_ticker": {},
+            "horizon_ssot": {
+                "historical_returns": {"AMAT": {"2Y": 20.0, "5Y": 50.0, "10Y": 100.0, "20Y": 200.0}},
+                "strategic_returns": {},
+                "intraday_by_ticker": {},
+                "cross_horizon_consistency": 97.0,
+            },
+            "hard_risk_by": {"AMAT": {"status": "OK", "pnl_pct": 0.05}},
+            "recent_hard_stops_by_ticker": {},
+            "active_decisions_by_ticker": {},
+            "conflict_resolution_by_ticker": {},
+        }
+        return ctx
+
+    def _hd_clean_ctx(self) -> dict:
+        return {
+            "gii_by": {
+                "HD": {
+                    "ticker": "HD",
+                    "lifecycle_stage": "MATURE_WINNER",
+                    "collapse_probability": 0.05,
+                    "recommended_shadow_strategy": "KEEP_GROWING_SHADOW",
+                    "growth_score": 82.0,
+                    "current_pct": 1.2,
+                    "capital_efficiency": 88.0,
+                }
+            },
+            "shadow_by": {},
+            "ppg_by": {},
+            "live_positions": {},
+            "paper_positions": {},
+            "signals": {"HD": {"signal": "STRONG BUY", "score": 95.0, "price": 337.11}},
+            "top_growth": ["HD"],
+            "policy_state": "NORMAL",
+            "suggested_policy": "GROWTH_SHADOW",
+            "ppg": {"portfolio_verdict": "BALANCED"},
+            "preferred_philosophy": "COLLABORATIVE",
+            "cash_hint": 8000.0,
+            "exp_by_ticker": {},
+            "horizon_ssot": {
+                "historical_returns": {"HD": {"2Y": 25.0, "5Y": 60.0, "10Y": 120.0, "20Y": 220.0}},
+                "strategic_returns": {},
+                "intraday_by_ticker": {},
+                "cross_horizon_consistency": 97.0,
+            },
+            "hard_risk_by": {},
+            "recent_hard_stops_by_ticker": {},
+            "active_decisions_by_ticker": {},
+            "conflict_resolution_by_ticker": {},
+        }
+
+    def test_buy_blocked_active_hard_risk_incompatibility(self) -> None:
+        ctx = self._forensic_amat_ctx()
+        ctx["hard_risk_by"]["AMAT"] = {"status": "STOP_LOSS_BREACHED", "pnl_pct": -3.2, "hard_rule": "HARD_STOP_LOSS_-3"}
+        ctx["paper_positions"] = {"AMAT": {"shares": 4.0, "unrealized_pct": -3.2, "current_pct": -3.2}}
+        action, _, evidence, _, _, _, consumption, _, _, hard = score_actions_for_ticker("AMAT", ctx)
+        self.assertEqual(action, "SELL_PAPER")
+        self.assertTrue(hard.get("override"))
+
+    def test_buy_blocked_critical_collapse_profit_decay(self) -> None:
+        action, _, evidence, _, _, _, consumption, _, _, _ = score_actions_for_ticker("AMAT", self._forensic_amat_ctx())
+        self.assertNotEqual(action, "BUY_PAPER")
+        pre = consumption.get("pre_entry_hard_risk") or {}
+        self.assertTrue(pre.get("hard_block"))
+        self.assertIn("critical_collapse_profit_decay_high_risk", pre.get("reasons") or [])
+
+    def test_buy_blocked_hard_stop_reentry_cooldown(self) -> None:
+        ctx = self._forensic_amat_ctx()
+        ctx["recent_hard_stops_by_ticker"] = {
+            "AMAT": {"timestamp": "2026-07-08T21:15:45+00:00", "reason": "HARD RISK override"}
+        }
+        ctx["active_decisions_by_ticker"] = {
+            "AMAT": {
+                "cooldown_status": {"active": True, "minutes_remaining": 12.0, "reason": "STOP_REENTRY_CHURN_ENFORCED"},
+                "last_executed_action": "SELL_PAPER",
+            }
+        }
+        action, _, _, _, _, _, consumption, _, _, _ = score_actions_for_ticker("AMAT", ctx)
+        self.assertNotEqual(action, "BUY_PAPER")
+        pre = consumption.get("pre_entry_hard_risk") or {}
+        self.assertIn("hard_stop_reentry_cooldown_active", pre.get("reasons") or [])
+
+    def test_risk_compatible_buy_remains_allowed(self) -> None:
+        action, _, _, _, _, _, consumption, _, _, _ = score_actions_for_ticker("HD", self._hd_clean_ctx())
+        self.assertEqual(action, "BUY_PAPER")
+        pre = consumption.get("pre_entry_hard_risk") or {}
+        self.assertFalse(pre.get("hard_block"))
+        self.assertEqual(pre.get("risk_level"), "LOW")
+
+    def test_hard_risk_sell_remains_mandatory(self) -> None:
+        ctx = self._forensic_amat_ctx()
+        ctx["paper_positions"] = {"AMAT": {"shares": 4.0, "unrealized_pct": -5.5, "current_pct": -5.5}}
+        ctx["hard_risk_by"]["AMAT"] = {"status": "CRITICAL_LOSS", "pnl_pct": -5.5, "hard_rule": "HARD_CRITICAL_STOP_-5"}
+        scores = {a: 40.0 for a in PAPER_ACTIONS}
+        scores["BUY_PAPER"] = 90.0
+        evidence: list[str] = []
+        hard = enforce_hard_risk_discipline("AMAT", scores, evidence, ctx)
+        self.assertTrue(hard.get("override"))
+        self.assertEqual(max(scores, key=lambda a: scores[a]), "SELL_PAPER")
+
+    def test_conflict_resolution_cannot_overturn_hard_incompatibility(self) -> None:
+        ctx = self._forensic_amat_ctx()
+        ctx["conflict_resolution_by_ticker"] = {
+            "AMAT": {
+                "scenario_ev_table": [
+                    {"action": "BUY_PAPER", "raev": 500.0},
+                    {"action": "SKIP_PAPER", "raev": 10.0},
+                ]
+            }
+        }
+        action, _, _, _, _, _, consumption, _, _, _ = score_actions_for_ticker("AMAT", ctx)
+        self.assertNotEqual(action, "BUY_PAPER")
+        self.assertEqual((consumption.get("risk_sync") or {}).get("decision_coherence_status"), "BLOCKED_HARD_RISK_CONFLICT")
+
+    def test_decision_state_cannot_authorize_hard_incompatible_buy(self) -> None:
+        ctx = self._forensic_amat_ctx()
+        ctx["active_decisions_by_ticker"] = {
+            "AMAT": {
+                "last_executed_action": "SELL_PAPER",
+                "cooldown_status": {"active": False, "reason": "cooldown_expired"},
+            }
+        }
+        action, _, _, _, _, _, _, _, _, _ = score_actions_for_ticker("AMAT", ctx)
+        self.assertNotEqual(action, "BUY_PAPER")
+
+    def test_profit_target_adapter_cannot_create_buy(self) -> None:
+        scores = {a: 0.0 for a in PAPER_ACTIONS}
+        ctx = {
+            "profit_target_by": {
+                "AMAT": {
+                    "exit_window_urgency": "CRITICAL",
+                    "recommended_shadow_strategy": "REDUCE_EXPOSURE_SHADOW",
+                    "target_confidence": 1.0,
+                }
+            },
+            "paper_positions": {"AMAT": {"shares": 1.0, "current_pct": 2.0}},
+        }
+        apply_profit_target_adapter_bias("AMAT", scores, [], ctx, held=True)
+        self.assertEqual(scores["BUY_PAPER"], 0.0)
+
+    def test_final_payload_contains_coherence_evidence(self) -> None:
+        decision = build_decision("AMAT", self._forensic_amat_ctx(), seq=1)
+        for field in (
+            "pre_entry_hard_risk_compatible",
+            "pre_entry_hard_risk_level",
+            "pre_entry_hard_risk_reasons",
+            "recent_hard_stop",
+            "reentry_authorized",
+            "risk_score_delta",
+            "decision_coherence_status",
+        ):
+            self.assertIn(field, decision)
+
+    def test_no_final_buy_with_blocked_hard_risk_conflict(self) -> None:
+        decisions = build_decisions(self._forensic_amat_ctx())
+        for decision in decisions:
+            if decision["action"] == "BUY_PAPER":
+                self.assertNotEqual(decision["decision_coherence_status"], "BLOCKED_HARD_RISK_CONFLICT")
+
+    def test_pre_entry_evaluator_persistent_reentry_block(self) -> None:
+        ctx = self._forensic_amat_ctx()
+        ctx["recent_hard_stops_by_ticker"] = {
+            "AMAT": {"timestamp": "2026-07-08T21:15:45+00:00", "reason": "HARD RISK override"}
+        }
+        ctx["active_decisions_by_ticker"] = {
+            "AMAT": {"cooldown_status": {"active": False, "reason": "cooldown_expired"}}
+        }
+        pre = evaluate_pre_entry_hard_risk_compatibility("AMAT", ctx, held=False)
+        self.assertTrue(pre.get("hard_block"))
+        self.assertFalse(pre.get("reentry_allowed"))
+        self.assertIn("persistent_critical_risk_after_hard_stop", pre.get("reasons") or [])
+
+    def test_apply_pre_entry_sync_records_soft_delta(self) -> None:
+        scores = {"BUY_PAPER": 30.0, "SKIP_PAPER": 10.0}
+        pre = {
+            "hard_block": False,
+            "soft_score_delta": -12.0,
+            "risk_level": "MODERATE",
+            "reasons": ["high_risk_weak_lifecycle_soft_penalty"],
+        }
+        sync = apply_pre_entry_hard_risk_sync("HD", scores, [], pre, held=False)
+        self.assertEqual(sync["decision_coherence_status"], "SOFT_RISK_CONFLICT_RESOLVED")
+        self.assertLess(scores["BUY_PAPER"], 30.0)
 
 
 if __name__ == "__main__":

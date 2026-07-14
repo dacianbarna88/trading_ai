@@ -8,7 +8,7 @@
 
 | Item | Value |
 |------|--------|
-| **Current approved milestone** | **Non-Terminal Order Recovery** — `NON_TERMINAL_ORDER_RECOVERY_CLOSED` |
+| **Current approved milestone** | **Decision Risk Synchronization** — `MAIN_BRAIN_RISK_SYNCHRONIZED` |
 | **Branch** | `cursor/x12b-legacy-archive-hotfix` |
 | **Base commits** | `9d816de` profit integrity guard · `295303f` capital base fix |
 | **Canonical live runtime** | `live_bot.py` |
@@ -33,7 +33,9 @@ python3 tae.py opportunity-attrition   # upstream attrition trace + death map (r
 
 Expected morning-audit: **READY** · operational contract all OK · `PAPER_PROFIT_INTEGRITY: PASS` · `validation_capital_base: 30000`
 
-Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_PIPELINE_CONSOLIDATION_AUDIT.md` · `TAE_PROFIT_OPTIMIZATION_AUDIT.md` · `TAE_OPPORTUNITY_ATTRITION_AUDIT.md` · `TAE_NON_TERMINAL_ORDER_RECOVERY_AUDIT.md`
+Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_PIPELINE_CONSOLIDATION_AUDIT.md` · `TAE_PROFIT_OPTIMIZATION_AUDIT.md` · `TAE_OPPORTUNITY_ATTRITION_AUDIT.md` · `TAE_NON_TERMINAL_ORDER_RECOVERY_AUDIT.md` · `TAE_DECISION_RISK_SYNCHRONIZATION_AUDIT.md` · `TAE_FORENSIC_LOSSES_BEFORE_AFTER.md`
+
+**Decision risk synchronization (2026-07-14):** PDE now runs `evaluate_pre_entry_hard_risk_compatibility()` before conflict resolution. Hard blocks BUY when GII collapse/lifecycle + HIGH_RISK + exposure disagree with entry; persistent reentry block after hard-risk SELL when critical risk remains. Coherence fields on every decision. Forensic replay: AMAT/MU Jul 8 add-ons + AMAT Jul 9 reentry → SKIP; $308.50 entry loss prevented in clean replay. Hard Risk SELL unchanged (mandatory). 88 tests OK.
 
 **Non-terminal order recovery (2026-07-14):** `SKIPPED_NO_MARK_PRICE` is non-terminal; `same_action` idempotency no longer permanently blocks when last order was non-terminal. Mark resolution priority: open position → `live_signals.csv` (≤3600s) → yfinance/cache → accounting position. HD recovered: **1 EXECUTED BUY** @ **$337.11** (`live_signals.csv`); exactly **1 trade**; second cycle **NO_CHANGE** (no duplicate). Retry cooldown: one attempt per cycle (`SKIPPED_RETRY_COOLDOWN`). Terminal: `EXECUTED`, `NO_CHANGE`. Non-terminal: `SKIPPED_NO_MARK_PRICE`, `SKIPPED_NO_POSITION`, `SKIPPED_SWITCH_NOT_AUTHORIZED`, `BLOCKED_FAKE_PROFIT_RISK`.
 
@@ -54,6 +56,8 @@ Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_P
 
 ## Current state (2026-07-14)
 
+- **Decision risk synchronized** — PDE pre-entry Hard Risk compatibility wired; AMAT/MU BUY blocked under PROFIT_DECAY + collapse=1.0; AMAT Jul 9 reentry blocked via persistent critical risk
+- **Decision replay promotion rejected** — +$5,051 fade-history claim not reproducible on clean PAPER history; no PDE patch applied
 - **Non-terminal order recovery closed** — `tae_paper_execution.py` reconciles `processed_decision_ids` after non-terminal skips; controlled retry when fresh mark exists
 - **Morning audit READY** — dual CANONICAL / PAPER VALIDATION sections; no mixed SSOT
 - **PAPER profit integrity guard** — `validation_capital_base` = $30,000; synthetic fill contamination = 0

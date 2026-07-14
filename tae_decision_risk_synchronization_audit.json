@@ -1,0 +1,67 @@
+{
+  "schema": "tae_decision_risk_synchronization_audit",
+  "generated_at": "2026-07-14T15:55:00+00:00",
+  "verdict": "MAIN_BRAIN_RISK_SYNCHRONIZED",
+  "mode": "PAPER_ONLY",
+  "root_cause": {
+    "summary": "PDE scored BUY from STRONG BUY signal + top_growth while GII/PPG already signaled PROFIT_DECAY, collapse_probability=1.0, TIGHTEN_TRAIL_SHADOW under HIGH_RISK; enforce_hard_risk_discipline() only fires on held positions after -3%/-5% breach, not pre-entry",
+    "mechanism": [
+      "Flat-path BUY scoring (+40 STRONG BUY, +20 top_growth) exceeded HIGH_RISK soft penalty (-8 BUY, +15 SKIP)",
+      "paper_positions lag allowed flat-path BUY while live/accounting exposure existed (add-on buys)",
+      "No pre-entry Hard Risk compatibility gate before conflict resolution / decision state",
+      "STOP_REENTRY_CHURN 30m cooldown expired on AMAT Jul 9 while structural risk unchanged"
+    ],
+    "pde_consumed": ["signal score", "policy_state", "top_growth", "DPE collaborative deltas", "named confidence rules"],
+    "pde_ignored": ["collapse_probability=1.0", "lifecycle PROFIT_DECAY", "TIGHTEN_TRAIL_SHADOW", "live exposure when paper_positions empty", "recent hard-risk SELL with persistent critical risk"]
+  },
+  "implementation": {
+    "files_changed": [
+      "tae_paper_decision_engine.py",
+      "tae_paper_decision_engine_test.py",
+      "PROJECT_BOOK.md",
+      "SESSION_START.md"
+    ],
+    "functions_added": [
+      "evaluate_pre_entry_hard_risk_compatibility",
+      "apply_pre_entry_hard_risk_sync",
+      "position_has_exposure",
+      "index_recent_hard_stops",
+      "has_valid_mark_price"
+    ],
+    "wiring": "After loss_discipline, before conflict_resolution in score_actions_for_ticker(); final BUY veto after decision_state_gate; coherence fields in build_decision()"
+  },
+  "validation": {
+    "decision_state_refresh": "PASS",
+    "full_paper_cycle_x2": "PASS",
+    "profit_pipeline": "PASS",
+    "morning_audit": "READY",
+    "profit_optimization": "CURRENT_BRAIN_RETAINED_INSUFFICIENT_EVIDENCE",
+    "profit_integrity": "PASS",
+    "reconciliation": "PASS",
+    "capital_base_usd": 30000,
+    "promotion_lock": false,
+    "unittest_total": 88,
+    "regression_tests_added": 12,
+    "contradictory_buy_violations": 0
+  },
+  "promotion_criteria": {
+    "prevents_buy_hard_risk_sell_contradiction": true,
+    "prevents_amat_reentry_churn": true,
+    "hard_risk_mandatory_unchanged": true,
+    "max_drawdown_not_increased": true,
+    "replay_pnl_improved_or_preserved": true,
+    "clean_hd_buy_allowed": true,
+    "no_unauthorized_churn": true,
+    "profit_integrity_pass": true,
+    "reconciliation_pass": true,
+    "capital_base_30000": true,
+    "promotion_lock_false": true,
+    "pde_sole_authority": true
+  },
+  "metrics": {
+    "buys_blocked_current_cycle": 3,
+    "valid_buys_preserved_current_cycle": 0,
+    "blocked_tickers": ["AMAT", "HSBA.L", "MU"],
+    "prevented_loss_usd_clean_replay": 308.5
+  }
+}

@@ -1,0 +1,171 @@
+{
+  "schema": "tae_forensic_losses_before_after",
+  "generated_at": "2026-07-14T15:55:00+00:00",
+  "verdict": "MAIN_BRAIN_RISK_SYNCHRONIZED",
+  "cases": [
+    {
+      "loss_id": "LOSS-001",
+      "ticker": "AMAT",
+      "original_buy_action": "BUY_PAPER",
+      "synchronized_buy_action": "SKIP_PAPER",
+      "original_exit_action": "SELL_PAPER",
+      "original_pnl": -122.4086,
+      "counterfactual_pnl": 0.0,
+      "drawdown_impact": "avoided_entry",
+      "pre_entry_hard_risk": {
+        "compatible": false,
+        "hard_block": true,
+        "risk_level": "CRITICAL",
+        "reasons": [
+          "critical_collapse_profit_decay_high_risk",
+          "tighten_trail_critical_collapse",
+          "existing_exposure_structural_decay"
+        ],
+        "source_fields": {
+          "hard_risk_status": "OK",
+          "pnl_pct": 0.0,
+          "collapse_probability": 1.0,
+          "lifecycle_stage": "PROFIT_DECAY",
+          "recommended_shadow_strategy": "TIGHTEN_TRAIL_SHADOW",
+          "governor_posture": "",
+          "policy_state": "HIGH_RISK",
+          "suggested_policy": "CAPITAL_PRESERVATION_SHADOW",
+          "portfolio_verdict": "PORTFOLIO_HIGH_RISK",
+          "high_risk_context": true,
+          "position_exposure": true,
+          "paper_held": false,
+          "cooldown_active": false,
+          "last_hard_stop_at": null
+        },
+        "recent_hard_stop": false,
+        "reentry_allowed": false,
+        "soft_score_delta": 0.0
+      },
+      "decision_coherence_status": "BLOCKED_HARD_RISK_CONFLICT",
+      "prevented_loss_usd": 122.41
+    },
+    {
+      "loss_id": "LOSS-002",
+      "ticker": "MU",
+      "original_buy_action": "BUY_PAPER",
+      "synchronized_buy_action": "SKIP_PAPER",
+      "original_exit_action": "SELL_PAPER",
+      "original_pnl": -163.0994,
+      "counterfactual_pnl": 0.0,
+      "drawdown_impact": "avoided_entry",
+      "pre_entry_hard_risk": {
+        "compatible": false,
+        "hard_block": true,
+        "risk_level": "CRITICAL",
+        "reasons": [
+          "critical_collapse_profit_decay_high_risk",
+          "tighten_trail_critical_collapse",
+          "existing_exposure_structural_decay"
+        ],
+        "source_fields": {
+          "hard_risk_status": "OK",
+          "pnl_pct": 0.0,
+          "collapse_probability": 1.0,
+          "lifecycle_stage": "PROFIT_DECAY",
+          "recommended_shadow_strategy": "TIGHTEN_TRAIL_SHADOW",
+          "governor_posture": "WATCH_SHADOW",
+          "policy_state": "HIGH_RISK",
+          "suggested_policy": "CAPITAL_PRESERVATION_SHADOW",
+          "portfolio_verdict": "PORTFOLIO_HIGH_RISK",
+          "high_risk_context": true,
+          "position_exposure": true,
+          "paper_held": false,
+          "cooldown_active": false,
+          "last_hard_stop_at": null
+        },
+        "recent_hard_stop": false,
+        "reentry_allowed": false,
+        "soft_score_delta": 0.0
+      },
+      "decision_coherence_status": "BLOCKED_HARD_RISK_CONFLICT",
+      "prevented_loss_usd": 163.1
+    },
+    {
+      "loss_id": "LOSS-003",
+      "ticker": "SIE.DE",
+      "original_buy_action": "NONE (inherited)",
+      "synchronized_buy_action": "N/A",
+      "original_exit_action": "SELL_PAPER",
+      "original_pnl": -142.4888,
+      "counterfactual_pnl": -142.4888,
+      "drawdown_impact": "unchanged",
+      "note": "No PDE BUY to block; inherited baseline exposure"
+    },
+    {
+      "loss_id": "LOSS-004",
+      "ticker": "QQQ",
+      "original_buy_action": "NONE (inherited)",
+      "synchronized_buy_action": "N/A",
+      "original_exit_action": "PROTECT_PAPER",
+      "original_pnl": -0.6137,
+      "counterfactual_pnl": -0.6137,
+      "drawdown_impact": "unchanged",
+      "note": "No PDE BUY to block; inherited baseline exposure"
+    },
+    {
+      "loss_id": "LOSS-005",
+      "ticker": "AMAT",
+      "original_buy_action": "BUY_PAPER",
+      "synchronized_buy_action": "SKIP_PAPER",
+      "original_exit_action": "SELL_PAPER",
+      "original_pnl": -22.9851,
+      "counterfactual_pnl": 0.0,
+      "drawdown_impact": "avoided_entry",
+      "pre_entry_hard_risk": {
+        "compatible": false,
+        "hard_block": true,
+        "risk_level": "CRITICAL",
+        "reasons": [
+          "persistent_critical_risk_after_hard_stop",
+          "critical_collapse_profit_decay_high_risk",
+          "tighten_trail_critical_collapse",
+          "existing_exposure_structural_decay"
+        ],
+        "source_fields": {
+          "hard_risk_status": "OK",
+          "pnl_pct": 0.0,
+          "collapse_probability": 1.0,
+          "lifecycle_stage": "PROFIT_DECAY",
+          "recommended_shadow_strategy": "TIGHTEN_TRAIL_SHADOW",
+          "governor_posture": "",
+          "policy_state": "HIGH_RISK",
+          "suggested_policy": "CAPITAL_PRESERVATION_SHADOW",
+          "portfolio_verdict": "PORTFOLIO_HIGH_RISK",
+          "high_risk_context": true,
+          "position_exposure": true,
+          "paper_held": false,
+          "cooldown_active": false,
+          "last_hard_stop_at": "2026-07-08T21:15:45+00:00"
+        },
+        "recent_hard_stop": true,
+        "reentry_allowed": false,
+        "soft_score_delta": 0.0
+      },
+      "decision_coherence_status": "BLOCKED_HARD_RISK_CONFLICT",
+      "prevented_loss_usd": 22.99
+    }
+  ],
+  "controls": {
+    "HD": {
+      "flat_action": "BUY_PAPER",
+      "coherence": "COHERENT",
+      "compatible": true
+    }
+  },
+  "summary": {
+    "prevented_loss_usd_clean_replay": 308.5,
+    "buys_blocked_current_cycle": 3,
+    "valid_buys_preserved_current_cycle": 0,
+    "blocked_tickers": [
+      "AMAT",
+      "HSBA.L",
+      "MU"
+    ],
+    "preserved_buy_tickers": []
+  }
+}

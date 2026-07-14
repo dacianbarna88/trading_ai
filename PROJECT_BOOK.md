@@ -1,8 +1,8 @@
 # Trading AI — PROJECT BOOK (Canonical Journal)
 
 **Last updated:** 2026-07-14  
-**Latest sprint:** **Non-Terminal Order Recovery** — `NON_TERMINAL_ORDER_RECOVERY_CLOSED`  
-**Previous milestones:** Opportunity Attrition (`UPSTREAM_BLOCKER_REJECTED`) · Main Decision Brain Closure · PAPER Profit Integrity Guard (`9d816de`) · capital base fix (`295303f`)  
+**Latest sprint:** **Decision Risk Synchronization** — `MAIN_BRAIN_RISK_SYNCHRONIZED` (PDE pre-entry Hard Risk compatibility)  
+**Previous milestones:** Non-Terminal Order Recovery (`NON_TERMINAL_ORDER_RECOVERY_CLOSED`) · Decision Replay Promotion (`REPLAY_VALUE_NOT_REPRODUCIBLE`)  
 **Branch:** `cursor/x12b-legacy-archive-hotfix`  
 **Governance mode:** PAPER_ONLY · ADVISORY_ONLY · NO_BROKER · NO_LIVE_PROMOTION  
 **Canonical runtime:** `live_bot.py` (not `live_bot_v5_1.py`)
@@ -13,6 +13,8 @@
 > **Profit optimization audit:** `python3 tae.py profit-optimization` (evidence-based challenger replay; read-only)  
 > **Opportunity attrition audit:** `python3 tae.py opportunity-attrition` (upstream death map + blocker challenger; read-only)  
 > **Non-terminal order recovery audit:** `TAE_NON_TERMINAL_ORDER_RECOVERY_AUDIT.md` · `tae_non_terminal_order_recovery_audit.json`  
+> **Decision risk sync audit:** `TAE_DECISION_RISK_SYNCHRONIZATION_AUDIT.md` · `tae_decision_risk_synchronization_audit.json` · `TAE_FORENSIC_LOSSES_BEFORE_AFTER.md`
+> **Decision replay promotion audit:** `TAE_DECISION_REPLAY_PROMOTION_AUDIT.md` · `tae_decision_replay_promotion_audit.json`  
 > **Profit targets:** `python3 tae.py profit-targets` · PTA wired into PDE for held-position exit scoring  
 > **SSOT rule:** Canonical = `tae_accounting_snapshot.json` · PAPER validation = `runtime_outputs/paper_execution/paper_portfolio.json` — never merge PnL
 > **End each sprint:** `bash tae_checkpoint.sh` then update this file + commit
@@ -399,6 +401,7 @@ Scope (allowed):
 | X.INFRA-HEALTH-2 | `TAE_INFRA_HEALTH_RESTRICTED_SUBPROCESS_FIX_REPORT.md` | launchctl/pgrep spawn-safe handling |
 | **X.Decision checkpoint** | `TAE_XDECISION_CHECKPOINT_VALIDATION_REPORT.md` | **`50ebc0b`** — focused commit |
 | **Non-Terminal Order Recovery** | `TAE_NON_TERMINAL_ORDER_RECOVERY_AUDIT.md` | `NON_TERMINAL_ORDER_RECOVERY_CLOSED` — PAPER execution retry after `SKIPPED_NO_MARK_PRICE`; HD recovered @ $337.11 (`live_signals.csv`) |
+| **Decision Replay / Protection Promotion** | `TAE_DECISION_REPLAY_PROMOTION_AUDIT.md` | `REPLAY_VALUE_NOT_REPRODUCIBLE` — +$5,051 fade-history claim not reproducible on clean PAPER history ($181.35 / 23 obs); gates not passed; no PDE patch |
 
 ---
 
