@@ -14,6 +14,8 @@ from tae_full_paper_cycle import (
     build_promotion_gate,
     check_forbidden_file_safety,
     collect_summary,
+    compare_constitutional_evolution,
+    feedback_artifacts_exist,
     forbidden_files_unchanged,
     map_validation_verdict,
 )
@@ -54,6 +56,26 @@ class FullPaperCycleTest(unittest.TestCase):
     def test_map_validation_verdict(self) -> None:
         self.assertEqual(map_validation_verdict("PROMISING"), "PROMOTE_TO_LIVE_CANDIDATE")
         self.assertEqual(map_validation_verdict("CONTINUE_TESTING"), "CONTINUE_PAPER")
+
+    def test_feedback_artifacts_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertFalse(feedback_artifacts_exist(root))
+            (root / "runtime_outputs/paper_execution/rule_outcome_attribution.json").parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            (root / "runtime_outputs/paper_execution/rule_outcome_attribution.json").write_text("{}")
+            self.assertTrue(feedback_artifacts_exist(root))
+
+    def test_compare_constitutional_evolution_detects_weight_change(self) -> None:
+        before_w = {"weights": {"BUY_PAPER": {"new_weight": 1.0}}}
+        after_w = {"weights": {"BUY_PAPER": {"new_weight": 1.02}}}
+        before_d = {"decisions": [{"ticker": "HD", "action": "BUY_PAPER", "confidence": 0.7}]}
+        after_d = {"decisions": [{"ticker": "HD", "action": "BUY_PAPER", "confidence": 0.72}]}
+        result = compare_constitutional_evolution(before_d, after_d, before_w, after_w)
+        self.assertTrue(result["loop_closed"])
+        self.assertGreaterEqual(result["weight_change_count"], 1)
+        self.assertFalse(result["human_intervention_required"])
 
     def test_forbidden_unchanged(self) -> None:
         self.assertTrue(forbidden_files_unchanged({"a": 1.0}, {"a": 1.0}))

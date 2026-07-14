@@ -598,6 +598,15 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     if not r_cr["ok"]:
         exit_code = r_cr["exit_code"] or 1
 
+    # Constitutional evolution — apply prior economic feedback before PDE
+    from tae_full_paper_cycle import (
+        archive_pre_evolution_snapshot,
+        run_post_learning_evolution,
+        run_pre_pde_feedback,
+    )
+
+    run_pre_pde_feedback(root, cli_steps)
+
     # Ranks 5-9 — PAPER DECISIONS (PDE: position, profit, loss, buy, policy)
     r_pde = run_cli_step("paper_decisions", [py, "tae.py", "paper-decisions"], cwd=root)
     cli_steps.append(r_pde)
@@ -639,6 +648,8 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     if not r_pde["ok"]:
         exit_code = r_pde["exit_code"] or 1
 
+    archive_pre_evolution_snapshot(root, kind="decisions")
+
     # Rank 11 — PAPER EXECUTION
     r_exec = run_cli_step("paper_execution", [py, "tae.py", "paper-execution"], cwd=root)
     cli_steps.append(r_exec)
@@ -668,6 +679,23 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     steps.append(s4b)
     all_overrides.extend(s4b.overrides)
 
+    # Validation before learning — today's decisions → verdicts → weights
+    r_exp = run_cli_step("paper_experiments", [py, "tae.py", "paper-experiments"], cwd=root)
+    cli_steps.append(r_exp)
+    steps.append(
+        step_from_cli(
+            10,
+            "paper_experiments",
+            "PAPER EXPERIMENTS",
+            "LEARNING",
+            r_exp,
+            inputs=[str(DECISIONS_JSON)],
+            outputs=["decision_validation_results.json"],
+        )
+    )
+    if not r_exp["ok"]:
+        exit_code = r_exp["exit_code"] or 1
+
     # Rank 13 — OUTCOME MEMORY
     r_mem = run_cli_step("outcome_memory", [py, "tae.py", "outcome-memory"], cwd=root)
     cli_steps.append(r_mem)
@@ -694,12 +722,34 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
         )
     )
 
+    archive_pre_evolution_snapshot(root, kind="weights")
+
     # Rank 15 — ADAPTIVE WEIGHTS
     r_aw = run_cli_step("adaptive_weights", [py, "tae.py", "adaptive-weights"], cwd=root)
     cli_steps.append(r_aw)
     steps.append(step_from_cli(15, "adaptive_weights", "ADAPTIVE WEIGHTS", "LEARNING", r_aw, inputs=["attribution"], outputs=["paper_action_weights.json"]))
 
-    # Rank 16 — DPE chain
+    evolution = run_post_learning_evolution(root, cli_steps)
+    steps.append(
+        StepRecord(
+            rank=16,
+            step_id="constitutional_evolution",
+            name="CONSTITUTIONAL EVOLUTION",
+            rule_class="LEARNING",
+            ok=bool(evolution.get("ok")),
+            status="PASS" if evolution.get("loop_closed") else "PASS_WITH_NO_DELTA",
+            reason=None if evolution.get("loop_closed") else "no decision/weight delta this cycle",
+            inputs=["paper_action_weights.json", "rule_lifecycle.json", str(DECISIONS_JSON)],
+            outputs=["runtime_outputs/governance/constitutional_evolution.json", str(DECISIONS_JSON)],
+            metrics={
+                "loop_closed": evolution.get("loop_closed"),
+                "decision_change_count": evolution.get("decision_change_count"),
+                "weight_change_count": evolution.get("weight_change_count"),
+            },
+        )
+    )
+
+    # Rank 17 — DPE chain
     for name in (
         "dpe_events",
         "dpe_splitter",
@@ -713,7 +763,7 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
         cli_steps.append(r)
     steps.append(
         StepRecord(
-            rank=16,
+            rank=17,
             step_id="dpe",
             name="DPE",
             rule_class="LEARNING",
@@ -726,15 +776,11 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
         )
     )
 
-    # paper_experiments (validation — feeds promotion, not in 19 ranks but required)
-    r_exp = run_cli_step("paper_experiments", [py, "tae.py", "paper-experiments"], cwd=root)
-    cli_steps.append(r_exp)
-
-    # Rank 17 — CANONICAL VS PAPER
+    # Rank 18 — CANONICAL VS PAPER
     r_cmp = run_cli_step("canonical_vs_paper", [py, "tae.py", "canonical-vs-paper"], cwd=root)
     cli_steps.append(r_cmp)
     steps.append(
-        step_from_cli(17, "canonical_vs_paper", "CANONICAL VS PAPER", "REPORT_ONLY", r_cmp, inputs=[str(ACCOUNTING_JSON), str(PAPER_PORTFOLIO_JSON)], outputs=["TAE_CANONICAL_VS_PAPER_REPORT.md"])
+        step_from_cli(18, "canonical_vs_paper", "CANONICAL VS PAPER", "REPORT_ONLY", r_cmp, inputs=[str(ACCOUNTING_JSON), str(PAPER_PORTFOLIO_JSON)], outputs=["TAE_CANONICAL_VS_PAPER_REPORT.md"])
     )
 
     safety = check_forbidden_file_safety(root, before_mtimes=before_mtimes)

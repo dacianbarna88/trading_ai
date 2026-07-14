@@ -38,6 +38,10 @@ PAPER_EXEC_TRADES = Path("runtime_outputs/paper_execution/paper_trades.jsonl")
 PAPER_EXEC_ORDERS = Path("runtime_outputs/paper_execution/paper_orders.jsonl")
 PAPER_MTM_JSON = Path("runtime_outputs/paper_execution/mark_to_market.json")
 RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
+ADAPTIVE_WEIGHTS_JSON = Path("runtime_outputs/adaptive_weights/paper_action_weights.json")
+PRE_EVOLUTION_DECISIONS = Path("runtime_outputs/paper_decisions/paper_decisions_pre_evolution.json")
+PRE_EVOLUTION_WEIGHTS = Path("runtime_outputs/adaptive_weights/paper_action_weights_pre_evolution.json")
+EVOLUTION_JSON = Path("runtime_outputs/governance/constitutional_evolution.json")
 
 FORBIDDEN_SNAPSHOT = (
     "live_bot.py",
@@ -164,7 +168,147 @@ def check_forbidden_file_safety(
 
 
 def feedback_artifacts_exist(root: Path) -> bool:
-    return (root / VALIDATION_JSON).is_file() or (root / MEMORY_JSONL).is_file()
+    """True when prior-cycle economic feedback can drive pre-PDE evolution."""
+    candidates = (
+        root / VALIDATION_JSON,
+        root / MEMORY_JSONL,
+        root / PAPER_EXEC_ATTRIBUTION,
+        root / ADAPTIVE_WEIGHTS_JSON,
+        root / PAPER_EXEC_TRADES,
+    )
+    return any(p.is_file() for p in candidates)
+
+
+def archive_pre_evolution_snapshot(root: Path, *, kind: str) -> None:
+    """Preserve executed-decision / pre-learning weight state for same-cycle evolution proof."""
+    if kind == "decisions":
+        src = root / DECISIONS_JSON
+        if src.is_file():
+            dst = root / PRE_EVOLUTION_DECISIONS
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    elif kind == "weights":
+        src = root / ADAPTIVE_WEIGHTS_JSON
+        if src.is_file():
+            dst = root / PRE_EVOLUTION_WEIGHTS
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def _decision_index(doc: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    return {
+        _s(row.get("ticker")).upper(): row
+        for row in (doc or {}).get("decisions") or []
+        if _s(row.get("ticker"))
+    }
+
+
+def _weight_index(doc: dict[str, Any] | None) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for action, row in ((doc or {}).get("weights") or {}).items():
+        out[_s(action).upper()] = _f((row or {}).get("new_weight"), 1.0)
+    return out
+
+
+def compare_constitutional_evolution(
+    before_decisions: dict[str, Any] | None,
+    after_decisions: dict[str, Any] | None,
+    before_weights: dict[str, Any] | None,
+    after_weights: dict[str, Any] | None,
+) -> dict[str, Any]:
+    before_idx = _decision_index(before_decisions)
+    after_idx = _decision_index(after_decisions)
+    tickers = sorted(set(before_idx) | set(after_idx))
+    decision_changes: list[dict[str, Any]] = []
+    for ticker in tickers:
+        b = before_idx.get(ticker) or {}
+        a = after_idx.get(ticker) or {}
+        b_action = _s(b.get("action"))
+        a_action = _s(a.get("action"))
+        b_conf = _f(b.get("confidence"))
+        a_conf = _f(a.get("confidence"))
+        if b_action != a_action or abs(b_conf - a_conf) >= 0.001:
+            decision_changes.append(
+                {
+                    "ticker": ticker,
+                    "action_before": b_action or None,
+                    "action_after": a_action or None,
+                    "confidence_before": round(b_conf, 4),
+                    "confidence_after": round(a_conf, 4),
+                }
+            )
+
+    bw = _weight_index(before_weights)
+    aw = _weight_index(after_weights)
+    weight_changes: list[dict[str, Any]] = []
+    for action in sorted(set(bw) | set(aw)):
+        prev = bw.get(action, 1.0)
+        new = aw.get(action, 1.0)
+        if abs(new - prev) >= 0.0001:
+            weight_changes.append(
+                {
+                    "action": action,
+                    "weight_before": round(prev, 4),
+                    "weight_after": round(new, 4),
+                    "delta": round(new - prev, 4),
+                }
+            )
+
+    evolved = bool(decision_changes or weight_changes)
+    attribution_doc = _load_json(PAPER_EXEC_ATTRIBUTION) or {}
+    return {
+        "schema": "tae.constitutional_evolution.v1",
+        "mode": MODE,
+        "generated_at": _now(),
+        "loop_closed": evolved,
+        "human_intervention_required": False,
+        "decision_changes": decision_changes,
+        "weight_changes": weight_changes,
+        "decision_change_count": len(decision_changes),
+        "weight_change_count": len(weight_changes),
+        "attribution_rule_count": len(attribution_doc.get("rules") or {}),
+    }
+
+
+def run_post_learning_evolution(root: Path, step_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Re-run PDE after economic attribution + weight change; persist evolution evidence."""
+    before_decisions = _load_json(root / PRE_EVOLUTION_DECISIONS) or _load_json(root / DECISIONS_JSON)
+    before_weights = _load_json(root / PRE_EVOLUTION_WEIGHTS) or _load_json(root / ADAPTIVE_WEIGHTS_JSON)
+
+    print("\n>>> [constitutional_evolution] re-running paper-decisions after learning feedback")
+    from tae_paper_decision_engine import main as run_pde
+
+    exit_code = int(run_pde())
+    after_decisions = _load_json(root / DECISIONS_JSON) or {}
+    after_weights = _load_json(root / ADAPTIVE_WEIGHTS_JSON) or {}
+
+    evolution = compare_constitutional_evolution(
+        before_decisions,
+        after_decisions,
+        before_weights,
+        after_weights,
+    )
+    evolution["pde_exit_code"] = exit_code
+    evolution["ok"] = exit_code == 0
+    EVOLUTION_JSON.parent.mkdir(parents=True, exist_ok=True)
+    EVOLUTION_JSON.write_text(json.dumps(evolution, indent=2) + "\n", encoding="utf-8")
+
+    step_results.append(
+        {
+            "step": "constitutional_evolution",
+            "ok": evolution["ok"],
+            "exit_code": exit_code,
+            "loop_closed": evolution["loop_closed"],
+            "decision_change_count": evolution["decision_change_count"],
+            "weight_change_count": evolution["weight_change_count"],
+            "output": str(EVOLUTION_JSON),
+        }
+    )
+    print(
+        f">>> [constitutional_evolution] loop_closed={evolution['loop_closed']} "
+        f"decision_deltas={evolution['decision_change_count']} weight_deltas={evolution['weight_change_count']}"
+    )
+    return evolution
 
 
 def run_pre_pde_feedback(root: Path, step_results: list[dict[str, Any]]) -> None:
