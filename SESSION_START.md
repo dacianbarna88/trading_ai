@@ -8,7 +8,7 @@
 
 | Item | Value |
 |------|--------|
-| **Current approved milestone** | **Operational Consistency Closure** — `TAE_OPERATIONALLY_CLOSED` |
+| **Current approved milestone** | **Non-Terminal Order Recovery** — `NON_TERMINAL_ORDER_RECOVERY_CLOSED` |
 | **Branch** | `cursor/x12b-legacy-archive-hotfix` |
 | **Base commits** | `9d816de` profit integrity guard · `295303f` capital base fix |
 | **Canonical live runtime** | `live_bot.py` |
@@ -28,11 +28,16 @@ python3 tae.py full-paper-cycle
 python3 tae.py morning-audit
 python3 tae.py profit-pipeline   # optional: standalone end-to-end pipeline view
 python3 tae.py profit-optimization   # evidence-based calibration audit (read-only)
+python3 tae.py opportunity-attrition   # upstream attrition trace + death map (read-only)
 ```
 
 Expected morning-audit: **READY** · operational contract all OK · `PAPER_PROFIT_INTEGRITY: PASS` · `validation_capital_base: 30000`
 
-Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_PIPELINE_CONSOLIDATION_AUDIT.md` · `TAE_PROFIT_OPTIMIZATION_AUDIT.md`
+Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_PIPELINE_CONSOLIDATION_AUDIT.md` · `TAE_PROFIT_OPTIMIZATION_AUDIT.md` · `TAE_OPPORTUNITY_ATTRITION_AUDIT.md` · `TAE_NON_TERMINAL_ORDER_RECOVERY_AUDIT.md`
+
+**Non-terminal order recovery (2026-07-14):** `SKIPPED_NO_MARK_PRICE` is non-terminal; `same_action` idempotency no longer permanently blocks when last order was non-terminal. Mark resolution priority: open position → `live_signals.csv` (≤3600s) → yfinance/cache → accounting position. HD recovered: **1 EXECUTED BUY** @ **$337.11** (`live_signals.csv`); exactly **1 trade**; second cycle **NO_CHANGE** (no duplicate). Retry cooldown: one attempt per cycle (`SKIPPED_RETRY_COOLDOWN`). Terminal: `EXECUTED`, `NO_CHANGE`. Non-terminal: `SKIPPED_NO_MARK_PRICE`, `SKIPPED_NO_POSITION`, `SKIPPED_SWITCH_NOT_AUTHORIZED`, `BLOCKED_FAKE_PROFIT_RISK`.
+
+**Upstream attrition conclusion (2026-07-14):** 25 opportunities → 6 actionable (24%). Largest upstream kills: weak/no-signal (8), held-winner HOLD bias (6 via growth), knowledge rules (2 STRONG BUY: DIA/AMAT). Prior `policy_skip EV +238` claim **INVALID** (clean net $0.75). Confidence-threshold near-miss challenger for DIA **rejected** (fails multi-ticker). No production patch applied.
 
 **SSOT boundaries (do not merge):**
 
@@ -47,9 +52,9 @@ Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_P
 
 ---
 
-## Current state (2026-07-10)
+## Current state (2026-07-14)
 
-- **Operational consistency closed** — `full-paper-cycle` refreshes accounting, PPG, APPE, GII, protect, infra before PDE/DPE chain
+- **Non-terminal order recovery closed** — `tae_paper_execution.py` reconciles `processed_decision_ids` after non-terminal skips; controlled retry when fresh mark exists
 - **Morning audit READY** — dual CANONICAL / PAPER VALIDATION sections; no mixed SSOT
 - **PAPER profit integrity guard** — `validation_capital_base` = $30,000; synthetic fill contamination = 0
 - **Capital base CONFIRMED** — virtual $10k DEPOSIT excluded; effective contributed capital $30,000

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -617,7 +618,14 @@ class TestCapitalBaseDefectFix(unittest.TestCase):
             "expected_profit_delta": 10.0,
             "evidence": "test",
         }
-        order = pe.execute_decision(decision, portfolio, accounting=None, all_decisions=[decision])
+        with mock.patch.object(pe, "resolve_mark_price", return_value={
+            "price": 0.0,
+            "source": "UNAVAILABLE",
+            "timestamp": None,
+            "freshness": "UNAVAILABLE",
+            "attempts": [],
+        }):
+            order = pe.execute_decision(decision, portfolio, accounting=None, all_decisions=[decision])
         self.assertEqual(order["status"], "SKIPPED_NO_MARK_PRICE")
         self.assertFalse(order["is_trade"])
         self.assertEqual(portfolio["cash"], 5000.0)
@@ -707,19 +715,26 @@ class TestProfitIntegrityGuard(unittest.TestCase):
         self.assertTrue(
             pe.is_suspicious_synthetic_fill_price(100.0, "DIA", pos=None, decision={}, accounting=None)
         )
-        order = pe.execute_decision(
-            {
-                "decision_id": "PDEC-DIA-X",
-                "ticker": "DIA",
-                "action": "BUY_PAPER",
-                "confidence": 0.8,
-                "portfolio_snapshot": {"current_price": 100.0},
-                "evidence": "test",
-            },
-            {"cash": 5000.0, "realized_pnl": 0.0, "positions": {}},
-            accounting=None,
-            all_decisions=[],
-        )
+        with mock.patch.object(pe, "resolve_mark_price", return_value={
+            "price": 100.0,
+            "source": "decision_portfolio_snapshot",
+            "timestamp": None,
+            "freshness": "STALE",
+            "attempts": [],
+        }):
+            order = pe.execute_decision(
+                {
+                    "decision_id": "PDEC-ZZZ-001",
+                    "ticker": "ZZZNOTREAL",
+                    "action": "BUY_PAPER",
+                    "confidence": 0.8,
+                    "portfolio_snapshot": {"current_price": 100.0},
+                    "evidence": "test",
+                },
+                {"cash": 5000.0, "realized_pnl": 0.0, "positions": {}},
+                accounting=None,
+                all_decisions=[],
+            )
         self.assertEqual(order["status"], "BLOCKED_FAKE_PROFIT_RISK")
 
     def test_corrupt_avg_price_detected_before_validation(self) -> None:
@@ -793,6 +808,152 @@ class TestProfitIntegrityGuard(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["verdict"], "PAPER_PROFIT_INTEGRITY_CLOSED")
         self.assertAlmostEqual(result["metrics"]["profit_vs_capital_base"], -25160.72, places=1)
+
+
+class TestNonTerminalOrderRecovery(unittest.TestCase):
+    def test_executed_same_action_does_not_reexecute(self) -> None:
+        processed = {"PDEC-AAPL-001"}
+        last_orders = {
+            "PDEC-AAPL-001": {
+                "action": "PROTECT_PAPER",
+                "status": "EXECUTED",
+                "executed": True,
+            }
+        }
+        ok, reason = pe.should_execute_decision(
+            "PDEC-AAPL-001", "PROTECT_PAPER", processed=processed, last_orders=last_orders
+        )
+        self.assertFalse(ok)
+        self.assertEqual(reason, "already_processed_same_action")
+
+    def test_skipped_no_mark_is_non_terminal(self) -> None:
+        self.assertFalse(pe.is_terminal_order_status("SKIPPED_NO_MARK_PRICE"))
+        self.assertTrue(pe.is_terminal_order_status("EXECUTED", executed=True))
+
+    def test_reconcile_drops_non_terminal_from_processed(self) -> None:
+        processed = {"PDEC-HD-0010"}
+        last_orders = {"PDEC-HD-0010": {"status": "SKIPPED_NO_MARK_PRICE", "action": "BUY_PAPER"}}
+        cleaned = pe.reconcile_processed_decision_ids(processed, last_orders)
+        self.assertNotIn("PDEC-HD-0010", cleaned)
+
+    def test_hd_buy_resolves_live_signal_price(self) -> None:
+        with mock.patch.object(pe, "SIGNALS_CSV", Path(__file__).parent / "live_signals.csv"):
+            if not (Path(__file__).parent / "live_signals.csv").is_file():
+                self.skipTest("live_signals.csv not present")
+            resolved = pe.resolve_mark_price("HD", None, {})
+            self.assertGreater(resolved["price"], 0)
+            self.assertEqual(resolved["source"], "live_signals.csv")
+
+    def test_retry_executes_when_mark_available(self) -> None:
+        portfolio = {"cash": 5000.0, "realized_pnl": 0.0, "positions": {}}
+        decision = {
+            "decision_id": "PDEC-HD-0010",
+            "ticker": "HD",
+            "action": "BUY_PAPER",
+            "confidence": 0.8,
+            "expected_profit_delta": 15.0,
+            "evidence": "retry buy",
+        }
+        with mock.patch.object(pe, "resolve_mark_price", return_value={
+            "price": 337.11,
+            "source": "live_signals.csv",
+            "timestamp": "2026-07-14T02:28:53",
+            "freshness": "FRESH",
+            "attempts": [],
+        }):
+            order = pe.execute_decision(decision, portfolio, accounting=None, all_decisions=[decision])
+        self.assertEqual(order["status"], "EXECUTED")
+        self.assertTrue(order["is_trade"])
+        self.assertAlmostEqual(order["fill_price"], 337.11, places=2)
+        self.assertIn("HD", portfolio["positions"])
+
+    def test_retry_without_mark_does_not_mutate_portfolio(self) -> None:
+        portfolio = {"cash": 5000.0, "realized_pnl": 0.0, "positions": {}}
+        cash_before = portfolio["cash"]
+        decision = {
+            "decision_id": "PDEC-NEW-002",
+            "ticker": "NEWCO",
+            "action": "BUY_PAPER",
+            "confidence": 0.8,
+            "evidence": "retry",
+        }
+        with mock.patch.object(pe, "resolve_mark_price", return_value={
+            "price": 0.0,
+            "source": "UNAVAILABLE",
+            "timestamp": None,
+            "freshness": "UNAVAILABLE",
+            "attempts": [],
+        }):
+            order = pe.execute_decision(decision, portfolio, accounting=None, all_decisions=[decision])
+        self.assertEqual(order["status"], "SKIPPED_NO_MARK_PRICE")
+        self.assertEqual(portfolio["cash"], cash_before)
+        self.assertEqual(order["order_classification"], "NON_TERMINAL")
+
+    def test_retry_cooldown_blocks_second_attempt_same_cycle(self) -> None:
+        cycle_ts = datetime(2026, 7, 14, 1, 0, 0, tzinfo=timezone.utc)
+        last_orders = {
+            "PDEC-HD-0010": {
+                "timestamp": "2026-07-14T01:00:05+00:00",
+                "status": "SKIPPED_NO_MARK_PRICE",
+                "action": "BUY_PAPER",
+            }
+        }
+        ok, reason = pe.should_execute_decision(
+            "PDEC-HD-0010",
+            "BUY_PAPER",
+            processed={"PDEC-HD-0010"},
+            last_orders=last_orders,
+            cycle_ts=cycle_ts,
+            cycle_orders={"PDEC-HD-0010": last_orders["PDEC-HD-0010"]},
+        )
+        self.assertFalse(ok)
+        self.assertEqual(reason, "retry_cooldown_active")
+
+    def test_successful_retry_becomes_terminal(self) -> None:
+        order = {
+            "status": "EXECUTED",
+            "executed": True,
+            "is_trade": True,
+        }
+        self.assertTrue(pe.is_terminal_order_status(order["status"], executed=order["executed"], is_trade=order["is_trade"]))
+
+    def test_synthetic_price_still_blocked_with_signal(self) -> None:
+        with mock.patch.object(pe, "resolve_mark_price", return_value={
+            "price": 100.0,
+            "source": "decision_portfolio_snapshot",
+            "timestamp": None,
+            "freshness": "STALE",
+            "attempts": [],
+        }):
+            order = pe.execute_decision(
+                {
+                    "decision_id": "PDEC-ZZZ-001",
+                    "ticker": "ZZZNOTREAL",
+                    "action": "BUY_PAPER",
+                    "confidence": 0.8,
+                    "evidence": "test",
+                },
+                {"cash": 5000.0, "realized_pnl": 0.0, "positions": {}},
+                accounting=None,
+                all_decisions=[],
+            )
+        self.assertEqual(order["status"], "BLOCKED_FAKE_PROFIT_RISK")
+
+    def test_non_terminal_retry_allowed_after_skipped_mark(self) -> None:
+        processed = {"PDEC-HD-0010"}
+        last_orders = {
+            "PDEC-HD-0010": {"action": "BUY_PAPER", "status": "SKIPPED_NO_MARK_PRICE", "timestamp": "2026-07-10T07:07:35+00:00"}
+        }
+        ok, reason = pe.should_execute_decision(
+            "PDEC-HD-0010",
+            "BUY_PAPER",
+            processed=processed,
+            last_orders=last_orders,
+            cycle_ts=datetime(2026, 7, 14, 1, 0, 0, tzinfo=timezone.utc),
+            cycle_orders={},
+        )
+        self.assertTrue(ok)
+        self.assertTrue(reason.startswith("retry_after_non_terminal"))
 
 
 if __name__ == "__main__":

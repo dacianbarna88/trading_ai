@@ -56,6 +56,336 @@ PAPER_ACTIONS = frozenset(
     }
 )
 
+SIGNALS_CSV = Path("live_signals.csv")
+SIGNAL_PRICE_MAX_AGE_SECONDS = 3600.0
+RISK_PRICE_MAX_AGE_SECONDS = 45.0
+
+TERMINAL_ORDER_STATUSES = frozenset({"EXECUTED", "NO_CHANGE"})
+
+NON_TERMINAL_ORDER_STATUSES = frozenset(
+    {
+        "SKIPPED_NO_MARK_PRICE",
+        "SKIPPED_NO_POSITION",
+        "SKIPPED_SWITCH_NOT_AUTHORIZED",
+        "BLOCKED_FAKE_PROFIT_RISK",
+    }
+)
+
+
+def _parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+def is_terminal_order_status(status: str, *, executed: bool | None = None, is_trade: bool | None = None) -> bool:
+    st = _s(status).upper()
+    if st in TERMINAL_ORDER_STATUSES:
+        return True
+    if st in NON_TERMINAL_ORDER_STATUSES:
+        return False
+    if executed is True or is_trade is True:
+        return True
+    return st not in NON_TERMINAL_ORDER_STATUSES and st != ""
+
+
+def _load_signal_prices() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    if not SIGNALS_CSV.is_file():
+        return out
+    try:
+        import csv
+
+        with SIGNALS_CSV.open(encoding="utf-8", errors="replace") as handle:
+            for row in csv.DictReader(handle):
+                ticker = _s(row.get("Ticker")).upper()
+                if not ticker:
+                    continue
+                px = _f(row.get("Price"))
+                if px > 0:
+                    out[ticker] = {"price": px, "timestamp": _s(row.get("Time")), "signal": _s(row.get("Signal"))}
+    except OSError:
+        return out
+    return out
+
+
+def _signal_age_seconds(timestamp: str | None) -> float | None:
+    if not timestamp:
+        return None
+    text = timestamp.strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            dt = datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+            return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds())
+        except ValueError:
+            continue
+    return None
+
+
+def resolve_mark_price(
+    ticker: str,
+    accounting: dict[str, Any] | None,
+    decision: dict[str, Any],
+    pos: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Deterministic fill-price resolution — no synthetic fallback."""
+    ticker_u = _s(ticker).upper()
+    attempts: list[dict[str, Any]] = []
+
+    if pos and _f(pos.get("shares")) > 0:
+        px = _f(pos.get("current_price"))
+        if px > 0:
+            attempts.append({"source": "paper_position", "price": px, "fresh": True, "selected": True})
+            return {
+                "price": px,
+                "source": _s(pos.get("mark_source")) or "paper_position",
+                "timestamp": pos.get("mark_timestamp"),
+                "freshness": "FRESH",
+                "attempts": attempts,
+            }
+
+    signals = _load_signal_prices()
+    sig = signals.get(ticker_u) or {}
+    sig_px = _f(sig.get("price"))
+    sig_age = _signal_age_seconds(sig.get("timestamp"))
+    if sig_px > 0:
+        fresh = sig_age is not None and sig_age <= SIGNAL_PRICE_MAX_AGE_SECONDS
+        attempts.append(
+            {
+                "source": "live_signals.csv",
+                "price": sig_px,
+                "timestamp": sig.get("timestamp"),
+                "age_seconds": sig_age,
+                "fresh": fresh,
+                "selected": fresh,
+            }
+        )
+        if fresh:
+            return {
+                "price": sig_px,
+                "source": "live_signals.csv",
+                "timestamp": sig.get("timestamp"),
+                "freshness": "FRESH",
+                "attempts": attempts,
+            }
+
+    if pos:
+        px = _f(pos.get("current_price"))
+        mark_source = _s(pos.get("mark_source"))
+        mark_status = _s(pos.get("mark_status"))
+        if px > 0 and mark_status in {"LIVE", "DATA_OK", "FRESH"}:
+            attempts.append({"source": "paper_position_mtm", "price": px, "fresh": True, "selected": True})
+            return {
+                "price": px,
+                "source": mark_source or "paper_position_mtm",
+                "timestamp": pos.get("mark_timestamp"),
+                "freshness": "FRESH",
+                "attempts": attempts,
+            }
+        if px > 0:
+            attempts.append({"source": "paper_position_stale", "price": px, "fresh": False, "selected": False})
+
+    live_px, live_source, live_status = _fetch_ticker_price(ticker_u)
+    if live_px is not None and live_px > 0:
+        fresh = live_status in {"DATA_OK", "LIVE", "FRESH"}
+        attempts.append(
+            {
+                "source": live_source or "yfinance",
+                "price": live_px,
+                "status": live_status,
+                "fresh": fresh,
+                "selected": fresh,
+            }
+        )
+        if fresh:
+            return {
+                "price": live_px,
+                "source": live_source or "yfinance",
+                "timestamp": _now(),
+                "freshness": "FRESH",
+                "attempts": attempts,
+            }
+
+    for row in (accounting or {}).get("open_positions") or []:
+        if _s(row.get("ticker")).upper() != ticker_u:
+            continue
+        px = _f(row.get("current_price"))
+        if px > 0:
+            attempts.append({"source": "accounting_open_position", "price": px, "fresh": True, "selected": True})
+            return {
+                "price": px,
+                "source": "accounting_open_position",
+                "timestamp": (accounting or {}).get("generated_at"),
+                "freshness": "FRESH",
+                "attempts": attempts,
+            }
+
+    snap_px = _f((decision.get("portfolio_snapshot") or {}).get("current_price"))
+    if snap_px > 0:
+        attempts.append({"source": "decision_portfolio_snapshot", "price": snap_px, "fresh": False, "selected": False})
+
+    return {
+        "price": 0.0,
+        "source": "UNAVAILABLE",
+        "timestamp": None,
+        "freshness": "UNAVAILABLE",
+        "attempts": attempts,
+    }
+
+
+def reconcile_processed_decision_ids(
+    processed: set[str],
+    last_orders: dict[str, dict[str, Any]],
+) -> set[str]:
+    """Drop decision_ids whose last order ended non-terminal — allow recovery."""
+    cleaned = set(processed)
+    for did in list(cleaned):
+        last = last_orders.get(did) or {}
+        status = _s(last.get("status")).upper()
+        if status in NON_TERMINAL_ORDER_STATUSES:
+            cleaned.discard(did)
+    return cleaned
+
+
+def _retry_cooldown_active(
+    decision_id: str,
+    *,
+    last_orders: dict[str, dict[str, Any]],
+    cycle_ts: datetime | None,
+    cycle_orders: dict[str, dict[str, Any]],
+) -> bool:
+    if decision_id in cycle_orders:
+        return True
+    last = last_orders.get(decision_id) or {}
+    last_ts = _parse_ts(last.get("timestamp"))
+    if cycle_ts and last_ts and last_ts >= cycle_ts:
+        status = _s(last.get("status")).upper()
+        if status in {"SKIPPED_NO_MARK_PRICE", "SKIPPED_RETRY_COOLDOWN"}:
+            return True
+    return False
+
+
+def audit_mark_price_failures(*, tickers: list[str] | None = None) -> dict[str, Any]:
+    """Phase 1 audit — trace mark-price resolution for SKIPPED_NO_MARK_PRICE cases."""
+    accounting = load_json(ACCOUNTING_JSON) or {}
+    decisions_doc = load_json(DECISIONS_JSON) or {}
+    portfolio = load_json(PORTFOLIO_JSON) or {}
+    orders = load_jsonl(ORDERS_JSONL)
+    signals = _load_signal_prices()
+
+    if tickers is None:
+        tickers = sorted(
+            {
+                _s(o.get("ticker")).upper()
+                for o in orders
+                if _s(o.get("status")).upper() == "SKIPPED_NO_MARK_PRICE"
+            }
+        )
+        if "HD" not in tickers:
+            tickers = ["HD"] + tickers
+
+    cases: list[dict[str, Any]] = []
+    for ticker in tickers:
+        ticker_u = _s(ticker).upper()
+        pos = (portfolio.get("positions") or {}).get(ticker_u)
+        decision = next(
+            (d for d in (decisions_doc.get("decisions") or []) if _s(d.get("ticker")).upper() == ticker_u),
+            {"ticker": ticker_u},
+        )
+        resolved = resolve_mark_price(ticker_u, accounting, decision, pos=pos)
+        sig = signals.get(ticker_u) or {}
+        acct_open = any(
+            _s(r.get("ticker")).upper() == ticker_u for r in (accounting.get("open_positions") or [])
+        )
+        last_skips = [
+            o
+            for o in orders
+            if _s(o.get("ticker")).upper() == ticker_u and _s(o.get("status")).upper() == "SKIPPED_NO_MARK_PRICE"
+        ]
+        cases.append(
+            {
+                "ticker": ticker_u,
+                "ticker_normalized": ticker_u,
+                "market_suffix": "none" if "." not in ticker_u else ticker_u.rsplit(".", 1)[-1],
+                "session": "unknown",
+                "price_sources_attempted": resolved.get("attempts") or [],
+                "failure_reason": "no_fresh_mark_in_legacy_fill_path" if resolved["price"] <= 0 else "resolved_now",
+                "live_signal_price": _f(sig.get("price")),
+                "live_signal_timestamp": sig.get("timestamp"),
+                "canonical_open_position": acct_open,
+                "valid_mark_exists_elsewhere": resolved["price"] > 0,
+                "symbol_mapping_issue": False,
+                "temporary_unavailability": resolved["price"] <= 0 and _f(sig.get("price")) <= 0,
+                "market_closed": False,
+                "resolved_price": resolved["price"],
+                "resolved_source": resolved["source"],
+                "resolved_freshness": resolved["freshness"],
+                "skip_order_count": len(last_skips),
+                "last_skip_at": (last_skips[-1].get("timestamp") if last_skips else None),
+            }
+        )
+
+    return {
+        "schema": "tae_non_terminal_order_recovery_audit",
+        "generated_at": _now(),
+        "root_cause_summary": (
+            "fill_price_for_position consulted only accounting/decision snapshot; "
+            "live_signals.csv and market-data layer were not used for new-entry BUY fills."
+        ),
+        "cases": cases,
+    }
+
+
+def write_non_terminal_recovery_audit() -> dict[str, Any]:
+    payload = audit_mark_price_failures()
+    report_md = Path("TAE_NON_TERMINAL_ORDER_RECOVERY_AUDIT.md")
+    report_json = Path("tae_non_terminal_order_recovery_audit.json")
+    lines = [
+        "# TAE Non-Terminal Order Recovery Audit",
+        "",
+        f"**Generated:** {payload['generated_at'][:19]}",
+        "",
+        "## Root cause",
+        "",
+        payload["root_cause_summary"],
+        "",
+        "## Mark-price failure cases",
+        "",
+    ]
+    for case in payload["cases"]:
+        lines.extend(
+            [
+                f"### {case['ticker']}",
+                "",
+                f"- Live signal price: **{case['live_signal_price']}** @ {case.get('live_signal_timestamp')}",
+                f"- Resolved now: **{case['resolved_price']}** ({case['resolved_source']}, {case['resolved_freshness']})",
+                f"- Canonical open position: **{case['canonical_open_position']}**",
+                f"- Valid mark elsewhere: **{case['valid_mark_exists_elsewhere']}**",
+                f"- Failure reason: {case['failure_reason']}",
+                f"- Skip orders: {case['skip_order_count']}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Terminal vs non-terminal",
+            "",
+            f"- **Terminal:** {', '.join(sorted(TERMINAL_ORDER_STATUSES))}",
+            f"- **Non-terminal:** {', '.join(sorted(NON_TERMINAL_ORDER_STATUSES))}",
+            "",
+        ]
+    )
+    report_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    report_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return payload
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -173,16 +503,8 @@ def _position_snapshot(pos: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def price_for_ticker(ticker: str, accounting: dict[str, Any] | None, decision: dict[str, Any]) -> float:
-    for row in (accounting or {}).get("open_positions") or []:
-        if _s(row.get("ticker")).upper() == ticker:
-            px = _f(row.get("current_price"))
-            if px > 0:
-                return px
-    pos = (decision.get("portfolio_snapshot") or {})
-    px = _f(pos.get("current_price"))
-    if px > 0:
-        return px
-    return 0.0
+    resolved = resolve_mark_price(ticker, accounting, decision)
+    return _f(resolved.get("price"))
 
 
 def fill_price_for_position(
@@ -192,18 +514,13 @@ def fill_price_for_position(
     decision: dict[str, Any],
 ) -> float:
     """MTM/current price for fills — never use avg_price or synthetic defaults as fill."""
-    if pos:
-        px = _f(pos.get("current_price"))
-        if px > 0:
-            return px
-    px = price_for_ticker(ticker, accounting, decision)
+    resolved = resolve_mark_price(ticker, accounting, decision, pos=pos)
+    px = _f(resolved.get("price"))
     if px > 0 and pos:
         avg = _f(pos.get("avg_price"))
         if avg > 0 and abs(px - avg) < 0.0001:
             px = 0.0
-    if px > 0:
-        return px
-    return 0.0
+    return px if px > 0 else 0.0
 
 
 def _canonical_account_value(accounting: dict[str, Any] | None) -> float:
@@ -796,13 +1113,21 @@ def execute_decision(
 
     positions = portfolio.setdefault("positions", {})
     pos_ref = positions.get(ticker)
-    fill_price = fill_price_for_position(pos_ref, ticker, accounting, decision)
+    mark = resolve_mark_price(ticker, accounting, decision, pos=pos_ref)
+    fill_price = _f(mark.get("price"))
     price = fill_price
     if fill_price <= 0 and _has_open_position(_position_snapshot(pos_ref)):
         fallback = _f((_position_snapshot(pos_ref)).get("current_price"))
         if fallback > 0:
             fill_price = fallback
             price = fallback
+            mark = {
+                "price": fallback,
+                "source": "position_fallback",
+                "timestamp": pos_ref.get("mark_timestamp") if pos_ref else None,
+                "freshness": "FRESH",
+                "attempts": [],
+            }
 
     cash_before = round(_f(portfolio.get("cash")), 4)
     before = _position_snapshot(positions.get(ticker))
@@ -1006,6 +1331,11 @@ def execute_decision(
         "mode": MODE,
         "broker_executed": False,
         "live_money": False,
+        "mark_source": mark.get("source"),
+        "mark_timestamp": mark.get("timestamp"),
+        "mark_freshness": mark.get("freshness"),
+        "mark_resolution_attempts": mark.get("attempts") or [],
+        "order_classification": "TERMINAL" if is_terminal_order_status(status, executed=executed, is_trade=is_trade) else "NON_TERMINAL",
     }
     return order
 
@@ -1480,6 +1810,8 @@ def should_execute_decision(
     *,
     processed: set[str],
     last_orders: dict[str, dict[str, Any]],
+    cycle_ts: datetime | None = None,
+    cycle_orders: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[bool, str]:
     if not decision_id:
         return False, "missing decision_id"
@@ -1488,6 +1820,16 @@ def should_execute_decision(
     prior_action = _s((last_orders.get(decision_id) or {}).get("action")).upper()
     if prior_action and prior_action != action:
         return True, f"action_changed:{prior_action}->{action}"
+    last_status = _s((last_orders.get(decision_id) or {}).get("status")).upper()
+    if last_status in NON_TERMINAL_ORDER_STATUSES:
+        if _retry_cooldown_active(
+            decision_id,
+            last_orders=last_orders,
+            cycle_ts=cycle_ts,
+            cycle_orders=cycle_orders or {},
+        ):
+            return False, "retry_cooldown_active"
+        return True, f"retry_after_non_terminal:{last_status}"
     return False, "already_processed_same_action"
 
 
@@ -1542,6 +1884,9 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         }
     processed = set(portfolio.get("processed_decision_ids") or [])
     last_orders = load_orders_by_decision(ORDERS_JSONL)
+    processed = reconcile_processed_decision_ids(processed, last_orders)
+    cycle_ts = _parse_ts(decisions_doc.get("generated_at"))
+    cycle_orders: dict[str, dict[str, Any]] = {}
 
     removed_legacy_trades = sanitize_trades_file(TRADES_JSONL)
     before_snapshot = _portfolio_snapshot(portfolio)
@@ -1553,18 +1898,52 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
     skipped_same_action = 0
     skipped_switch = 0
     accepted_switch = 0
+    non_terminal_retries = 0
+    retry_cooldown_blocks = 0
+
+    retry_state: dict[str, Any] = dict(portfolio.get("non_terminal_retry_state") or {})
 
     for decision in decisions:
         decision_id = _s(decision.get("decision_id"))
         action = _s(decision.get("action")).upper()
         ok, reason = should_execute_decision(
-            decision_id, action, processed=processed, last_orders=last_orders
+            decision_id,
+            action,
+            processed=processed,
+            last_orders=last_orders,
+            cycle_ts=cycle_ts,
+            cycle_orders=cycle_orders,
         )
         if not ok:
-            skipped_same_action += 1
+            if reason == "retry_cooldown_active":
+                retry_cooldown_blocks += 1
+                last = last_orders.get(decision_id) or {}
+                order = {
+                    "timestamp": _now(),
+                    "decision_id": decision_id,
+                    "ticker": _s(decision.get("ticker")).upper(),
+                    "action": action,
+                    "status": "SKIPPED_RETRY_COOLDOWN",
+                    "executed": False,
+                    "is_trade": False,
+                    "execution_reason": reason,
+                    "previous_status": last.get("status"),
+                    "retry_count": _f((retry_state.get(decision_id) or {}).get("retry_count")),
+                    "order_classification": "NON_TERMINAL",
+                    "mode": MODE,
+                    "broker_executed": False,
+                    "live_money": False,
+                }
+                orders.append(order)
+                append_jsonl(ORDERS_JSONL, order)
+                cycle_orders[decision_id] = order
+            else:
+                skipped_same_action += 1
             continue
         if action not in PAPER_ACTIONS:
             continue
+        if reason.startswith("retry_after_non_terminal"):
+            non_terminal_retries += 1
         if reason.startswith("action_changed"):
             hard_override = bool((decision.get("hard_risk_discipline") or {}).get("override"))
             switch_ok = bool(decision.get("decision_switch_authorized"))
@@ -1602,14 +1981,31 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
             execution_reason=reason,
         )
         order["execution_reason"] = reason
+        if reason.startswith("retry_after_non_terminal"):
+            prev = last_orders.get(decision_id) or {}
+            order["previous_status"] = prev.get("status")
+            entry = retry_state.setdefault(decision_id, {"retry_count": 0})
+            entry["retry_count"] = int(_f(entry.get("retry_count"))) + 1
+            entry["last_status"] = order.get("status")
+            entry["last_retry_at"] = order.get("timestamp")
+            entry["retry_reason"] = reason
+            entry["mark_source"] = order.get("mark_source")
+            entry["mark_timestamp"] = order.get("mark_timestamp")
+            entry["classification"] = order.get("order_classification")
         orders.append(order)
         append_jsonl(ORDERS_JSONL, order)
+        cycle_orders[decision_id] = order
         if order.get("is_trade"):
             trade = {**order, "record_type": "paper_trade", "shares": order.get("fill_shares")}
             append_jsonl(TRADES_JSONL, trade)
             trades_written += 1
         action_counts[action] = action_counts.get(action, 0) + 1
-        processed.add(decision_id)
+        if is_terminal_order_status(
+            _s(order.get("status")),
+            executed=bool(order.get("executed")),
+            is_trade=bool(order.get("is_trade")),
+        ):
+            processed.add(decision_id)
         last_orders[decision_id] = order
 
     after_snapshot = _portfolio_snapshot(portfolio)
@@ -1628,6 +2024,7 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         validation["ok"] = False
 
     portfolio["processed_decision_ids"] = sorted(processed)
+    portfolio["non_terminal_retry_state"] = retry_state
     portfolio["last_execution_at"] = _now()
     portfolio["broker_executed"] = False
     portfolio["live_money"] = False
@@ -1657,6 +2054,8 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
         "skipped_same_action": skipped_same_action,
         "skipped_switch_not_authorized": skipped_switch,
         "accepted_action_switches": accepted_switch,
+        "non_terminal_retries": non_terminal_retries,
+        "retry_cooldown_blocks": retry_cooldown_blocks,
     }
 
     post_integrity = check_paper_profit_integrity(
