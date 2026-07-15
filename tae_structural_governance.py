@@ -712,6 +712,23 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     if not r_exec["ok"]:
         exit_code = r_exec["exit_code"] or 1
 
+    # Observe Validation → Capital Allocation on existing decisions/orders (no new engine)
+    print("\n>>> [capital_challenger_observe] update_capital_challenger_registry", flush=True)
+    from tae_paper_decision_engine import update_capital_challenger_registry
+
+    challenger_doc = update_capital_challenger_registry()
+    cli_steps.append(
+        {
+            "step": "capital_challenger_observe",
+            "ok": True,
+            "exit_code": 0,
+            "authorized_count": challenger_doc.get("authorized_count"),
+            "executed_trade_count": challenger_doc.get("executed_trade_count"),
+            "capital_moved_abs_usd": challenger_doc.get("capital_moved_abs_usd"),
+            "output": "runtime_outputs/learning_to_profit/capital_challengers.json",
+        }
+    )
+
     # Rank 12 — MARK-TO-MARKET
     r_mtm = run_cli_step("paper_mark_to_market", [py, "tae.py", "paper-mark-to-market"], cwd=root)
     cli_steps.append(r_mtm)

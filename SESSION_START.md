@@ -8,9 +8,9 @@
 
 | Item | Value |
 |------|--------|
-| **Current approved milestone** | **Full Paper Cycle Hang Closure** — `FULL_PAPER_CYCLE_HANG_CLOSED` |
+| **Current approved milestone** | **Validation → Capital Allocation Closure** — `VALIDATION_TO_CAPITAL_ALLOCATION_CLOSED` |
 | **Branch** | `cursor/x12b-legacy-archive-hotfix` |
-| **Base commits** | `7c4f6a0` constitutional evolution loop · `4cd669b` Hard Risk sync |
+| **Base commits** | capital allocation closure · `c5ce77c` hang fix · `7c4f6a0` constitutional evolution |
 | **Canonical live runtime** | `live_bot.py` |
 | **TAE PAPER brain** | `tae_paper_decision_engine.py` (PDE) — single final action per ticker |
 | **TAE PAPER integration** | Structural governance 19-step → `full-paper-cycle` |
@@ -32,6 +32,8 @@ python3 tae.py opportunity-attrition   # upstream attrition trace + death map (r
 ```
 
 Expected morning-audit: **READY** · operational contract all OK · `PAPER_PROFIT_INTEGRITY: PASS` · `validation_capital_base: 30000`
+
+**Validation → Capital Allocation closure (2026-07-15):** PROMISING experiments no longer stop at report-only boost. Eligibility classifies ACTIONABLE / PROTECTION_ONLY / PORTFOLIO_POLICY / NOT_EXECUTABLE / INSUFFICIENT_EVIDENCE. `paper_experiment_action` maps to existing PDE verbs (`PAPER_TRAILING_PROTECT_TRIM`→`REDUCE_PAPER`). Adaptive weights consume actionable `experiment_results.json`. Validated cycle executed 4 REDUCE challengers (AAPL/PG/GE/HSBA.L); AMAT/MU Hard Risk blocked. Artifact: `TAE_VALIDATION_TO_CAPITAL_ALLOCATION_AUDIT.md`.
 
 **Full-paper-cycle hang fix (2026-07-15):** Output no longer stops silently after the governance header. Rank-1 `gate_data_validity` → `run_historical_runtime_refresh()` emits `[START]`/`[END]`/`[FAIL]`/`[TIMEOUT]` per source/script. CLI invokes `python3 -u`. `run_cli_step` bounded at 600s. Root cause was silent multi-minute historical refresh subprocesses (not recursion). Constitutional evolution loop preserved. Audit: `TAE_FULL_PAPER_CYCLE_HANG_AUDIT.md`.
 

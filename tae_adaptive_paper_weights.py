@@ -135,6 +135,66 @@ def aggregate_validation_by_action(validation: dict[str, Any] | None) -> dict[st
     return by_action
 
 
+def map_experiment_action_for_weights(paper_experiment_action: str) -> str | None:
+    """Reuse PDE mapping without importing PDE (avoid cycles)."""
+    mapping = {
+        "PAPER_TRAILING_PROTECT_TRIM": "REDUCE_PAPER",
+        "PAPER_LIFECYCLE_TRIM": "REDUCE_PAPER",
+        "PAPER_PORTFOLIO_PROTECT": "PROTECT_PAPER",
+        "PAPER_REALLOCATION": "ROTATE_PAPER",
+        "PAPER_ROTATION_REDUCE": "ROTATE_PAPER",
+        "PAPER_LIFECYCLE_HOLD": "HOLD_PAPER",
+    }
+    return mapping.get(_s(paper_experiment_action).upper())
+
+
+def aggregate_experiments_by_action(experiments_doc: dict[str, Any] | None) -> dict[str, dict[str, int]]:
+    """Only reproducible/actionable experiment rows affect weights — not raw portfolio maintenance."""
+    by_action: dict[str, dict[str, int]] = {a: {} for a in PAPER_ACTIONS}
+    for row in (experiments_doc or {}).get("experiments") or []:
+        verdict = _s(row.get("verdict")).upper()
+        if verdict not in {"PROMISING", "CONTINUE_TESTING", "REJECT"}:
+            continue
+        paper_action = _s(row.get("paper_experiment_action")).upper()
+        if paper_action in {"PAPER_DPE_PHILOSOPHY_WEIGHT", "PAPER_MAINTENANCE_REFRESH", "PAPER_DECISION_REPLAY", "PAPER_CONFIDENCE_SHADOW", "PAPER_PATTERN_DISCOVERY"}:
+            continue
+        mapped = map_experiment_action_for_weights(paper_action)
+        if not mapped:
+            continue
+        deltas = row.get("deltas") or {}
+        profit_delta = _f(deltas.get("expected_profit_delta_usd"))
+        if verdict == "PROMISING" and profit_delta < 1.0:
+            continue
+        # Require ticker support for actionable weight influence
+        tickers = row.get("affected_tickers") or []
+        if not tickers:
+            continue
+        counts = by_action[mapped]
+        counts[verdict] = counts.get(verdict, 0) + 1
+    return by_action
+
+
+def experiment_attribution_rows(experiments_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in (experiments_doc or {}).get("experiments") or []:
+        mapped = map_experiment_action_for_weights(_s(row.get("paper_experiment_action")))
+        if not mapped:
+            continue
+        if _s(row.get("verdict")).upper() not in {"PROMISING", "CONTINUE_TESTING", "REJECT"}:
+            continue
+        if not (row.get("affected_tickers") or []):
+            continue
+        rows.append(
+            {
+                "experiment_id": _s(row.get("hypothesis_id")),
+                "action": mapped,
+                "verdict": _s(row.get("verdict")).upper(),
+                "profit_delta": _f((row.get("deltas") or {}).get("expected_profit_delta_usd")),
+            }
+        )
+    return rows
+
+
 def aggregate_ticker_validation(validation: dict[str, Any] | None) -> dict[str, dict[str, dict[str, int]]]:
     out: dict[str, dict[str, dict[str, int]]] = {}
     for row in (validation or {}).get("results") or []:
@@ -218,6 +278,8 @@ def compute_action_weight(
     attribution_doc: dict[str, Any] | None,
     global_risk_adj: float,
     evidence_sources: list[str],
+    experiment_counts: dict[str, int] | None = None,
+    experiment_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     raw_delta = 0.0
     reasons: list[str] = []
@@ -232,6 +294,24 @@ def compute_action_weight(
             contrib = base * (count / total)
             raw_delta += contrib
             reasons.append(f"{verdict}×{count} → {contrib:+.4f}")
+
+    exp_counts = experiment_counts or {}
+    exp_total = sum(exp_counts.values())
+    if exp_total:
+        evidence_sources.append(str(EXPERIMENTS_JSON))
+        for verdict, count in exp_counts.items():
+            base = VERDICT_DELTA.get(verdict, 0.0) * 0.75  # capped relative to decision validation
+            if base == 0.0:
+                continue
+            contrib = clamp_delta(base * (count / exp_total))
+            raw_delta += contrib
+            matched_ids = [
+                r.get("experiment_id")
+                for r in (experiment_rows or [])
+                if r.get("action") == action and r.get("verdict") == verdict
+            ]
+            id_note = f" [{','.join(matched_ids[:3])}]" if matched_ids else ""
+            reasons.append(f"experiment {verdict}×{count}{id_note} → {contrib:+.4f}")
 
     hint_delta, hint_reason = hints_action_delta(hints, action)
     if hint_delta:
@@ -340,6 +420,7 @@ def write_report(doc: dict[str, Any]) -> None:
             "## Evidence sources",
             "",
             f"- Validation: `{VALIDATION_JSON}`",
+            f"- Experiment results (actionable only): `{EXPERIMENTS_JSON}`",
             f"- Longitudinal hints: `{ADAPTATION_HINTS_JSON}`",
             f"- Longitudinal knowledge: `{LONGITUDINAL_KNOWLEDGE_JSON}`",
             f"- Paper execution attribution: `{RULE_ATTRIBUTION_JSON}`",
@@ -366,10 +447,13 @@ def run_adaptive_paper_weights(*, write_report_flag: bool = True) -> dict[str, A
     memory_index = load_json(MEMORY_INDEX_JSON)
     knowledge_doc = load_json(LONGITUDINAL_KNOWLEDGE_JSON)
     attribution_doc = load_json(RULE_ATTRIBUTION_JSON)
+    experiments_doc = load_json(EXPERIMENTS_JSON)
 
     previous = load_previous_weights()
     by_action = aggregate_validation_by_action(validation)
     by_ticker = aggregate_ticker_validation(validation)
+    by_experiment = aggregate_experiments_by_action(experiments_doc)
+    experiment_rows = experiment_attribution_rows(experiments_doc)
     global_risk_adj, risk_reason = confidence_evolution_risk_adjustment(confidence)
 
     weights: dict[str, dict[str, Any]] = {}
@@ -390,6 +474,8 @@ def run_adaptive_paper_weights(*, write_report_flag: bool = True) -> dict[str, A
             attribution_doc=attribution_doc,
             global_risk_adj=global_risk_adj,
             evidence_sources=list(base_sources),
+            experiment_counts=by_experiment.get(action) or {},
+            experiment_rows=[r for r in experiment_rows if r.get("action") == action],
         )
         if risk_reason and action == "BUY_PAPER":
             row["reason"] = f"{row['reason']}; {risk_reason}" if row.get("reason") else risk_reason
@@ -412,6 +498,8 @@ def run_adaptive_paper_weights(*, write_report_flag: bool = True) -> dict[str, A
         "longitudinal_records": _f((memory_index or {}).get("total_records")),
         "validation_decisions": _f((validation or {}).get("decisions_consumed")),
         "paper_execution_rules": len((attribution_doc or {}).get("rules") or {}),
+        "experiment_actionable_rows": len(experiment_rows),
+        "experiment_weight_counts": by_experiment,
         "weights": weights,
         "ticker_weights": ticker_weights,
     }

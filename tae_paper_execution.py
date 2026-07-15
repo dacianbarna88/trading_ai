@@ -919,6 +919,13 @@ def extract_rule_sources(decision: dict[str, Any]) -> list[str]:
         rid = _s(hyp.get("hypothesis_id"))
         if rid:
             rules.append(rid)
+    exp_id = _s(decision.get("experiment_id"))
+    if exp_id and exp_id not in rules:
+        rules.append(exp_id)
+    for row in (decision.get("experiment_capital_evidence") or {}).get("authorized_challengers") or []:
+        rid = _s(row.get("experiment_id"))
+        if rid and rid not in rules:
+            rules.append(rid)
     ke = decision.get("knowledge_evidence") or {}
     for rid in ke.get("rules_applied") or []:
         if rid:

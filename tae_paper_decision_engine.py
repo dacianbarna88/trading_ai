@@ -1455,27 +1455,346 @@ def ticker_universe(ctx: dict[str, Any]) -> list[str]:
     return sorted(universe)
 
 
+# paper_experiment_action → existing PDE action only (None = no safe executable mapping)
+EXPERIMENT_ACTION_MAP: dict[str, str | None] = {
+    "PAPER_TRAILING_PROTECT_TRIM": "REDUCE_PAPER",  # bounded trim via existing REDUCE path
+    "PAPER_LIFECYCLE_TRIM": "REDUCE_PAPER",
+    "PAPER_PORTFOLIO_PROTECT": "PROTECT_PAPER",
+    "PAPER_REALLOCATION": "ROTATE_PAPER",  # held source required; no invented BUY
+    "PAPER_ROTATION_REDUCE": "ROTATE_PAPER",
+    "PAPER_LIFECYCLE_HOLD": "HOLD_PAPER",
+    "PAPER_DPE_PHILOSOPHY_WEIGHT": None,  # portfolio policy / philosophy only
+    "PAPER_MAINTENANCE_REFRESH": None,
+    "PAPER_PATTERN_DISCOVERY": None,
+    "PAPER_DECISION_REPLAY": None,
+    "PAPER_CONFIDENCE_SHADOW": None,
+}
+
+CHALLENGER_MAX_ALLOCATION_USD = 400.0
+CHALLENGER_MAX_TRIM_FRACTION = 0.10
+CHALLENGER_ACTION_SCORE_DELTA = 32.0
+MIN_REPRODUCIBLE_PROFIT_DELTA = 1.0
+CAPITAL_CHALLENGERS_JSON = LTP_DIR / "capital_challengers.json"
+
+
+def map_paper_experiment_action(paper_experiment_action: str) -> str | None:
+    """Map LTB experiment action strings onto existing PDE actions only."""
+    return EXPERIMENT_ACTION_MAP.get(_s(paper_experiment_action).upper())
+
+
 def experiment_boost(ticker: str, ctx: dict[str, Any]) -> tuple[float, list[str]]:
-    exps = list(ctx.get("exp_by_ticker", {}).get(ticker.upper(), []))
-    exps.extend(ctx.get("exp_by_ticker", {}).get("_PORTFOLIO", []))
-    boost = 0.0
+    """Legacy aggregate boost kept for callers/tests; prefer apply_experiment_capital_evidence."""
+    detail = apply_experiment_capital_evidence(
+        ticker, {a: 0.0 for a in PAPER_ACTIONS}, [], ctx, apply_scores=False
+    )
+    return _f(detail.get("legacy_net_boost")), list(detail.get("notes") or [])
+
+
+def classify_experiment_capital_eligibility(
+    exp: dict[str, Any],
+    *,
+    ticker: str,
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """Classify one experiment for capital-allocation eligibility (no raw PROMISING auto-buy)."""
+    ticker_u = ticker.upper()
+    hid = _s(exp.get("hypothesis_id"))
+    verdict = _s(exp.get("verdict")).upper()
+    paper_action = _s(exp.get("paper_experiment_action")).upper()
+    hyp_type = _s(exp.get("hypothesis_type")).upper()
+    deltas = exp.get("deltas") or {}
+    profit_delta = _f(deltas.get("expected_profit_delta_usd"))
+    risk_delta = _f(deltas.get("risk_delta"))
+    cap_eff_delta = _f(deltas.get("capital_efficiency_delta"))
+    confidence = _f(exp.get("confidence"))
+    scoring = _s(exp.get("scoring_method"), "unknown")
+    mapped = map_paper_experiment_action(paper_action)
+
+    if ticker_u in {"_PORTFOLIO", "PORTFOLIO", ""} or hyp_type == "DPE_PHILOSOPHY" or paper_action == "PAPER_DPE_PHILOSOPHY_WEIGHT":
+        return {
+            "experiment_id": hid,
+            "experiment_verdict": verdict,
+            "hypothesis_type": hyp_type,
+            "paper_experiment_action": paper_action,
+            "experiment_action_mapping": None,
+            "capital_candidate_status": "PORTFOLIO_POLICY_CANDIDATE",
+            "allocation_authorized": False,
+            "allocation_block_reason": "philosophy/policy only — no direct trade mapping",
+            "proposed_allocation_usd": 0.0,
+            "expected_profit_delta": profit_delta,
+            "expected_risk_delta": risk_delta,
+            "capital_efficiency_delta": cap_eff_delta,
+            "evidence_quality": "SIMULATED",
+            "sample_size": int(
+                _f((((ctx.get("rule_lifecycle") or {}).get("rules") or {}).get(hid) or {}).get("total_decisions"))
+            ),
+            "confidence": confidence,
+            "scoring_method": scoring,
+            "held": False,
+            "hard_block": False,
+            "pre_entry_risk_level": None,
+            "rollback_condition": "n/a — policy bias only",
+            "challenger_lifecycle": "PORTFOLIO_POLICY_CANDIDATE",
+        }
+
+    held = paper_position_held(ticker_u, ctx)
+    pre_entry = evaluate_pre_entry_hard_risk_compatibility(ticker_u, ctx, held=held)
+    lifecycle = ((ctx.get("rule_lifecycle") or {}).get("rules") or {}).get(hid) or {}
+    sample_size = int(_f(lifecycle.get("total_decisions")))
+    pos = (ctx.get("paper_positions") or {}).get(ticker_u) or {}
+    shares = _f(pos.get("shares"))
+    mark = _f(pos.get("current_price") or pos.get("avg_price"))
+    cash = _f(((ctx.get("paper_portfolio") or {}).get("cash")) or ((ctx.get("accounting") or {}).get("cash_available")))
+    signal = (ctx.get("signals") or {}).get(ticker_u) or {}
+    signal_name = _s(signal.get("signal")).upper()
+    signal_score = _f(signal.get("score"))
+
+    block_reasons: list[str] = []
+    status = "NOT_EXECUTABLE"
+    allocation_authorized = False
+    proposed_allocation_usd = 0.0
+    rollback_condition = "realized_pnl < 0 OR drawdown increase without profit capture after next cycle"
+
+    if verdict != "PROMISING":
+        status = "INSUFFICIENT_EVIDENCE"
+        block_reasons.append(f"verdict={verdict or 'NONE'}")
+    elif paper_action in {"PAPER_DPE_PHILOSOPHY_WEIGHT"} or hyp_type == "DPE_PHILOSOPHY" or mapped is None and paper_action.startswith("PAPER_DPE"):
+        status = "PORTFOLIO_POLICY_CANDIDATE"
+        block_reasons.append("philosophy/policy only — no direct trade mapping")
+    elif mapped is None:
+        status = "NOT_EXECUTABLE"
+        block_reasons.append(f"no safe PDE mapping for {paper_action or 'EMPTY'}")
+    elif profit_delta < MIN_REPRODUCIBLE_PROFIT_DELTA:
+        status = "INSUFFICIENT_EVIDENCE"
+        block_reasons.append(f"profit_delta={profit_delta} below minimum")
+    elif scoring and "simulation" in scoring and confidence < 0.45:
+        status = "INSUFFICIENT_EVIDENCE"
+        block_reasons.append("low-confidence simulation evidence")
+    elif mapped in {"BUY_PAPER"} and pre_entry.get("hard_block"):
+        status = "NOT_EXECUTABLE"
+        block_reasons.append("hard_risk_incompatible_buy")
+        block_reasons.extend([_s(r) for r in (pre_entry.get("reasons") or [])[:3]])
+    elif mapped in {"BUY_PAPER", "ROTATE_PAPER"} and not held and mapped == "ROTATE_PAPER":
+        # REALLOCATION without held source cannot rotate; BUY not invented from PROMISING alone
+        if pre_entry.get("hard_block"):
+            status = "NOT_EXECUTABLE"
+            block_reasons.append("hard_risk_blocks_new_allocation")
+            block_reasons.extend([_s(r) for r in (pre_entry.get("reasons") or [])[:3]])
+        elif signal_score < 90.0 or "BUY" not in signal_name:
+            status = "NOT_EXECUTABLE"
+            block_reasons.append("reallocation lacks held source and strong BUY signal")
+        elif cash < 100.0:
+            status = "NOT_EXECUTABLE"
+            block_reasons.append("insufficient cash for challenger allocation")
+        else:
+            # Still no invented BUY mapping from PAPER_REALLOCATION when not held
+            status = "NOT_EXECUTABLE"
+            block_reasons.append("PAPER_REALLOCATION requires held source for ROTATE; no invented BUY")
+    elif mapped in {"REDUCE_PAPER", "PROTECT_PAPER", "ROTATE_PAPER", "SELL_PAPER"} and not held:
+        status = "NOT_EXECUTABLE"
+        block_reasons.append("no open paper position for protection/trim/rotate")
+    elif mapped == "HOLD_PAPER":
+        status = "PROTECTION_ONLY_CANDIDATE"
+        block_reasons.append("HOLD mapping is non-capital-moving")
+    elif mapped == "PROTECT_PAPER" and shares > 0 and mark <= 0:
+        status = "INSUFFICIENT_EVIDENCE"
+        block_reasons.append("invalid mark price")
+    elif mapped in {"REDUCE_PAPER", "PROTECT_PAPER"} and shares > 0:
+        # Prefer REDUCE for capital-moving challenger; PROTECT alone may be bookkeeping
+        if mapped == "PROTECT_PAPER":
+            status = "PROTECTION_ONLY_CANDIDATE"
+            block_reasons.append("PROTECT mapping may be protect-mode only unless risk trim triggers")
+        else:
+            status = "ACTIONABLE_CAPITAL_CANDIDATE"
+            allocation_authorized = True
+            proposed_allocation_usd = round(
+                min(CHALLENGER_MAX_ALLOCATION_USD, max(0.0, shares * mark * CHALLENGER_MAX_TRIM_FRACTION)),
+                2,
+            )
+            if proposed_allocation_usd < 1.0:
+                status = "INSUFFICIENT_EVIDENCE"
+                allocation_authorized = False
+                block_reasons.append("trim notional below $1")
+            else:
+                block_reasons = []
+    elif mapped == "ROTATE_PAPER" and held:
+        if pre_entry.get("hard_block") and _s(pre_entry.get("risk_level")).upper() == "CRITICAL":
+            # held rotate/sell still allowed under hard risk SELL discipline; mark as actionable sell-side
+            status = "ACTIONABLE_CAPITAL_CANDIDATE"
+            allocation_authorized = True
+            proposed_allocation_usd = round(
+                min(CHALLENGER_MAX_ALLOCATION_USD, max(0.0, shares * mark * CHALLENGER_MAX_TRIM_FRACTION)),
+                2,
+            )
+            mapped = "REDUCE_PAPER"  # safer existing path than full rotate under CRITICAL
+            block_reasons.append("CRITICAL held exposure → bounded REDUCE challenger instead of full ROTATE")
+        else:
+            status = "ACTIONABLE_CAPITAL_CANDIDATE"
+            allocation_authorized = True
+            proposed_allocation_usd = round(min(CHALLENGER_MAX_ALLOCATION_USD, max(0.0, shares * mark * 0.2)), 2)
+    else:
+        status = "NOT_EXECUTABLE"
+        block_reasons.append("eligibility gates not satisfied")
+
+    evidence_quality = "SIMULATED"
+    if sample_size >= 5 and _f(lifecycle.get("net_pnl_impact")) != 0.0:
+        evidence_quality = "REALIZED_SUPPORTED"
+    elif sample_size >= 1:
+        evidence_quality = "PARTIAL_REALIZED"
+
+    return {
+        "experiment_id": hid,
+        "experiment_verdict": verdict,
+        "hypothesis_type": hyp_type,
+        "paper_experiment_action": paper_action,
+        "experiment_action_mapping": mapped,
+        "capital_candidate_status": status,
+        "allocation_authorized": allocation_authorized,
+        "allocation_block_reason": "; ".join(block_reasons) if block_reasons else None,
+        "proposed_allocation_usd": proposed_allocation_usd,
+        "expected_profit_delta": profit_delta,
+        "expected_risk_delta": risk_delta,
+        "capital_efficiency_delta": cap_eff_delta,
+        "evidence_quality": evidence_quality,
+        "sample_size": sample_size,
+        "confidence": confidence,
+        "scoring_method": scoring,
+        "held": held,
+        "hard_block": bool(pre_entry.get("hard_block")),
+        "pre_entry_risk_level": pre_entry.get("risk_level"),
+        "rollback_condition": rollback_condition,
+        "challenger_lifecycle": "PROMISING→CAPITAL_CHALLENGER" if allocation_authorized else status,
+    }
+
+
+def apply_experiment_capital_evidence(
+    ticker: str,
+    scores: dict[str, float],
+    evidence: list[str],
+    ctx: dict[str, Any],
+    *,
+    apply_scores: bool = True,
+) -> dict[str, Any]:
+    """Apply ticker/action-specific experiment evidence. No uniform PROMISING boost."""
+    ticker_u = ticker.upper()
+    ticker_exps = list((ctx.get("exp_by_ticker") or {}).get(ticker_u) or [])
+    portfolio_exps = list((ctx.get("exp_by_ticker") or {}).get("_PORTFOLIO") or [])
     notes: list[str] = []
-    for exp in exps:
-        verdict = _s(exp.get("verdict"))
-        action = _s(exp.get("paper_experiment_action"))
-        if verdict == "PROMISING":
-            boost += 12.0
-            notes.append(f"experiment {exp.get('hypothesis_id')} PROMISING")
-        elif verdict == "CONTINUE_TESTING":
-            boost += 5.0
+    evaluations: list[dict[str, Any]] = []
+    score_deltas: dict[str, float] = {a: 0.0 for a in PAPER_ACTIONS}
+    authorized: list[dict[str, Any]] = []
+    legacy_net = 0.0
+
+    # Ticker-local experiments drive capital challenger scoring
+    for exp in ticker_exps:
+        row = classify_experiment_capital_eligibility(exp, ticker=ticker_u, ctx=ctx)
+        evaluations.append(row)
+        verdict = row["experiment_verdict"]
+        mapped = row.get("experiment_action_mapping")
+        notes.append(f"experiment {row['experiment_id']} {verdict} → {row['capital_candidate_status']}")
+        if mapped:
+            notes.append(f"map {row['paper_experiment_action']}→{mapped}")
+
+        if row["capital_candidate_status"] == "ACTIONABLE_CAPITAL_CANDIDATE" and mapped:
+            delta = CHALLENGER_ACTION_SCORE_DELTA
+            if row["expected_profit_delta"] >= 10.0:
+                delta += 8.0
+            if row["evidence_quality"] == "REALIZED_SUPPORTED":
+                delta += 6.0
+            score_deltas[mapped] = score_deltas.get(mapped, 0.0) + delta
+            # Mild relative lift vs competing hold when trim authorized
+            if mapped == "REDUCE_PAPER":
+                score_deltas["HOLD_PAPER"] = score_deltas.get("HOLD_PAPER", 0.0) - 10.0
+                score_deltas["PROTECT_PAPER"] = score_deltas.get("PROTECT_PAPER", 0.0) + 6.0
+            authorized.append(row)
+            legacy_net += 12.0
+        elif row["capital_candidate_status"] == "PROTECTION_ONLY_CANDIDATE" and mapped:
+            score_deltas[mapped] = score_deltas.get(mapped, 0.0) + 14.0
+            legacy_net += 5.0
         elif verdict == "REJECT":
-            boost -= 20.0
-            notes.append(f"experiment {exp.get('hypothesis_id')} REJECT")
-        elif verdict == "NEEDS_MORE_DATA":
-            boost -= 8.0
-        if action:
-            notes.append(action)
-    return boost, notes
+            if mapped:
+                score_deltas[mapped] = score_deltas.get(mapped, 0.0) - 20.0
+            legacy_net -= 20.0
+        elif verdict == "CONTINUE_TESTING" and mapped:
+            score_deltas[mapped] = score_deltas.get(mapped, 0.0) + 6.0
+            legacy_net += 5.0
+
+    # Portfolio-policy experiments: philosophy bias only (never invent trades)
+    for exp in portfolio_exps:
+        verdict = _s(exp.get("verdict")).upper()
+        paper_action = _s(exp.get("paper_experiment_action")).upper()
+        hid = _s(exp.get("hypothesis_id"))
+        if paper_action == "PAPER_DPE_PHILOSOPHY_WEIGHT" or _s(exp.get("hypothesis_type")).upper() == "DPE_PHILOSOPHY":
+            row = {
+                "experiment_id": hid,
+                "experiment_verdict": verdict,
+                "paper_experiment_action": paper_action,
+                "experiment_action_mapping": None,
+                "capital_candidate_status": "PORTFOLIO_POLICY_CANDIDATE",
+                "allocation_authorized": False,
+                "allocation_block_reason": "DPE philosophy — collaborative/competitive weight bias only",
+                "proposed_allocation_usd": 0.0,
+                "expected_profit_delta": _f((exp.get("deltas") or {}).get("expected_profit_delta_usd")),
+                "expected_risk_delta": _f((exp.get("deltas") or {}).get("risk_delta")),
+                "evidence_quality": "SIMULATED",
+                "sample_size": 0,
+            }
+            evaluations.append(row)
+            notes.append(f"experiment {hid} PORTFOLIO_POLICY_CANDIDATE")
+            if verdict == "PROMISING":
+                preferred = _s(ctx.get("preferred_philosophy")).upper()
+                if preferred == "COLLABORATIVE":
+                    score_deltas["PROTECT_PAPER"] += 5.0
+                    score_deltas["HOLD_PAPER"] += 3.0
+                elif preferred == "COMPETITIVE":
+                    score_deltas["ROTATE_PAPER"] += 4.0
+                legacy_net += 4.0
+        # Do NOT apply uniform NEEDS_MORE_DATA penalties from portfolio maintenance hyps
+
+    primary: dict[str, Any] = {}
+    if authorized:
+        primary = authorized[0]
+    else:
+        ticker_evals = [
+            e
+            for e in evaluations
+            if e.get("capital_candidate_status") not in {"PORTFOLIO_POLICY_CANDIDATE"}
+        ]
+        primary = ticker_evals[0] if ticker_evals else {}
+
+    experiment_score_delta = {
+        a: round(v, 2) for a, v in score_deltas.items() if abs(v) >= 0.01
+    }
+
+    if apply_scores:
+        for action, delta in score_deltas.items():
+            if abs(delta) >= 0.01 and action in scores:
+                scores[action] += delta
+        if experiment_score_delta:
+            evidence.append(
+                "experiment capital evidence: "
+                + ", ".join(f"{a}{d:+.1f}" for a, d in sorted(experiment_score_delta.items()))
+            )
+        evidence.extend(notes[:6])
+
+    return {
+        "experiment_id": primary.get("experiment_id"),
+        "experiment_verdict": primary.get("experiment_verdict"),
+        "capital_candidate_status": primary.get("capital_candidate_status") or "NOT_EXECUTABLE",
+        "experiment_action_mapping": primary.get("experiment_action_mapping"),
+        "experiment_score_delta": experiment_score_delta,
+        "proposed_allocation_usd": primary.get("proposed_allocation_usd") or 0.0,
+        "expected_profit_delta": primary.get("expected_profit_delta") or 0.0,
+        "expected_risk_delta": primary.get("expected_risk_delta") or 0.0,
+        "evidence_quality": primary.get("evidence_quality") or "NONE",
+        "allocation_authorized": bool(primary.get("allocation_authorized")),
+        "allocation_block_reason": primary.get("allocation_block_reason"),
+        "evaluations": evaluations,
+        "authorized_challengers": authorized,
+        "notes": notes,
+        "legacy_net_boost": legacy_net,
+        "rollback_condition": primary.get("rollback_condition"),
+    }
 
 
 def estimate_deltas(ticker: str, action: str, ctx: dict[str, Any]) -> dict[str, float]:
@@ -1740,7 +2059,6 @@ def score_actions_for_ticker(
 
     policy_state = _s(ctx.get("policy_state"))
     suggested_policy = _s(ctx.get("suggested_policy")).upper()
-    exp_boost, exp_notes = experiment_boost(ticker, ctx)
     preferred = _s(ctx.get("preferred_philosophy"))
 
     scores: dict[str, float] = {a: 0.0 for a in PAPER_ACTIONS}
@@ -1890,19 +2208,39 @@ def score_actions_for_ticker(
     else:
         evidence.append("protection validation gates passed")
 
+    experiment_capital_evidence = apply_experiment_capital_evidence(
+        ticker, scores, evidence, ctx, apply_scores=True
+    )
+
+    # Authorized challenger: elevate mapped EXISTING action over soft HOLD/PROTECT/SKIP.
+    # Never elevates BUY_PAPER and never bypasses Hard Risk SELL overrides.
+    if experiment_capital_evidence.get("allocation_authorized") and held:
+        mapped = _s(experiment_capital_evidence.get("experiment_action_mapping"))
+        if mapped in {"REDUCE_PAPER", "ROTATE_PAPER", "SELL_PAPER", "PROTECT_PAPER"}:
+            soft_lead = max(
+                scores.get("HOLD_PAPER", 0.0),
+                scores.get("PROTECT_PAPER", 0.0) if mapped != "PROTECT_PAPER" else 0.0,
+                scores.get("SKIP_PAPER", 0.0),
+                scores.get(mapped, 0.0),
+            )
+            if scores.get(mapped, 0.0) <= soft_lead:
+                bump = (soft_lead - scores.get(mapped, 0.0)) + 8.0
+                scores[mapped] = scores.get(mapped, 0.0) + bump
+                deltas = dict(experiment_capital_evidence.get("experiment_score_delta") or {})
+                deltas[mapped] = round(_f(deltas.get(mapped)) + bump, 2)
+                experiment_capital_evidence["experiment_score_delta"] = deltas
+                evidence.append(
+                    f"capital challenger authorized: elevate {mapped} +{bump:.1f} over soft peers"
+                )
+
     consumption_evidence = {
         "knowledge_evidence": knowledge_evidence,
         "longitudinal_knowledge_evidence": longitudinal_knowledge_evidence,
         "dpe_evaluator_evidence": dpe_evaluator_evidence,
         "adaptive_weight_evidence": adaptive_weight_detail,
         "profit_target_evidence": profit_target_evidence,
+        "experiment_capital_evidence": experiment_capital_evidence,
     }
-
-    for action_key in scores:
-        scores[action_key] += exp_boost * (
-            0.15 if action_key in {"HOLD_PAPER", "PROTECT_PAPER", "BUY_PAPER"} else 0.1
-        )
-    evidence.extend(exp_notes)
 
     rules_applied = collect_rules_applied(consumption_evidence, named_rules)
     lifecycle_evidence = apply_rule_lifecycle_bias(scores, evidence, ctx, rules_applied)
@@ -1944,6 +2282,29 @@ def score_actions_for_ticker(
     if not state_detail.get("decision_switch_authorized") and not hard_risk_discipline.get("override"):
         gate = state_detail.get("decision_state_evidence") or {}
         best = _s(gate.get("final_action"), best)
+
+    # Capital challenger may authorize a soft switch onto the mapped EXISTING action.
+    if (
+        experiment_capital_evidence.get("allocation_authorized")
+        and not hard_risk_discipline.get("override")
+        and held
+    ):
+        mapped = _s(experiment_capital_evidence.get("experiment_action_mapping"))
+        if mapped in {"REDUCE_PAPER", "ROTATE_PAPER", "SELL_PAPER"} and scores.get(mapped, 0.0) >= 18.0:
+            best = mapped
+            state_detail["decision_switch_authorized"] = True
+            state_detail["switch_reason"] = (
+                f"capital_challenger:{experiment_capital_evidence.get('experiment_id')}"
+            )
+            gate = dict(state_detail.get("decision_state_evidence") or {})
+            gate["final_action"] = mapped
+            gate["switch_reason"] = state_detail["switch_reason"]
+            state_detail["decision_state_evidence"] = gate
+            consumption_evidence["decision_state_evidence"] = state_detail
+            evidence.append(
+                f"capital challenger switch authorized → {mapped} "
+                f"(experiment {experiment_capital_evidence.get('experiment_id')})"
+            )
 
     if best == "BUY_PAPER" and pre_entry.get("hard_block"):
         best = "SKIP_PAPER" if not held else "HOLD_PAPER"
@@ -2142,6 +2503,28 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         "reentry_authorized": bool(pre_entry.get("reentry_allowed")),
         "risk_score_delta": _f(risk_sync.get("risk_score_delta")),
         "decision_coherence_status": coherence_status,
+        "experiment_capital_evidence": consumption_evidence.get("experiment_capital_evidence"),
+        "experiment_id": (consumption_evidence.get("experiment_capital_evidence") or {}).get("experiment_id"),
+        "experiment_verdict": (consumption_evidence.get("experiment_capital_evidence") or {}).get("experiment_verdict"),
+        "capital_candidate_status": (consumption_evidence.get("experiment_capital_evidence") or {}).get(
+            "capital_candidate_status"
+        ),
+        "experiment_action_mapping": (consumption_evidence.get("experiment_capital_evidence") or {}).get(
+            "experiment_action_mapping"
+        ),
+        "experiment_score_delta": (consumption_evidence.get("experiment_capital_evidence") or {}).get(
+            "experiment_score_delta"
+        ),
+        "proposed_allocation_usd": (consumption_evidence.get("experiment_capital_evidence") or {}).get(
+            "proposed_allocation_usd"
+        ),
+        "allocation_authorized": bool(
+            (consumption_evidence.get("experiment_capital_evidence") or {}).get("allocation_authorized")
+        ),
+        "allocation_block_reason": (consumption_evidence.get("experiment_capital_evidence") or {}).get(
+            "allocation_block_reason"
+        ),
+        "evidence_quality": (consumption_evidence.get("experiment_capital_evidence") or {}).get("evidence_quality"),
         "created_at": ts,
     }
 
@@ -2281,6 +2664,146 @@ def write_outputs(report: dict[str, Any]) -> tuple[Path, Path, Path]:
     )
     REPORT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return DECISIONS_JSON, DECISIONS_JSONL, REPORT_MD
+
+
+def update_capital_challenger_registry(
+    *,
+    decisions: list[dict[str, Any]] | None = None,
+    orders: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Observe Validation→Capital Allocation outcomes using existing decisions/orders."""
+    LTP_DIR.mkdir(parents=True, exist_ok=True)
+    if decisions is None:
+        decisions = list((load_json(DECISIONS_JSON) or {}).get("decisions") or [])
+    if orders is None:
+        orders = load_jsonl(ORDERS_JSONL)[-40:]
+
+    prev = load_json(CAPITAL_CHALLENGERS_JSON) or {}
+    by_id: dict[str, dict[str, Any]] = {
+        _s(r.get("experiment_id")): dict(r)
+        for r in (prev.get("challengers") or [])
+        if _s(r.get("experiment_id"))
+    }
+
+    orders_by_ticker = {}
+    for o in orders:
+        t = _s(o.get("ticker")).upper()
+        if t:
+            orders_by_ticker[t] = o
+
+    progressed = 0
+    capital_moved = 0.0
+    for d in decisions:
+        exp_id = _s(d.get("experiment_id"))
+        status = _s(d.get("capital_candidate_status"))
+        if not exp_id:
+            continue
+        row = by_id.get(exp_id) or {
+            "experiment_id": exp_id,
+            "lifecycle": "PROMISING",
+            "created_at": _now(),
+        }
+        row.update(
+            {
+                "ticker": _s(d.get("ticker")).upper(),
+                "experiment_verdict": d.get("experiment_verdict"),
+                "capital_candidate_status": status,
+                "experiment_action_mapping": d.get("experiment_action_mapping"),
+                "proposed_allocation_usd": d.get("proposed_allocation_usd"),
+                "expected_profit_delta": d.get("expected_profit_delta"),
+                "expected_risk_delta": d.get("expected_risk_delta"),
+                "allocation_authorized": bool(d.get("allocation_authorized")),
+                "allocation_block_reason": d.get("allocation_block_reason"),
+                "evidence_quality": d.get("evidence_quality"),
+                "final_action": d.get("action"),
+                "updated_at": _now(),
+            }
+        )
+        if d.get("allocation_authorized"):
+            row["lifecycle"] = "CAPITAL_CHALLENGER"
+            progressed += 1
+        order = orders_by_ticker.get(_s(d.get("ticker")).upper()) or {}
+        if order and order.get("executed") and bool(order.get("is_trade")):
+            row["lifecycle"] = "EXECUTED_PAPER"
+            row["observed_fill_shares"] = order.get("fill_shares")
+            row["observed_capital_impact"] = order.get("capital_impact")
+            row["observed_realized_pnl"] = order.get("realized_pnl")
+            capital_moved += abs(_f(order.get("capital_impact") or order.get("gross_value")))
+            # Promotion/retirement deferred to attribution/realized evidence
+            realized = _f(order.get("realized_pnl"))
+            if realized > 0:
+                row["lifecycle"] = "OBSERVED"
+                row["promotion_hint"] = "PROMOTED_CANDIDATE"
+            elif realized < 0:
+                row["lifecycle"] = "OBSERVED"
+                row["promotion_hint"] = "REVERT_OR_RETIRE"
+            else:
+                row["lifecycle"] = "EXECUTED_PAPER"
+                row["promotion_hint"] = "OBSERVE"
+        elif status in {"NOT_EXECUTABLE", "INSUFFICIENT_EVIDENCE", "PORTFOLIO_POLICY_CANDIDATE", "PROTECTION_ONLY_CANDIDATE"}:
+            row["lifecycle"] = status
+        by_id[exp_id] = row
+
+    challengers = sorted(by_id.values(), key=lambda r: _s(r.get("experiment_id")))
+    doc = {
+        "schema": "tae.capital_challengers.v1",
+        "mode": MODE,
+        "live_promotion_allowed": False,
+        "generated_at": _now(),
+        "challenger_count": len(challengers),
+        "authorized_count": sum(1 for r in challengers if r.get("allocation_authorized")),
+        "executed_trade_count": sum(1 for r in challengers if r.get("lifecycle") in {"EXECUTED_PAPER", "OBSERVED"}),
+        "capital_moved_abs_usd": round(capital_moved, 2),
+        "challengers": challengers,
+        "arrow": "Validation→Capital Allocation",
+        "notes": [
+            "PROMISING alone never authorizes capital",
+            "Hard Risk remains non-bypassable",
+            "PDE remains single final authority",
+        ],
+    }
+    CAPITAL_CHALLENGERS_JSON.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    return doc
+
+
+def replay_promising_capital_allocation(
+    experiment_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Retrospective eligibility replay of PROMISING experiments (read-only classification)."""
+    ctx = build_context()
+    experiments = (load_json(EXPERIMENTS_JSON) or {}).get("experiments") or []
+    target = set(experiment_ids or [])
+    rows: list[dict[str, Any]] = []
+    for exp in experiments:
+        hid = _s(exp.get("hypothesis_id"))
+        if target and hid not in target:
+            continue
+        if _s(exp.get("verdict")).upper() != "PROMISING" and (not target or hid not in target):
+            continue
+        tickers = [_s(t).upper() for t in (exp.get("affected_tickers") or []) if _s(t)]
+        if not tickers:
+            # portfolio-scope
+            row = classify_experiment_capital_eligibility(exp, ticker="_PORTFOLIO", ctx=ctx)
+            row["ticker"] = "_PORTFOLIO"
+            row["claimed_profit_delta"] = _f((exp.get("deltas") or {}).get("expected_profit_delta_usd"))
+            row["would_move_capital"] = False
+            rows.append(row)
+            continue
+        for t in tickers:
+            row = classify_experiment_capital_eligibility(exp, ticker=t, ctx=ctx)
+            row["ticker"] = t
+            row["claimed_profit_delta"] = row.get("expected_profit_delta")
+            row["would_move_capital"] = bool(row.get("allocation_authorized"))
+            rows.append(row)
+
+    return {
+        "schema": "tae.capital_allocation_replay.v1",
+        "mode": MODE,
+        "generated_at": _now(),
+        "rows": rows,
+        "eligible_count": sum(1 for r in rows if r.get("capital_candidate_status") == "ACTIONABLE_CAPITAL_CANDIDATE"),
+        "ineligible_count": sum(1 for r in rows if r.get("capital_candidate_status") != "ACTIONABLE_CAPITAL_CANDIDATE"),
+    }
 
 
 def print_summary(report: dict[str, Any]) -> None:
