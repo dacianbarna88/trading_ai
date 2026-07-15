@@ -53,6 +53,8 @@ ARTIFACT_PATHS = {
     "actionable_audit": "tae_actionable_signal_audit.json",
     "market_monitor": "tae_market_open_monitor.json",
     "promotion_queue": "tae_promotion_queue.json",
+    "roi_queue": "tae_roi_queue.json",
+    "roi_challenger_report": "tae_roi001_challenger_report.json",
     "watchlist": "watchlist.txt",
     "research_runtime": "tae_research_runtime.json",
     "research_enrich": "tae_live_signals_research_enrich.json",
@@ -282,6 +284,10 @@ class TAECommandCenterContext:
     market_monitor_status: str = "MISSING"
     promotion_queue: dict[str, Any] = field(default_factory=dict)
     promotion_queue_status: str = "MISSING"
+    roi_queue: dict[str, Any] = field(default_factory=dict)
+    roi_queue_status: str = "MISSING"
+    roi_challenger_report: dict[str, Any] = field(default_factory=dict)
+    roi_challenger_report_status: str = "MISSING"
     research_runtime: dict[str, Any] = field(default_factory=dict)
     research_runtime_status: str = "MISSING"
     research_enrich: dict[str, Any] = field(default_factory=dict)
@@ -508,6 +514,18 @@ def load_command_center_context(root: Path | str = PROJECT_ROOT) -> TAECommandCe
     ctx.promotion_queue = promotion_queue or {}
     ctx.promotion_queue_status = promo_st
     status["tae_promotion_queue.json"] = promo_st
+
+    roi_q_path = root / ARTIFACT_PATHS["roi_queue"]
+    roi_queue, roi_q_st = _safe_read_json(roi_q_path)
+    ctx.roi_queue = roi_queue or {}
+    ctx.roi_queue_status = roi_q_st
+    status["tae_roi_queue.json"] = roi_q_st
+
+    roi_r_path = root / ARTIFACT_PATHS["roi_challenger_report"]
+    roi_report, roi_r_st = _safe_read_json(roi_r_path)
+    ctx.roi_challenger_report = roi_report or {}
+    ctx.roi_challenger_report_status = roi_r_st
+    status["tae_roi001_challenger_report.json"] = roi_r_st
 
     research_path = root / ARTIFACT_PATHS["research_runtime"]
     research_runtime, research_st = _safe_read_json(research_path)
@@ -1330,6 +1348,33 @@ def render_watchlist_proposal_panel(ctx: TAECommandCenterContext) -> None:
         st.caption(f"ℹ️ {note}")
 
 
+def render_roi_economic_status_panel(ctx: TAECommandCenterContext) -> None:
+    st.subheader("💵 ROI Economic Status")
+    st.caption(f"SSOT: tae_roi_queue.json ({ctx.roi_queue_status})")
+
+    if ctx.roi_queue_status != "OK" or not ctx.roi_queue:
+        st.warning(f"ROI queue: {ctx.roi_queue_status}")
+        return
+
+    active = next((i for i in (ctx.roi_queue.get("queue") or []) if i.get("active")), None)
+    if not active:
+        st.info("No active ROI challenger.")
+        return
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Active ROI", active.get("roi_id") or active.get("ROI_ID"))
+    c2.metric("Status", active.get("status"))
+    c3.metric("Sample", f"{active.get('sample_size')}/{active.get('minimum_sample_size')}")
+    c4.metric("Production", "ON" if active.get("production_enabled") else "OFF")
+    c5.metric("Δ realized", _fmt(active.get("realized_profit_delta")))
+
+    st.caption(
+        f"Δ DD {active.get('drawdown_delta')} | Δ expectancy {active.get('expectancy_delta')} | "
+        f"Δ PF {active.get('profit_factor_delta')} | reason: {active.get('last_verdict_reason')}"
+    )
+    st.caption(f"Report: tae_roi001_challenger_report.json ({ctx.roi_challenger_report_status})")
+
+
 def render_promotion_queue_panel(ctx: TAECommandCenterContext) -> None:
     st.subheader("✅ Governed Promotion Queue")
     st.caption(f"Artifact: tae_promotion_queue.json ({ctx.promotion_queue_status})")
@@ -2088,6 +2133,8 @@ def render_tae_command_center() -> None:
     render_watchlist_proposal_panel(ctx)
     st.divider()
     render_promotion_queue_panel(ctx)
+    st.divider()
+    render_roi_economic_status_panel(ctx)
     st.divider()
     render_actionable_signal_audit_panel(ctx)
     st.divider()

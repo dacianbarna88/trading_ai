@@ -1,0 +1,292 @@
+{
+  "schema": "tae_roi001_challenger",
+  "roi_id": "ROI-001",
+  "generated_at": "2026-07-15T20:24:22+00:00",
+  "mode": "PAPER_ONLY",
+  "construction": "FROZEN",
+  "baseline_rule": "trim_pct = 30 if confidence < 0.7 else 20",
+  "challenger_rule": "trim_pct = PTA suggested_partial_size_pct (else baseline fallback)",
+  "production_default": "baseline (roi001_challenger=False)",
+  "sample": {
+    "reduce_executions": 4,
+    "tickers": [
+      "AAPL",
+      "GE",
+      "HSBA.L",
+      "PG"
+    ],
+    "ticker_count": 4,
+    "min_required_executions": 10,
+    "min_required_tickers": 3
+  },
+  "comparisons": [
+    {
+      "ticker": "HSBA.L",
+      "decision_id": "PDEC-HSBA.L-0011",
+      "pta_suggested_partial_size_pct": 50,
+      "pta_urgency": "CRITICAL",
+      "pta_strategy": "REDUCE_EXPOSURE_SHADOW",
+      "baseline": {
+        "trim_pct": 20.0,
+        "shares_sold": 0.278203,
+        "cash_released": 411.6842,
+        "realized_pnl": 3.9505,
+        "remaining_shares": 1.11281,
+        "remaining_unrealized_pnl": 15.802,
+        "position_value_after": 1646.7369,
+        "source": "baseline_hardcoded"
+      },
+      "challenger": {
+        "trim_pct": 50.0,
+        "shares_sold": 0.695507,
+        "cash_released": 1029.2106,
+        "realized_pnl": 9.8762,
+        "remaining_shares": 0.695507,
+        "remaining_unrealized_pnl": 9.8763,
+        "position_value_after": 1029.2106,
+        "source": "challenger_pta_suggested"
+      },
+      "delta": {
+        "trim_pct": 30.0,
+        "shares_sold": 0.417304,
+        "cash_released": 617.5264,
+        "realized_pnl": 5.9257,
+        "remaining_unrealized_pnl": -5.9257
+      },
+      "replay_vs_recorded": {
+        "baseline_realized_error": 0.0,
+        "baseline_shares_error": 0.0
+      }
+    },
+    {
+      "ticker": "PG",
+      "decision_id": "PDEC-PG-0018",
+      "pta_suggested_partial_size_pct": 20,
+      "pta_urgency": "LOW",
+      "pta_strategy": "KEEP_GROWING_SHADOW",
+      "baseline": {
+        "trim_pct": 20.0,
+        "shares_sold": 3.36814,
+        "cash_released": 498.8889,
+        "realized_pnl": 2.4924,
+        "remaining_shares": 13.47256,
+        "remaining_unrealized_pnl": 9.9696,
+        "position_value_after": 1995.5555,
+        "source": "baseline_hardcoded"
+      },
+      "challenger": {
+        "trim_pct": 20.0,
+        "shares_sold": 3.36814,
+        "cash_released": 498.8889,
+        "realized_pnl": 2.4924,
+        "remaining_shares": 13.47256,
+        "remaining_unrealized_pnl": 9.9696,
+        "position_value_after": 1995.5555,
+        "source": "challenger_pta_suggested"
+      },
+      "delta": {
+        "trim_pct": 0.0,
+        "shares_sold": 0.0,
+        "cash_released": 0.0,
+        "realized_pnl": 0.0,
+        "remaining_unrealized_pnl": 0.0
+      },
+      "replay_vs_recorded": {
+        "baseline_realized_error": 0.0,
+        "baseline_shares_error": 0.0
+      }
+    },
+    {
+      "ticker": "AAPL",
+      "decision_id": "PDEC-AAPL-0001",
+      "pta_suggested_partial_size_pct": 25,
+      "pta_urgency": "MEDIUM",
+      "pta_strategy": "HOLD_AND_MONITOR_SHADOW",
+      "baseline": {
+        "trim_pct": 20.0,
+        "shares_sold": 1.62006,
+        "cash_released": 530.9666,
+        "realized_pnl": 23.9526,
+        "remaining_shares": 6.48024,
+        "remaining_unrealized_pnl": 95.8103,
+        "position_value_after": 2123.8662,
+        "source": "baseline_hardcoded"
+      },
+      "challenger": {
+        "trim_pct": 25.0,
+        "shares_sold": 2.025075,
+        "cash_released": 663.7082,
+        "realized_pnl": 29.9407,
+        "remaining_shares": 6.075225,
+        "remaining_unrealized_pnl": 89.8222,
+        "position_value_after": 1991.1246,
+        "source": "challenger_pta_suggested"
+      },
+      "delta": {
+        "trim_pct": 5.0,
+        "shares_sold": 0.405015,
+        "cash_released": 132.7416,
+        "realized_pnl": 5.9881,
+        "remaining_unrealized_pnl": -5.9881
+      },
+      "replay_vs_recorded": {
+        "baseline_realized_error": 0.0,
+        "baseline_shares_error": 0.0
+      }
+    },
+    {
+      "ticker": "GE",
+      "decision_id": "PDEC-GE-0009",
+      "pta_suggested_partial_size_pct": 25,
+      "pta_urgency": "MEDIUM",
+      "pta_strategy": "HOLD_AND_MONITOR_SHADOW",
+      "baseline": {
+        "trim_pct": 30.0,
+        "shares_sold": 0.386443,
+        "cash_released": 138.7021,
+        "realized_pnl": -0.0464,
+        "remaining_shares": 0.9017,
+        "remaining_unrealized_pnl": -0.1082,
+        "position_value_after": 323.6382,
+        "source": "baseline_hardcoded"
+      },
+      "challenger": {
+        "trim_pct": 25.0,
+        "shares_sold": 0.322036,
+        "cash_released": 115.5851,
+        "realized_pnl": -0.0386,
+        "remaining_shares": 0.966107,
+        "remaining_unrealized_pnl": -0.1159,
+        "position_value_after": 346.7552,
+        "source": "challenger_pta_suggested"
+      },
+      "delta": {
+        "trim_pct": -5.0,
+        "shares_sold": -0.064407,
+        "cash_released": -23.117,
+        "realized_pnl": 0.0078,
+        "remaining_unrealized_pnl": -0.0077
+      },
+      "replay_vs_recorded": {
+        "baseline_realized_error": 0.0,
+        "baseline_shares_error": 0.0
+      }
+    }
+  ],
+  "baseline": {
+    "realized_pnl_sum": 30.3491,
+    "cash_released": 1580.2418,
+    "remaining_unrealized_pnl_on_legs": 121.4737,
+    "remaining_position_value": 6089.7968,
+    "portfolio_value": 29819.1164,
+    "portfolio_realized_pnl": -694.2754,
+    "portfolio_unrealized_pnl": 172.4711,
+    "drawdown_pct": 1.719802,
+    "capital_efficiency": 0.019205,
+    "win_rate": 0.75,
+    "expectancy": 7.587275,
+    "profit_factor": 655.075431,
+    "average_winner": 10.131833,
+    "average_loser": -0.0464,
+    "n_trades": 4.0
+  },
+  "challenger": {
+    "realized_pnl_sum": 42.2707,
+    "cash_released": 2307.3928,
+    "remaining_unrealized_pnl_on_legs": 109.5522,
+    "remaining_position_value": 5362.6459,
+    "portfolio_value": 29819.1164,
+    "portfolio_realized_pnl": -682.3538,
+    "portfolio_unrealized_pnl": 160.5496,
+    "drawdown_pct": 1.514449,
+    "capital_efficiency": 0.01832,
+    "win_rate": 0.75,
+    "expectancy": 10.567675,
+    "profit_factor": 1096.095855,
+    "average_winner": 14.1031,
+    "average_loser": -0.0386,
+    "n_trades": 4.0
+  },
+  "delta": {
+    "realized_pnl": 11.9216,
+    "cash_released": 727.151,
+    "remaining_unrealized_pnl": -11.9215,
+    "remaining_position_value": -727.1509,
+    "portfolio_value": 0.0,
+    "drawdown_pct": -0.205353,
+    "expectancy": 2.9804,
+    "profit_factor": 441.020424,
+    "capital_efficiency": -0.000886
+  },
+  "promotion_checks": {
+    "higher_realized_profit": true,
+    "drawdown_le_baseline": true,
+    "profit_factor_ge_baseline": true,
+    "expectancy_ge_baseline": true,
+    "min_reduce_executions": false,
+    "min_tickers": true,
+    "hard_risk_regression": false,
+    "decision_state_regression": false,
+    "duplicate_execution": false,
+    "profit_integrity_pass": true,
+    "reconciliation_pass": true,
+    "production_default_unchanged": true
+  },
+  "integrity": {
+    "ok": true,
+    "verdict": "PAPER_PROFIT_INTEGRITY_CLOSED",
+    "reconciliation": {
+      "ok": true,
+      "status": "PASS",
+      "errors": [],
+      "checks": [
+        {
+          "name": "total_value",
+          "expected": 29819.1164,
+          "actual": 29819.1164,
+          "ok": true,
+          "formula": "cash + open_positions_value"
+        },
+        {
+          "name": "open_positions_value",
+          "expected": 16479.2872,
+          "actual": 16479.2872,
+          "ok": true,
+          "formula": "sum(position.current_value)"
+        },
+        {
+          "name": "unrealized_pnl",
+          "expected": 172.4711,
+          "actual": 172.4711,
+          "ok": true,
+          "formula": "sum(position.pnl)"
+        },
+        {
+          "name": "total_pnl",
+          "expected": -521.8043,
+          "actual": -521.8043,
+          "ok": true,
+          "formula": "realized_pnl + unrealized_pnl"
+        },
+        {
+          "name": "value_delta",
+          "expected": -521.8043,
+          "actual": -521.8036,
+          "ok": true,
+          "formula": "(realized_pnl - realized_at_baseline) + (unrealized_pnl - baseline_unrealized_pnl)"
+        }
+      ],
+      "cash": 13339.8292,
+      "open_positions_value": 16479.2872,
+      "total_value": 29819.1164,
+      "realized_pnl": -694.2754,
+      "unrealized_pnl": 172.4711,
+      "total_pnl": -521.8043,
+      "positions_count": 18
+    }
+  },
+  "verdict": "ROI001_NEEDS_MORE_EVIDENCE",
+  "commit": false,
+  "baseline_restored": true,
+  "note": "Challenger sized legs improve realized/expectancy/PF on available history, but sample < 10 REDUCE executions \u2014 promotion blocked."
+}

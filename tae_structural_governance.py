@@ -738,6 +738,36 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     if not r_mtm["ok"]:
         exit_code = r_mtm["exit_code"] or 1
 
+    # ROI economic orchestration — evidence refresh (read-only replay; baseline production until PROMOTED_PAPER)
+    print("\n>>> [START] roi_economic_orchestration", flush=True)
+    try:
+        from tae_roi001_challenger import run_roi_economic_orchestration
+
+        roi_orch = run_roi_economic_orchestration(write_outputs=True)
+        print(
+            f">>> [END] roi_economic_orchestration status={roi_orch.get('status')} "
+            f"sample={roi_orch.get('sample_size')} production={roi_orch.get('production_enabled')}",
+            flush=True,
+        )
+        cli_steps.append(
+            {
+                "step": "roi_economic_orchestration",
+                "ok": bool(roi_orch.get("ok")),
+                "exit_code": 0 if roi_orch.get("ok") else 1,
+                "active_roi_id": roi_orch.get("active_roi_id"),
+                "status": roi_orch.get("status"),
+                "sample_size": roi_orch.get("sample_size"),
+                "production_enabled": roi_orch.get("production_enabled"),
+                "verdict": roi_orch.get("verdict"),
+            }
+        )
+        if roi_orch.get("verdict") == "BLOCKED_BY_ROI_STATE_CONFLICT":
+            exit_code = 1
+    except Exception as exc:
+        print(f">>> [FAIL] roi_economic_orchestration: {exc}", flush=True)
+        cli_steps.append({"step": "roi_economic_orchestration", "ok": False, "error": str(exc)})
+        exit_code = 1
+
     # Re-run gates 2 & 4 post MTM
     s2b = gate_accounting_reconciliation()
     s2b.rank = 2

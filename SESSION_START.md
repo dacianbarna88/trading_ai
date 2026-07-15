@@ -8,7 +8,7 @@
 
 | Item | Value |
 |------|--------|
-| **Current approved milestone** | **Validation → Capital Allocation Closure** — `VALIDATION_TO_CAPITAL_ALLOCATION_CLOSED` |
+| **Current approved milestone** | **Economic Orchestration Closure** — `ECONOMIC_ORCHESTRATION_CLOSED` |
 | **Branch** | `cursor/x12b-legacy-archive-hotfix` |
 | **Base commits** | capital allocation closure · `c5ce77c` hang fix · `7c4f6a0` constitutional evolution |
 | **Canonical live runtime** | `live_bot.py` |
@@ -32,6 +32,8 @@ python3 tae.py opportunity-attrition   # upstream attrition trace + death map (r
 ```
 
 Expected morning-audit: **READY** · operational contract all OK · `PAPER_PROFIT_INTEGRITY: PASS` · `validation_capital_base: 30000`
+
+**Economic orchestration closure (2026-07-15):** ROI lifecycle closed in existing modules — no new orchestrator. `tae_roi_queue.json` is SSOT. Each `full-paper-cycle` auto-runs `run_roi001_challenger()` → verdict → queue advance. ROI-001: `ECONOMICALLY_POSITIVE` n=4/10, +$11.92 realized Δ, `production_enabled=false`. Visibility: `morning-audit`, `profit-pipeline`, dashboard panel. Audit: `TAE_ECONOMIC_ORCHESTRATION_CLOSURE_AUDIT.md`.
 
 **Validation → Capital Allocation closure (2026-07-15):** PROMISING experiments no longer stop at report-only boost. Eligibility classifies ACTIONABLE / PROTECTION_ONLY / PORTFOLIO_POLICY / NOT_EXECUTABLE / INSUFFICIENT_EVIDENCE. `paper_experiment_action` maps to existing PDE verbs (`PAPER_TRAILING_PROTECT_TRIM`→`REDUCE_PAPER`). Adaptive weights consume actionable `experiment_results.json`. Validated cycle executed 4 REDUCE challengers (AAPL/PG/GE/HSBA.L); AMAT/MU Hard Risk blocked. Artifact: `TAE_VALIDATION_TO_CAPITAL_ALLOCATION_AUDIT.md`.
 

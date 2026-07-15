@@ -1001,6 +1001,52 @@ def bootstrap_portfolio(accounting: dict[str, Any] | None, existing: dict[str, A
     return portfolio
 
 
+def baseline_reduce_trim_pct(confidence: float) -> float:
+    """Hardcoded REDUCE sizing (ROI-001 baseline)."""
+    return 30.0 if _f(confidence, 0.5) < 0.7 else 20.0
+
+
+def resolve_reduce_trim_pct(
+    confidence: float,
+    ticker: str,
+    *,
+    challenger: bool = False,
+    pta_row: dict[str, Any] | None = None,
+) -> tuple[float, str]:
+    """
+    ROI-001 sizing: baseline hardcoded vs challenger PTA suggested_partial_size_pct.
+
+    Production default is baseline (challenger=False). No other behaviour changes.
+    """
+    baseline = baseline_reduce_trim_pct(confidence)
+    if not challenger:
+        return baseline, "baseline_hardcoded"
+    suggested = None if not isinstance(pta_row, dict) else pta_row.get("suggested_partial_size_pct")
+    if suggested is None:
+        return baseline, "challenger_fallback_no_pta"
+    try:
+        pct = float(suggested)
+    except (TypeError, ValueError):
+        return baseline, "challenger_fallback_invalid_pta"
+    if pct <= 0.0 or pct > 100.0:
+        return baseline, "challenger_fallback_invalid_pta"
+    return pct, "challenger_pta_suggested"
+
+
+def load_pta_by_ticker() -> dict[str, dict[str, Any]]:
+    """Read-only index of existing Profit Target Adapter rows (ROI-001 challenger)."""
+    path = Path("tae_profit_target_adapter.json")
+    doc = load_json(path) or {}
+    out: dict[str, dict[str, Any]] = {}
+    for row in doc.get("tickers") or []:
+        if not isinstance(row, dict):
+            continue
+        tk = _s(row.get("ticker")).upper()
+        if tk:
+            out[tk] = row
+    return out
+
+
 def _sell_shares(
     portfolio: dict[str, Any],
     ticker: str,
@@ -1109,6 +1155,8 @@ def execute_decision(
     accounting: dict[str, Any] | None,
     all_decisions: list[dict[str, Any]],
     execution_reason: str = "new_decision",
+    roi001_challenger: bool = False,
+    pta_by: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     action = _s(decision.get("action")).upper()
     ticker = _s(decision.get("ticker")).upper()
@@ -1188,7 +1236,16 @@ def execute_decision(
             status = "BLOCKED_FAKE_PROFIT_RISK"
             reason = f"REDUCE_PAPER blocked — suspicious ${SYNTHETIC_FILL_ANCHOR:.0f} fill for {ticker}"
         else:
-            trim_pct = 30.0 if confidence < 0.7 else 20.0
+            pta_row = None
+            if roi001_challenger:
+                index = pta_by if pta_by is not None else load_pta_by_ticker()
+                pta_row = index.get(ticker)
+            trim_pct, trim_source = resolve_reduce_trim_pct(
+                confidence,
+                ticker,
+                challenger=bool(roi001_challenger),
+                pta_row=pta_row,
+            )
             trim_shares = _f(before.get("shares")) * (trim_pct / 100.0)
             avg = _f(before.get("avg_price"))
             cost_basis = round(avg * trim_shares, 4) if avg > 0 else 0.0
@@ -1196,7 +1253,7 @@ def execute_decision(
             fill_shares = trim_shares
             capital_impact = round(gross_value, 4)
             after = _position_snapshot(after_pos)
-            reason = f"REDUCE_PAPER trim {trim_pct:.0f}% — {reason}"
+            reason = f"REDUCE_PAPER trim {trim_pct:.0f}% [{trim_source}] — {reason}"
             status = "EXECUTED"
             executed = True
             is_trade = fill_shares > 0
@@ -1910,6 +1967,14 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
 
     retry_state: dict[str, Any] = dict(portfolio.get("non_terminal_retry_state") or {})
 
+    try:
+        from tae_roi001_challenger import resolve_roi_production_flags
+
+        roi_flags = resolve_roi_production_flags()
+    except Exception:
+        roi_flags = {"roi001_challenger": False}
+    roi001_challenger = bool(roi_flags.get("roi001_challenger"))
+
     for decision in decisions:
         decision_id = _s(decision.get("decision_id"))
         action = _s(decision.get("action")).upper()
@@ -1986,6 +2051,7 @@ def run_paper_execution(*, write_report_flag: bool = True) -> dict[str, Any]:
             accounting=accounting,
             all_decisions=decisions,
             execution_reason=reason,
+            roi001_challenger=roi001_challenger,
         )
         order["execution_reason"] = reason
         if reason.startswith("retry_after_non_terminal"):

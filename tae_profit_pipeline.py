@@ -764,6 +764,12 @@ def format_pipeline_section(payload: dict[str, Any]) -> list[str]:
         f"reconciliation={dq.get('reconciliation_status')}",
         f"Full report: {REPORT_MD} | {REPORT_JSON}",
     ]
+    try:
+        from tae_roi001_challenger import format_roi_economic_status_section
+
+        lines.extend(format_roi_economic_status_section())
+    except Exception:
+        pass
     return lines
 
 

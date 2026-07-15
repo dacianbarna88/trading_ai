@@ -1,0 +1,67 @@
+{
+  "schema": "tae_economic_orchestration_closure",
+  "generated_at": "2026-07-15T20:24:00+00:00",
+  "verdict": "ECONOMIC_ORCHESTRATION_CLOSED",
+  "prior_verdict": "ECONOMIC_ORCHESTRATION_PARTIALLY_EXISTS",
+  "active_roi_id": "ROI-001",
+  "roi_status": "ECONOMICALLY_POSITIVE",
+  "sample_size": 4,
+  "minimum_sample_size": 10,
+  "minimum_tickers": 3,
+  "tickers": ["HSBA.L", "AAPL", "PG", "GE"],
+  "production_enabled": false,
+  "production_flag": "roi001_challenger",
+  "realized_profit_delta": 11.9216,
+  "drawdown_delta": -0.205353,
+  "expectancy_delta": 2.9804,
+  "profit_factor_delta": 441.020424,
+  "last_verdict_reason": "insufficient_sample_positive_economics",
+  "report_verdict": "ROI001_NEEDS_MORE_EVIDENCE",
+  "next_waiting_roi_id": "ROI-002",
+  "ssot": "tae_roi_queue.json",
+  "cycle_trace": [
+    ">>> [START] roi_economic_orchestration",
+    ">>> [END] roi_economic_orchestration status=ECONOMICALLY_POSITIVE sample=4 production=False"
+  ],
+  "constitutional_evolution": {
+    "loop_closed": true,
+    "decision_deltas": 0,
+    "weight_deltas": 1
+  },
+  "gates": {
+    "profit_integrity": "PAPER_PROFIT_INTEGRITY_CLOSED",
+    "reconciliation": "PASS",
+    "hard_risk": "PASS",
+    "decision_state": "PASS",
+    "validation_capital_base": 30000.0,
+    "duplicate_execution": false
+  },
+  "validation_commands": [
+    "python3 tae.py full-paper-cycle",
+    "python3 tae.py morning-audit",
+    "python3 tae.py profit-pipeline"
+  ],
+  "tests": {
+    "module": "tae_roi_orchestration_test",
+    "ran": 10,
+    "passed": 10,
+    "failed": 0
+  },
+  "terminology_ownership": {
+    "roi_queue_status": "economic change lifecycle (PROMOTED_PAPER / REJECTED / RETIRED)",
+    "capital_challengers_promotion_hint": "per-experiment capital observation only — never ROI status",
+    "dpe_adaptive_winner": "philosophy experiment advisory only — never ROI status",
+    "watchlist_promotion_queue": "watchlist candidate only — never ROI status",
+    "live_promotion_gate": "broker/live safety lock only — never ROI status"
+  },
+  "changed_files": [
+    "tae_roi001_challenger.py",
+    "tae_structural_governance.py",
+    "tae_paper_execution.py",
+    "tae_profit_pipeline.py",
+    "dashboard_tae_command_center.py",
+    "tae_roi_orchestration_test.py",
+    "tae_roi_queue.json",
+    "tae_next_dollar.json"
+  ]
+}

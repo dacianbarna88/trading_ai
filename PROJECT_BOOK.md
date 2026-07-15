@@ -1,7 +1,8 @@
 # Trading AI — PROJECT BOOK (Canonical Journal)
 
 **Last updated:** 2026-07-15  
-**Latest sprint:** **Validation → Capital Allocation Closure** — `VALIDATION_TO_CAPITAL_ALLOCATION_CLOSED`  
+**Latest sprint:** **Economic Orchestration Closure** — `ECONOMIC_ORCHESTRATION_CLOSED`  
+**Previous sprint:** Validation → Capital Allocation Closure — `VALIDATION_TO_CAPITAL_ALLOCATION_CLOSED`  
 **Previous sprint:** Full Paper Cycle Hang Closure (`FULL_PAPER_CYCLE_HANG_CLOSED`) · Constitutional evolution (`7c4f6a0`)  
 **Branch:** `cursor/x12b-legacy-archive-hotfix`  
 **Governance mode:** PAPER_ONLY · ADVISORY_ONLY · NO_BROKER · NO_LIVE_PROMOTION  
@@ -9,6 +10,7 @@
 
 > **Read first each session:** `SESSION_START.md` → `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md`  
 > **PAPER daily operator command:** `python3 tae.py full-paper-cycle` then `python3 tae.py morning-audit` (expect **READY**)  
+> **Economic orchestration closure (2026-07-15):** `TAE_ECONOMIC_ORCHESTRATION_CLOSURE_AUDIT.md` · `tae_economic_orchestration_closure_audit.json` — ROI queue SSOT (`tae_roi_queue.json`); automatic evidence refresh + verdict + rollback + queue advance in `full-paper-cycle`; ROI-001 `ECONOMICALLY_POSITIVE` n=4; production flag false until all gates pass  
 > **Validation→Capital audit (2026-07-15):** `TAE_VALIDATION_TO_CAPITAL_ALLOCATION_AUDIT.md` · `TAE_EXPERIMENT_CAPITAL_CHALLENGER_REPORT.md` — PROMISING eligibility → mapped REDUCE challengers; AMAT/MU Hard Risk blocked  
 > **Hang fix audit (2026-07-15):** `TAE_FULL_PAPER_CYCLE_HANG_AUDIT.md` · `tae_full_paper_cycle_hang_audit.json` — rank-1 `gate_data_validity` historical refresh now emits `[START]`/`[END]` trace; CLI uses `-u`; subprocess timeout 600s  
 > **Profit pipeline view:** `python3 tae.py profit-pipeline` (read-only join of existing artifacts)  

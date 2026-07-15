@@ -1,0 +1,84 @@
+{
+  "schema": "tae_next_dollar",
+  "generated_at": "2026-07-15T20:24:22+00:00",
+  "verdict": "NEXT_DOLLAR_IDENTIFIED",
+  "work_allowed": "ONLY_ACTIVE_ROI",
+  "active_roi": {
+    "roi_id": "ROI-001",
+    "status": "ECONOMICALLY_POSITIVE",
+    "sample_size": 4,
+    "minimum_sample_size": 10,
+    "realized_profit_delta": 11.9216,
+    "drawdown_delta": -0.205353,
+    "expectancy_delta": 2.9804,
+    "profit_factor_delta": 441.020424,
+    "production_enabled": false,
+    "last_verdict_reason": "insufficient_sample_positive_economics"
+  },
+  "next_waiting_roi_id": "ROI-002",
+  "queue_head": [
+    {
+      "rank": 1,
+      "roi_id": "ROI-001",
+      "status": "ECONOMICALLY_POSITIVE",
+      "active": true,
+      "depends_on": null
+    },
+    {
+      "rank": 2,
+      "roi_id": "ROI-002",
+      "status": "WAITING",
+      "active": false,
+      "depends_on": "ROI-001"
+    },
+    {
+      "rank": 3,
+      "roi_id": "ROI-009",
+      "status": "WAITING",
+      "active": false,
+      "depends_on": null
+    },
+    {
+      "rank": 4,
+      "roi_id": "ROI-007",
+      "status": "WAITING",
+      "active": false,
+      "depends_on": null
+    },
+    {
+      "rank": 5,
+      "roi_id": "ROI-006",
+      "status": "WAITING",
+      "active": false,
+      "depends_on": null
+    },
+    {
+      "rank": 6,
+      "roi_id": "ROI-005",
+      "status": "WAITING",
+      "active": false,
+      "depends_on": null
+    },
+    {
+      "rank": 7,
+      "roi_id": "ROI-008",
+      "status": "WAITING",
+      "active": false,
+      "depends_on": null
+    },
+    {
+      "rank": 8,
+      "roi_id": "ROI-004",
+      "status": "WAITING",
+      "active": false,
+      "depends_on": null
+    }
+  ],
+  "terminology_ownership": {
+    "roi_queue_status": "economic change lifecycle (PROMOTED_PAPER / REJECTED / RETIRED)",
+    "capital_challengers_promotion_hint": "per-experiment capital observation only \u2014 never ROI status",
+    "dpe_adaptive_winner": "philosophy experiment advisory only \u2014 never ROI status",
+    "watchlist_promotion_queue": "watchlist candidate only \u2014 never ROI status",
+    "live_promotion_gate": "broker/live safety lock only \u2014 never ROI status"
+  }
+}
