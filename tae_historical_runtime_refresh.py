@@ -27,6 +27,29 @@ REPORT_MD = Path("TAE_HISTORICAL_RUNTIME_REPORT.md")
 PYTHON = sys.executable
 
 
+def _trace_ts() -> str:
+    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+
+def trace_start(step_name: str) -> float:
+    t0 = time.monotonic()
+    print(f"[START] {step_name} {_trace_ts()}", flush=True)
+    return t0
+
+
+def trace_end(step_name: str, t0: float) -> None:
+    duration = time.monotonic() - t0
+    print(f"[END] {step_name} {_trace_ts()} duration={duration:.1f}s", flush=True)
+
+
+def trace_fail(step_name: str, error: str) -> None:
+    print(f"[FAIL] {step_name} {error}", flush=True)
+
+
+def trace_timeout(step_name: str, duration: float) -> None:
+    print(f"[TIMEOUT] {step_name} duration={duration:.1f}s", flush=True)
+
+
 @dataclass(frozen=True)
 class HistoricalSourceSpec:
     source_id: str
@@ -175,14 +198,19 @@ def audit_all_sources(*, root: Path | None = None) -> dict[str, Any]:
 
 
 def _run_script(script: str, *, root: Path, timeout: int = 300) -> tuple[bool, str]:
+    step_name = f"historical_refresh/{script}"
+    t0 = trace_start(step_name)
     script_path = root / script
     if not script_path.is_file():
+        trace_fail(step_name, f"missing script: {script}")
+        trace_end(step_name, t0)
         return False, f"missing script: {script}"
     env = os.environ.copy()
     env["PYTHONPATH"] = str(root) + (f":{env['PYTHONPATH']}" if env.get("PYTHONPATH") else "")
+    env["PYTHONUNBUFFERED"] = "1"
     try:
         proc = subprocess.run(
-            [PYTHON, str(script_path)],
+            [PYTHON, "-u", str(script_path)],
             cwd=str(root),
             env=env,
             capture_output=True,
@@ -191,12 +219,18 @@ def _run_script(script: str, *, root: Path, timeout: int = 300) -> tuple[bool, s
             check=False,
         )
     except subprocess.TimeoutExpired:
+        trace_timeout(step_name, time.monotonic() - t0)
         return False, "timeout"
     except OSError as exc:
+        trace_fail(step_name, str(exc))
+        trace_end(step_name, t0)
         return False, str(exc)
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "")[-500:]
+        trace_fail(step_name, err or f"exit {proc.returncode}")
+        trace_end(step_name, t0)
         return False, err or f"exit {proc.returncode}"
+    trace_end(step_name, t0)
     return True, "ok"
 
 
@@ -244,10 +278,16 @@ def refresh_source(spec: HistoricalSourceSpec, *, root: Path) -> dict[str, Any]:
 
 def recompute_dependents(*, root: Path, any_refreshed: bool) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
+    t0 = trace_start("historical_refresh/recompute_dependents")
     for name, script, artifact in RECOMPUTE_DEPENDENTS:
         artifact_path = root / artifact
         artifact_age = _file_age_hours(artifact_path)
         if not any_refreshed and artifact_age is not None and artifact_age <= DEFAULT_MAX_AGE_HOURS:
+            print(f"[START] historical_refresh/recompute/{name} {_trace_ts()}", flush=True)
+            print(
+                f"[END] historical_refresh/recompute/{name} {_trace_ts()} duration=0.0s skipped=fresh",
+                flush=True,
+            )
             results.append(
                 {
                     "name": name,
@@ -267,6 +307,7 @@ def recompute_dependents(*, root: Path, any_refreshed: bool) -> list[dict[str, A
                 "detail": detail,
             }
         )
+    trace_end("historical_refresh/recompute_dependents", t0)
     return results
 
 
@@ -282,14 +323,20 @@ def confidence_penalty(stale_sources: list[str]) -> float:
 def run_historical_runtime_refresh(*, root: Path | None = None, force: bool = False) -> dict[str, Any]:
     root = root or Path(".")
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    cycle_t0 = trace_start("run_historical_runtime_refresh")
 
+    audit_t0 = trace_start("historical_refresh/audit_before")
     audit_before = audit_all_sources(root=root)
+    trace_end("historical_refresh/audit_before", audit_t0)
+
     refresh_results: list[dict[str, Any]] = []
     any_refreshed = False
 
     for spec in HISTORICAL_SOURCES:
         row = audit_source(spec, root=root)
         needs_refresh = force or row["status"] in {"STALE", "MISSING"}
+        source_step = f"historical_refresh/source/{spec.source_id}"
+        source_t0 = trace_start(source_step)
         if not needs_refresh:
             refresh_results.append(
                 {
@@ -301,14 +348,20 @@ def run_historical_runtime_refresh(*, root: Path | None = None, force: bool = Fa
                     "age_hours_after": row["age_hours"],
                 }
             )
+            trace_end(source_step, source_t0)
             continue
         result = refresh_source(spec, root=root)
         refresh_results.append(result)
         if result.get("refresh_ok") and result.get("status") in {"REFRESHED", "FRESH"}:
             any_refreshed = True
+        if not result.get("refresh_ok"):
+            trace_fail(source_step, result.get("reason") or result.get("status") or "refresh failed")
+        trace_end(source_step, source_t0)
 
     recompute = recompute_dependents(root=root, any_refreshed=any_refreshed)
+    audit_t0 = trace_start("historical_refresh/audit_after")
     audit_after = audit_all_sources(root=root)
+    trace_end("historical_refresh/audit_after", audit_t0)
 
     stale_ids = [
         s["source_id"]
@@ -333,6 +386,7 @@ def run_historical_runtime_refresh(*, root: Path | None = None, force: bool = Fa
     }
     STATE_JSON.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     write_report(state)
+    trace_end("run_historical_runtime_refresh", cycle_t0)
     return state
 
 

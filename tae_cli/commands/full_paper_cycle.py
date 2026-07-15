@@ -15,7 +15,7 @@ def run(_args: list[str] | None = None) -> int:
     print("Mode: PAPER_ONLY | READ_ONLY | NO_BROKER | NO_LIVE_CHANGE | no execution")
     print("")
 
-    result = subprocess.run([sys.executable, "tae_full_paper_cycle.py"], cwd=ROOT, check=False)
+    result = subprocess.run([sys.executable, "-u", "tae_full_paper_cycle.py"], cwd=ROOT, check=False)
     code = int(result.returncode)
 
     if REPORT_MD.is_file():

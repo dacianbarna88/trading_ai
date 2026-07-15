@@ -9,14 +9,17 @@ Orchestrates existing modules; does not duplicate decision/execution logic.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 MODE = "PAPER_ONLY"
+DEFAULT_CLI_STEP_TIMEOUT = 600
 
 GOVERNANCE_DIR = Path("runtime_outputs/governance")
 GOVERNANCE_JSON = GOVERNANCE_DIR / "structural_governance.json"
@@ -193,10 +196,52 @@ def check_forbidden_file_safety(
     }
 
 
-def run_cli_step(name: str, cmd: list[str], *, cwd: Path) -> dict[str, Any]:
-    print(f"\n>>> [{name}] {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, check=False, capture_output=False)
+def _unbuffered_cmd(cmd: list[str]) -> list[str]:
+    if not cmd:
+        return cmd
+    exe = Path(cmd[0]).name
+    if exe.startswith("python") and "-u" not in cmd:
+        return [cmd[0], "-u", *cmd[1:]]
+    return cmd
+
+
+def run_cli_step(
+    name: str,
+    cmd: list[str],
+    *,
+    cwd: Path,
+    timeout: int = DEFAULT_CLI_STEP_TIMEOUT,
+) -> dict[str, Any]:
+    from tae_historical_runtime_refresh import trace_end, trace_fail, trace_start, trace_timeout
+
+    cmd = _unbuffered_cmd(cmd)
+    t0 = trace_start(name)
+    print(f"\n>>> [{name}] {' '.join(cmd)}", flush=True)
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            check=False,
+            capture_output=False,
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        trace_timeout(name, time.monotonic() - t0)
+        return {
+            "step": name,
+            "command": cmd,
+            "exit_code": 124,
+            "ok": False,
+            "status": "TIMEOUT",
+            "reason": f"timeout after {timeout}s",
+        }
     ok = result.returncode == 0
+    trace_end(name, t0)
+    if not ok:
+        trace_fail(name, f"exit_code={result.returncode}")
     return {
         "step": name,
         "command": cmd,
@@ -208,13 +253,17 @@ def run_cli_step(name: str, cmd: list[str], *, cwd: Path) -> dict[str, Any]:
 
 
 def gate_data_validity(root: Path) -> StepRecord:
-    from tae_historical_runtime_refresh import run_historical_runtime_refresh
+    from tae_historical_runtime_refresh import run_historical_runtime_refresh, trace_end, trace_fail, trace_start
 
+    t0 = trace_start("gate_data_validity")
     hist = run_historical_runtime_refresh(root=root)
+    trace_end("gate_data_validity", t0)
     critical_fresh = bool(hist.get("critical_all_fresh", hist.get("all_fresh")))
     stale = list(hist.get("stale_sources") or [])
     ok = critical_fresh
     reason = None if ok else f"critical data stale: {', '.join(stale) or 'unknown'}"
+    if not ok:
+        trace_fail("gate_data_validity", reason or "critical sources stale")
     return StepRecord(
         rank=1,
         step_id="data_validity",
@@ -502,9 +551,13 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     all_overrides: list[str] = []
     exit_code = 0
 
-    print("===== TAE STRUCTURAL GOVERNANCE — FULL PAPER CYCLE =====")
-    print(f"Mode: {MODE} | NO_BROKER | NO_LIVE_PROMOTION")
-    print("")
+    print("===== TAE STRUCTURAL GOVERNANCE — FULL PAPER CYCLE =====", flush=True)
+    print(f"Mode: {MODE} | NO_BROKER | NO_LIVE_PROMOTION", flush=True)
+    print("", flush=True)
+
+    from tae_historical_runtime_refresh import trace_end, trace_start
+
+    cycle_t0 = trace_start("structural_paper_cycle")
 
     before_mtimes = {name: _file_mtime(root / name) for name in FORBIDDEN_SNAPSHOT}
 
@@ -704,8 +757,12 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     # Rank 14 — RULE SURVIVAL (direct — no duplicate longitudinal)
     from tae_rule_survival import run_rule_survival
 
-    print("\n>>> [rule_survival] tae_rule_survival.run_rule_survival")
+    print("\n>>> [rule_survival] tae_rule_survival.run_rule_survival", flush=True)
+    from tae_historical_runtime_refresh import trace_end, trace_start
+
+    surv_t0 = trace_start("rule_survival")
     surv = run_rule_survival(write_report_flag=True)
+    trace_end("rule_survival", surv_t0)
     r_surv_ok = bool(surv.get("ok", True))
     steps.append(
         StepRecord(
@@ -944,9 +1001,11 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     }
     GOVERNANCE_JSON.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
-    print("\n===== TAE STRUCTURAL GOVERNANCE — COMPLETE =====")
-    print("Final verdict:", final_verdict)
-    print("Wrote:", GOVERNANCE_JSON, GOVERNANCE_REPORT_MD, CONSOLIDATION_REPORT_MD, CYCLE_SUMMARY_JSON)
+    print("\n===== TAE STRUCTURAL GOVERNANCE — COMPLETE =====", flush=True)
+    print("Final verdict:", final_verdict, flush=True)
+    print("Wrote:", GOVERNANCE_JSON, GOVERNANCE_REPORT_MD, CONSOLIDATION_REPORT_MD, CYCLE_SUMMARY_JSON, flush=True)
+
+    trace_end("structural_paper_cycle", cycle_t0)
 
     if final_verdict == "BLOCKED_WITH_REASONS":
         exit_code = 1

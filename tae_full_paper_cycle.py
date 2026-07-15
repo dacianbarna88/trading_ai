@@ -272,13 +272,20 @@ def compare_constitutional_evolution(
 
 def run_post_learning_evolution(root: Path, step_results: list[dict[str, Any]]) -> dict[str, Any]:
     """Re-run PDE after economic attribution + weight change; persist evolution evidence."""
+    from tae_historical_runtime_refresh import trace_end, trace_fail, trace_start
+
+    t0 = trace_start("post_learning_evolution")
     before_decisions = _load_json(root / PRE_EVOLUTION_DECISIONS) or _load_json(root / DECISIONS_JSON)
     before_weights = _load_json(root / PRE_EVOLUTION_WEIGHTS) or _load_json(root / ADAPTIVE_WEIGHTS_JSON)
 
-    print("\n>>> [constitutional_evolution] re-running paper-decisions after learning feedback")
+    print("\n>>> [constitutional_evolution] re-running paper-decisions after learning feedback", flush=True)
+    pde_t0 = trace_start("post_learning_evolution/paper_decisions")
     from tae_paper_decision_engine import main as run_pde
 
     exit_code = int(run_pde())
+    trace_end("post_learning_evolution/paper_decisions", pde_t0)
+    if exit_code != 0:
+        trace_fail("post_learning_evolution/paper_decisions", f"exit_code={exit_code}")
     after_decisions = _load_json(root / DECISIONS_JSON) or {}
     after_weights = _load_json(root / ADAPTIVE_WEIGHTS_JSON) or {}
 
@@ -306,25 +313,37 @@ def run_post_learning_evolution(root: Path, step_results: list[dict[str, Any]]) 
     )
     print(
         f">>> [constitutional_evolution] loop_closed={evolution['loop_closed']} "
-        f"decision_deltas={evolution['decision_change_count']} weight_deltas={evolution['weight_change_count']}"
+        f"decision_deltas={evolution['decision_change_count']} weight_deltas={evolution['weight_change_count']}",
+        flush=True,
     )
+    trace_end("post_learning_evolution", t0)
     return evolution
 
 
 def run_pre_pde_feedback(root: Path, step_results: list[dict[str, Any]]) -> None:
+    from tae_historical_runtime_refresh import trace_end, trace_start
+
+    t0 = trace_start("pre_pde_feedback")
     if not feedback_artifacts_exist(root):
-        print("\n>>> [pre_pde_feedback] skipped — no prior validation/memory artifacts")
+        print("\n>>> [pre_pde_feedback] skipped — no prior validation/memory artifacts", flush=True)
+        trace_end("pre_pde_feedback", t0)
         return
     from tae_longitudinal_outcome_memory import run_longitudinal_memory
     from tae_adaptive_paper_weights import run_adaptive_paper_weights
     from tae_rule_survival import run_rule_survival
 
-    print("\n>>> [pre_pde_feedback] refreshing longitudinal memory + adaptive weights + rule survival before paper-decisions")
+    print("\n>>> [pre_pde_feedback] refreshing longitudinal memory + adaptive weights + rule survival before paper-decisions", flush=True)
+    mem_t0 = trace_start("pre_pde_feedback/longitudinal_memory")
     mem_result = run_longitudinal_memory()
+    trace_end("pre_pde_feedback/longitudinal_memory", mem_t0)
     mem_idx = mem_result.get("index") or {}
+    weights_t0 = trace_start("pre_pde_feedback/adaptive_weights")
     weights_result = run_adaptive_paper_weights()
+    trace_end("pre_pde_feedback/adaptive_weights", weights_t0)
     weights_doc = weights_result.get("document") or {}
+    survival_t0 = trace_start("pre_pde_feedback/rule_survival")
     survival_result = run_rule_survival(write_report_flag=True)
+    trace_end("pre_pde_feedback/rule_survival", survival_t0)
     survival_doc = survival_result.get("document") or {}
     step_results.append(
         {
@@ -350,6 +369,7 @@ def run_pre_pde_feedback(root: Path, step_results: list[dict[str, Any]]) -> None
             "rules_classified": len(survival_doc.get("rules") or {}),
         }
     )
+    trace_end("pre_pde_feedback", t0)
 
 
 def run_step(name: str, cmd: list[str], *, cwd: Path) -> dict[str, Any]:

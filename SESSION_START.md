@@ -8,9 +8,9 @@
 
 | Item | Value |
 |------|--------|
-| **Current approved milestone** | **Decision Risk Synchronization** — `MAIN_BRAIN_RISK_SYNCHRONIZED` |
+| **Current approved milestone** | **Full Paper Cycle Hang Closure** — `FULL_PAPER_CYCLE_HANG_CLOSED` |
 | **Branch** | `cursor/x12b-legacy-archive-hotfix` |
-| **Base commits** | `9d816de` profit integrity guard · `295303f` capital base fix |
+| **Base commits** | `7c4f6a0` constitutional evolution loop · `4cd669b` Hard Risk sync |
 | **Canonical live runtime** | `live_bot.py` |
 | **TAE PAPER brain** | `tae_paper_decision_engine.py` (PDE) — single final action per ticker |
 | **TAE PAPER integration** | Structural governance 19-step → `full-paper-cycle` |
@@ -33,7 +33,7 @@ python3 tae.py opportunity-attrition   # upstream attrition trace + death map (r
 
 Expected morning-audit: **READY** · operational contract all OK · `PAPER_PROFIT_INTEGRITY: PASS` · `validation_capital_base: 30000`
 
-Audit reference: `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md` · `TAE_PROFIT_PIPELINE_CONSOLIDATION_AUDIT.md` · `TAE_PROFIT_OPTIMIZATION_AUDIT.md` · `TAE_OPPORTUNITY_ATTRITION_AUDIT.md` · `TAE_NON_TERMINAL_ORDER_RECOVERY_AUDIT.md` · `TAE_DECISION_RISK_SYNCHRONIZATION_AUDIT.md` · `TAE_FORENSIC_LOSSES_BEFORE_AFTER.md`
+**Full-paper-cycle hang fix (2026-07-15):** Output no longer stops silently after the governance header. Rank-1 `gate_data_validity` → `run_historical_runtime_refresh()` emits `[START]`/`[END]`/`[FAIL]`/`[TIMEOUT]` per source/script. CLI invokes `python3 -u`. `run_cli_step` bounded at 600s. Root cause was silent multi-minute historical refresh subprocesses (not recursion). Constitutional evolution loop preserved. Audit: `TAE_FULL_PAPER_CYCLE_HANG_AUDIT.md`.
 
 **Decision risk synchronization (2026-07-14):** PDE now runs `evaluate_pre_entry_hard_risk_compatibility()` before conflict resolution. Hard blocks BUY when GII collapse/lifecycle + HIGH_RISK + exposure disagree with entry; persistent reentry block after hard-risk SELL when critical risk remains. Coherence fields on every decision. Forensic replay: AMAT/MU Jul 8 add-ons + AMAT Jul 9 reentry → SKIP; $308.50 entry loss prevented in clean replay. Hard Risk SELL unchanged (mandatory). 88 tests OK.
 

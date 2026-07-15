@@ -1,0 +1,75 @@
+{
+  "schema": "tae.full_paper_cycle_hang_audit.v1",
+  "generated_at": "2026-07-15T18:30:00+00:00",
+  "verdict": "FULL_PAPER_CYCLE_HANG_CLOSED",
+  "trigger_commit": "7c4f6a0b4498075a159d3500e4a32a6ab5477e51",
+  "blocked_function": "gate_data_validity",
+  "blocked_child_command": "run_historical_runtime_refresh() → historical refresh subprocess scripts (e.g. historical_intelligence_engine.py, research/strategic_horizon.py) via _run_script()",
+  "root_cause": "Silent first-step historical runtime refresh after constitutional evolution wiring. Output stopped at structural governance header because gate_data_validity() invoked run_historical_runtime_refresh() with no step tracing and capture_output=True on refresh subprocesses. When critical or optional sources were STALE/MISSING, sequential yfinance/network refresh scripts ran for up to 300s each with zero stdout, appearing as an infinite hang. Not recursion, not file lock, not live_bot conflict.",
+  "recursion_ruled_out": {
+    "full_paper_cycle_recursive_invocation": false,
+    "pre_pde_feedback_governance_reentry": false,
+    "post_learning_pde_recursion": false,
+    "evidence": "grep across pre_pde_feedback, PDE main(), longitudinal memory — no full-paper-cycle or run_structural_paper_cycle calls"
+  },
+  "duration_before_fix_seconds": {
+    "gate_data_validity_isolated": 130.4,
+    "visible_output_after_header_seconds": 0,
+    "operator_interrupted": true
+  },
+  "duration_after_fix_seconds": {
+    "gate_data_validity_fresh_sources": 1.7,
+    "direct_script_unbuffered": 43.6,
+    "cli_full_paper_cycle_cycle_1": 43.6,
+    "cli_full_paper_cycle_cycle_2": 44.6,
+    "structural_paper_cycle_total": 42.2
+  },
+  "fix_summary": [
+    "Added [START]/[END]/[FAIL]/[TIMEOUT] tracing to tae_historical_runtime_refresh.py, tae_structural_governance.py, tae_full_paper_cycle.py",
+    "run_cli_step() now uses python -u, PYTHONUNBUFFERED=1, and 600s bounded timeout with clean TIMEOUT verdict",
+    "CLI wrapper tae_cli/commands/full_paper_cycle.py invokes python3 -u tae_full_paper_cycle.py",
+    "Historical refresh _run_script() uses -u and per-script trace; preserves 300s/600s per-script timeouts",
+    "Constitutional evolution loop from 7c4f6a0 preserved unchanged"
+  ],
+  "files_changed": [
+    "tae_historical_runtime_refresh.py",
+    "tae_structural_governance.py",
+    "tae_full_paper_cycle.py",
+    "tae_cli/commands/full_paper_cycle.py"
+  ],
+  "two_cycle_validation": {
+    "cycle_1_exit_code": 0,
+    "cycle_2_exit_code": 0,
+    "manual_interruption_required": false,
+    "loop_closed": true,
+    "decision_change_count": 11,
+    "weight_change_count": 1,
+    "constitutional_evolution_artifact": "runtime_outputs/governance/constitutional_evolution.json"
+  },
+  "integrity_checks": {
+    "profit_integrity": "PAPER_PROFIT_INTEGRITY_CLOSED",
+    "reconciliation": "PASS",
+    "validation_capital_base": 30000.0,
+    "capital_base_status": "CONFIRMED",
+    "orphan_cycle_processes": "none detected",
+    "orders_jsonl_lines": 116,
+    "trades_jsonl_lines": 28,
+    "duplicate_orders_trades_dpe": false
+  },
+  "tests": {
+    "command": "python3 -m unittest tae_full_paper_cycle_test tae_paper_execution_test tae_paper_decision_engine_test tae_decision_state_test tae_profit_pipeline_test -v",
+    "ran": 86,
+    "failures": 0,
+    "errors": 0,
+    "status": "OK"
+  },
+  "morning_audit": {
+    "reconciliation": "PASS",
+    "validation_capital_base": 30000.0,
+    "profit_integrity": "PAPER_PROFIT_INTEGRITY_CLOSED"
+  },
+  "profit_pipeline": {
+    "integrity": "PAPER_PROFIT_INTEGRITY_CLOSED",
+    "reconciliation": "PASS"
+  }
+}

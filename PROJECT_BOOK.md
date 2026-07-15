@@ -1,14 +1,15 @@
 # Trading AI — PROJECT BOOK (Canonical Journal)
 
-**Last updated:** 2026-07-14  
-**Latest sprint:** **Decision Risk Synchronization** — `MAIN_BRAIN_RISK_SYNCHRONIZED` (PDE pre-entry Hard Risk compatibility)  
-**Previous milestones:** Non-Terminal Order Recovery (`NON_TERMINAL_ORDER_RECOVERY_CLOSED`) · Decision Replay Promotion (`REPLAY_VALUE_NOT_REPRODUCIBLE`)  
+**Last updated:** 2026-07-15  
+**Latest sprint:** **Full Paper Cycle Hang Closure** — `FULL_PAPER_CYCLE_HANG_CLOSED` (orchestration trace + bounded subprocess timeouts)  
+**Previous sprint:** Constitutional evolution loop (`7c4f6a0`) · Decision Risk Synchronization (`MAIN_BRAIN_RISK_SYNCHRONIZED`)  
 **Branch:** `cursor/x12b-legacy-archive-hotfix`  
 **Governance mode:** PAPER_ONLY · ADVISORY_ONLY · NO_BROKER · NO_LIVE_PROMOTION  
 **Canonical runtime:** `live_bot.py` (not `live_bot_v5_1.py`)
 
 > **Read first each session:** `SESSION_START.md` → `TAE_OPERATIONAL_CONSISTENCY_CLOSURE_AUDIT.md`  
 > **PAPER daily operator command:** `python3 tae.py full-paper-cycle` then `python3 tae.py morning-audit` (expect **READY**)  
+> **Hang fix audit (2026-07-15):** `TAE_FULL_PAPER_CYCLE_HANG_AUDIT.md` · `tae_full_paper_cycle_hang_audit.json` — rank-1 `gate_data_validity` historical refresh now emits `[START]`/`[END]` trace; CLI uses `-u`; subprocess timeout 600s  
 > **Profit pipeline view:** `python3 tae.py profit-pipeline` (read-only join of existing artifacts)  
 > **Profit optimization audit:** `python3 tae.py profit-optimization` (evidence-based challenger replay; read-only)  
 > **Opportunity attrition audit:** `python3 tae.py opportunity-attrition` (upstream death map + blocker challenger; read-only)  
