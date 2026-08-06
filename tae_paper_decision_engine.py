@@ -2118,7 +2118,14 @@ def apply_hypothesis_rules(
     confidence: float,
     ctx: dict[str, Any],
 ) -> tuple[str, list[dict[str, Any]], str]:
-    """Apply hypothesis validation/rejection rules; may force SKIP_PAPER."""
+    """
+    Apply hypothesis rules without allowing unrelated research experiments
+    to veto a canonical PAPER decision.
+
+    Canonical BUY_PAPER is owned by PDE scoring plus the existing market,
+    data, Hard Risk, capital and execution gates. Portfolio-policy,
+    maintenance and unmapped experiments remain observational.
+    """
     hyps = hypotheses_for_ticker(ticker, ctx.get("hypotheses"))
     applied: list[dict[str, Any]] = []
     for hyp in hyps:
@@ -2131,17 +2138,63 @@ def apply_hypothesis_rules(
             }
         )
 
-    exps = (ctx.get("exp_by_ticker") or {}).get(ticker.upper(), [])
-    exps.extend((ctx.get("exp_by_ticker") or {}).get("_PORTFOLIO", []))
-    if any(e.get("verdict") == "REJECT" for e in exps):
-        return "SKIP_PAPER", applied, "hypothesis rejection_rule: linked experiment REJECT"
+    ticker_exps = list(
+        (ctx.get("exp_by_ticker") or {}).get(ticker.upper(), []) or []
+    )
 
-    promising = any(e.get("verdict") == "PROMISING" for e in exps)
-    if action in {"BUY_PAPER", "ROTATE_PAPER"} and not promising and confidence < 0.5:
-        return "SKIP_PAPER", applied, "hypothesis rejection_rule: no PROMISING validation for aggressive action"
+    # A rejected experiment may veto only the executable action to which
+    # that specific experiment maps. Unmapped research/policy experiments
+    # must never turn a canonical BUY into SKIP.
+    rejected_for_action = []
+    promising_for_action = []
 
-    if action == "PROTECT_PAPER" and hyps and not promising and confidence < 0.42:
-        return "SKIP_PAPER", applied, "hypothesis rejection_rule: protect action lacks validation evidence"
+    for exp in ticker_exps:
+        mapped = map_paper_experiment_action(
+            _s(exp.get("paper_experiment_action")).upper()
+        )
+        verdict = _s(exp.get("verdict")).upper()
+
+        if mapped == action and verdict == "REJECT":
+            rejected_for_action.append(exp)
+
+        if mapped == action and verdict == "PROMISING":
+            promising_for_action.append(exp)
+
+    if rejected_for_action:
+        ids = ",".join(
+            _s(exp.get("hypothesis_id")) for exp in rejected_for_action
+        )
+        return (
+            "SKIP_PAPER",
+            applied,
+            f"hypothesis rejection_rule: action-specific experiment REJECT ({ids})",
+        )
+
+    # ROTATE and PROTECT may still depend on their mapped experimental
+    # evidence. Canonical BUY_PAPER does not require a PROMISING experiment:
+    # it has already passed PDE scoring and the common safety gates.
+    if (
+        action == "ROTATE_PAPER"
+        and not promising_for_action
+        and confidence < 0.5
+    ):
+        return (
+            "SKIP_PAPER",
+            applied,
+            "hypothesis rejection_rule: no PROMISING validation for ROTATE_PAPER",
+        )
+
+    if (
+        action == "PROTECT_PAPER"
+        and hyps
+        and not promising_for_action
+        and confidence < 0.42
+    ):
+        return (
+            "SKIP_PAPER",
+            applied,
+            "hypothesis rejection_rule: protect action lacks mapped validation evidence",
+        )
 
     return action, applied, ""
 

@@ -2835,6 +2835,34 @@ def _action_changed_flag(execution_reason: str) -> bool:
     return execution_reason.startswith("action_changed:")
 
 
+def _decision_strategy_id(
+    decision: dict[str, Any],
+    portfolio: dict[str, Any] | None = None,
+) -> str:
+    """Return the explicit strategy owner; unmarked legacy decisions are V1."""
+    portfolio = portfolio or {}
+    strategy_v2 = decision.get("strategy_v2") or {}
+    return (
+        _s(
+            decision.get("strategy_id")
+            or decision.get("strategy_version")
+            or strategy_v2.get("strategy_id")
+            or strategy_v2.get("strategy_version")
+            or portfolio.get("strategy_id")
+            or portfolio.get("strategy_version")
+            or "V1"
+        ).upper()
+        or "V1"
+    )
+
+
+def _is_v1_owned_decision(
+    decision: dict[str, Any],
+    portfolio: dict[str, Any] | None = None,
+) -> bool:
+    return _decision_strategy_id(decision, portfolio) in {"V1", "CANONICAL_PAPER"}
+
+
 def execute_decision(
     decision: dict[str, Any],
     portfolio: dict[str, Any],
@@ -3112,10 +3140,20 @@ def execute_decision(
     elif action == "BUY_PAPER":
         from tae_paper_profit_trailing import REASON_BUY_BLOCKED, trailing_active_on_position
 
-        # Scale-in / rebuy blocked while profit trailing owns the open cycle.
-        if trailing_active_on_position(before):
+        # Profit trailing is a V1 cycle owner. It must not become a global
+        # veto over explicitly marked V2/Vx strategy decisions.
+        strategy_id = _decision_strategy_id(decision, portfolio)
+        v1_trailing_owns_buy = (
+            _is_v1_owned_decision(decision, portfolio)
+            and trailing_active_on_position(before)
+        )
+
+        if v1_trailing_owns_buy:
             status = REASON_BUY_BLOCKED
-            reason = f"{REASON_BUY_BLOCKED}: scale-in blocked for active profit trailing cycle"
+            reason = (
+                f"{REASON_BUY_BLOCKED}: V1 scale-in blocked for active "
+                f"profit trailing cycle strategy_id={strategy_id}"
+            )
             executed = False
             is_trade = False
             after = before
@@ -3223,14 +3261,25 @@ def execute_decision(
                     )
                 else:
                     # Binding Decision Brain SKIP gate (PAPER NEW BUY only).
+                    current_switch_authorized = bool(
+                        decision.get("decision_switch_authorized")
+                    )
+                    current_action_is_buy = action == "BUY_PAPER"
+
+                    # A fresh, current BUY owned and authorized by PDE must not be
+                    # reverted by a sticky/previous execution_reason SKIP.
+                    effective_execution_reason = execution_reason
+                    if current_action_is_buy and current_switch_authorized:
+                        effective_execution_reason = "current_pde_buy_authorized"
+
                     db_skip_gate = evaluate_decision_brain_skip_new_entry_gate(
                         action=action,
                         is_new_position=is_new_position,
                         ticker=ticker,
                         decision=decision,
-                        execution_reason=execution_reason,
+                        execution_reason=effective_execution_reason,
                         entry_kind="BUY",
-                        strategy_id=_s(decision.get("strategy_id") or portfolio.get("strategy_id") or "V1") or "V1",
+                        strategy_id=_decision_strategy_id(decision, portfolio),
                     )
                     if db_skip_gate.get("blocked"):
                         status = BLOCK_REASON_DECISION_BRAIN_SKIP
