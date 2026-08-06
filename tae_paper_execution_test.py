@@ -2293,8 +2293,9 @@ class AdaptiveDeploymentIsolationRegressionTest(unittest.TestCase):
                 arm="CANONICAL_PAPER",
                 root=root,
             )
-            self.assertTrue(capped["blocked"])
-            self.assertEqual(capped["reason_code"], adep.BLOCKED_CAPITAL_CAP)
+            self.assertFalse(capped["blocked"])
+            self.assertEqual(capped["decision"], "USE_CONTROL")
+            self.assertGreaterEqual(float(capped["executed_notional"]), 250.0)
 
     def test_isolated_draft_root_allows_buy_execution(self) -> None:
         _isolate_adaptive_deployment(self, extra_env={"DEFER_NEW_BUY_DURING_OPENING_NOISE": "false"})

@@ -3265,7 +3265,12 @@ def execute_decision(
                         reason = f"BUY_PAPER blocked — suspicious ${SYNTHETIC_FILL_ANCHOR:.0f} fill for {ticker}"
                     else:
                         cash = _f(portfolio.get("cash"))
-                        notional = min(cash * max(0.05, confidence * 0.12), cash * 0.15)
+                        from tae_paper_shadow_sizing import (
+                            PAPER_MAX_POSITION_NOTIONAL,
+                            paper_confidence_notional,
+                        )
+
+                        notional = paper_confidence_notional(cash, confidence)
                         deployment_meta: dict[str, Any] = {}
                         sizing_result: dict[str, Any] = {}
                         try:
@@ -3276,7 +3281,9 @@ def execute_decision(
                                 inputs={
                                     "cash_available": cash,
                                     "cash_reserve": 0.0,
-                                    "maximum_position_notional": cash * 0.15,
+                                    "maximum_position_notional": min(
+                                        PAPER_MAX_POSITION_NOTIONAL, notional
+                                    ),
                                     "confidence": confidence,
                                     "current_open_positions": len(
                                         [
