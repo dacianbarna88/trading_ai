@@ -1627,6 +1627,8 @@ TRAILING_MERGE_FIELDS = (
     "profit_trailing_last_valid_mark",
     "profit_trailing_state_version",
     "profit_trailing_bootstrap_completed",
+    "profit_trailing_pce_verdict",
+    "profit_trailing_pce_wired",
 )
 
 
@@ -1988,7 +1990,11 @@ def merge_and_persist_profit_trailing_state(
     Does not invent fills or change cash/shares except via sync_portfolio_profit_trailing
     state-field updates on existing open positions.
     """
-    from tae_paper_profit_trailing import sync_portfolio_profit_trailing
+    from tae_paper_profit_trailing import (
+        load_pce_by_ticker,
+        sync_portfolio_profit_trailing,
+        wire_paper_profit_protection,
+    )
 
     lock = _acquire_execution_lock()
     try:
@@ -2010,6 +2016,12 @@ def merge_and_persist_profit_trailing_state(
             for key in TRAILING_MERGE_FIELDS:
                 if key in src:
                     dst[key] = src[key]
+        gii_by_ticker, _gii_meta = load_gii_lifecycle_index()
+        wire_paper_profit_protection(
+            disk,
+            pce_by=load_pce_by_ticker(),
+            gii_by=gii_by_ticker,
+        )
         sync_portfolio_profit_trailing(disk)
         save_json(PORTFOLIO_JSON, disk)
         return disk
@@ -4142,6 +4154,14 @@ def _run_paper_execution_body(*, write_report_flag: bool = True) -> dict[str, An
     roi001_challenger = bool(roi_flags.get("roi001_challenger"))
 
     gii_by_ticker, gii_meta = load_gii_lifecycle_index()
+
+    from tae_paper_profit_trailing import load_pce_by_ticker, wire_paper_profit_protection
+
+    wire_paper_profit_protection(
+        portfolio,
+        pce_by=load_pce_by_ticker(),
+        gii_by=gii_by_ticker,
+    )
 
     proactive_orders = execute_proactive_hard_risk_exits(
         portfolio,
