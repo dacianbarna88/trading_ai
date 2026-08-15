@@ -56,6 +56,15 @@ ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "SUSPENDED": frozenset({"CHALLENGER", "CANDIDATE", "ARCHIVED"}),
 }
 
+# Graduated autonomy: transitions in this table apply immediately, with no
+# human ticket approval. Scope is deliberately narrow — CANDIDATE -> CHALLENGER
+# only starts isolated PAPER testing (no capital movement, no champion change,
+# no LIVE impact). Every other transition, including CHALLENGER -> CHAMPION,
+# stays strictly human-gated via approve_ticket()/apply_ticket() below.
+AUTO_APPROVED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "CANDIDATE": frozenset({"CHALLENGER"}),
+}
+
 TICKET_TYPES = frozenset(
     {
         "ADVANCE_TO_CHALLENGER",
@@ -452,7 +461,7 @@ def create_ticket(
     sid = _s(strategy_id)
     to_state = _s(target_state).upper()
     state = load_promotion_state(create_if_missing=True)
-    row = (state.get("strategies") or {}).get(sid)
+    row = dict((state.get("strategies") or {}).get(sid) or {})
     if not row:
         return {"ok": False, "reason": "STRATEGY_NOT_IN_PROMOTION_STATE", "strategy_id": sid}
     fr = _s(row.get("lifecycle_state")).upper()
@@ -460,6 +469,8 @@ def create_ticket(
     if not check.get("ok"):
         audit("TICKET_CREATE_REJECTED", {"strategy_id": sid, "check": check, "ticket_type": ttype})
         return {"ok": False, **check}
+
+    auto_apply = to_state in AUTO_APPROVED_TRANSITIONS.get(fr, frozenset())
 
     ticket = {
         "ticket_id": f"PLT-{uuid.uuid4().hex[:12].upper()}",
@@ -473,12 +484,14 @@ def create_ticket(
         "strategy_id": sid,
         "from_state": fr,
         "to_state": to_state,
-        "status": TICKET_OPEN,
+        "status": TICKET_APPLIED if auto_apply else TICKET_OPEN,
         "requested_by": _s(requested_by) or "UNKNOWN",
         "rationale": _s(rationale),
-        "approver": None,
-        "approved_at": None,
-        "applied_at": None,
+        "approver": "TAE_STRATEGY_LAB_AUTO_GATE" if auto_apply else None,
+        "approved_at": _now() if auto_apply else None,
+        "applied_at": _now() if auto_apply else None,
+        "human_approval": not auto_apply,
+        "auto_applied": auto_apply,
         "rollback_plan": rollback_plan
         or {
             "previous_champion_id": state.get("champion_strategy_id"),
@@ -486,6 +499,28 @@ def create_ticket(
         },
     }
     _append_jsonl(PROMOTION_TICKETS_PATH, ticket)
+
+    if auto_apply:
+        strategies = dict(state.get("strategies") or {})
+        row["lifecycle_state"] = to_state
+        row["last_transition_at"] = _now()
+        row["last_ticket_id"] = ticket["ticket_id"]
+        row["live_allowed"] = False
+        strategies[sid] = row
+        state["strategies"] = strategies
+        save_promotion_state(state)
+        audit(
+            "TICKET_AUTO_APPLIED",
+            {
+                "ticket_id": ticket["ticket_id"],
+                "ticket_type": ttype,
+                "strategy_id": sid,
+                "from": fr,
+                "to": to_state,
+            },
+        )
+        return {"ok": True, "ticket": ticket, "auto_applied": True, "live_mutation": False}
+
     open_ids = list(state.get("open_ticket_ids") or [])
     open_ids.append(ticket["ticket_id"])
     state["open_ticket_ids"] = open_ids
@@ -1023,6 +1058,7 @@ def promotion_status() -> dict[str, Any]:
 
 __all__ = [
     "ALLOWED_TRANSITIONS",
+    "AUTO_APPROVED_TRANSITIONS",
     "AUTONOMOUS_PAPER_EVOLUTION_DOMAIN",
     "LIFECYCLE_STATES",
     "PROMOTION_DOMAIN",
