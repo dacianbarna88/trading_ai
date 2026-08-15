@@ -38,6 +38,7 @@ from tae_strategy_v2_routing import (
 )
 
 ATTRIBUTION_TOLERANCE_USD = 0.02
+ATTRIBUTION_TOLERANCE_ROI_PCT = 0.001  # 0.1 percentage points, for ROI-normalized leader comparisons
 MIN_MATCHED_CLOSED_FOR_VERDICT = 1
 DPE_CONTAMINATION_TOKENS = frozenset(
     {"COMPETITIVE", "COLLABORATIVE", "DPE_COMPETITIVE", "DPE_COLLABORATIVE"}
@@ -1007,43 +1008,15 @@ def _match_opportunities(
         same_entry_px = abs(a["entry_price"] - b["entry_price"]) <= 1e-6 or (
             a["entry_price"] > 0 and b["entry_price"] > 0 and abs(a["entry_price"] - b["entry_price"]) / a["entry_price"] < 1e-4
         )
-        # Comparable capital: same methodology requires similar notional OR documented tranche vs full —
-        # user requires same capital for primary winner; flag unequal notionals as ambiguous.
+        # Informational only — same-methodology notional check. Does NOT gate economic
+        # comparability: V1 (full position) vs V2 (tranche) are reconciled in dollar terms
+        # via economic_difference/attribution below, AND compared via ROI% (v1_roi_pct /
+        # v2_roi_pct, normalized by entry notional) in _leaders() so differing position
+        # sizes no longer force DATASETS_NOT_COMPARABLE_BY_DESIGN.
         capital_comparable = abs(a["value"] - b["value"]) <= max(1.0, 0.05 * max(a["value"], b["value"], 1.0))
+        capital_reason_code = None if capital_comparable else _noncomparability_reason(a, b)
         if not (same_ticker and same_entry_px):
             unmatched.append({"opportunity_id": oid, "v1": a, "v2": b, "reason": "ticker_or_entry_price_mismatch"})
-            continue
-        if not capital_comparable:
-            reason_code = _noncomparability_reason(a, b)
-            identity_matched_not_comparable.append(
-                {
-                    "opportunity_id": oid,
-                    "identity_matched": True,
-                    "economically_comparable": False,
-                    "reason": "entry_notional_not_comparable",
-                    "reason_code": reason_code,
-                    "v1_value": a["value"],
-                    "v2_value": b["value"],
-                    "v1_quantity": a.get("quantity"),
-                    "v2_quantity": b.get("quantity"),
-                    "v1": a,
-                    "v2": b,
-                }
-            )
-            # Keep legacy unmatched list for older consumers, with explicit identity flag.
-            unmatched.append(
-                {
-                    "opportunity_id": oid,
-                    "v1": a,
-                    "v2": b,
-                    "reason": "entry_notional_not_comparable",
-                    "reason_code": reason_code,
-                    "identity_matched": True,
-                    "economically_comparable": False,
-                    "v1_value": a["value"],
-                    "v2_value": b["value"],
-                }
-            )
             continue
 
         t = a["ticker"]
@@ -1074,6 +1047,11 @@ def _match_opportunities(
             else:
                 winner = "V1"
 
+        # ROI% normalizes PnL by entry notional so a full V1 position vs a V2 tranche
+        # of the same opportunity can be compared on return, not raw dollar exposure.
+        v1_roi_pct = (_f(v1_pnl) / a["value"]) if (v1_pnl is not None and a["value"]) else None
+        v2_roi_pct = (_f(v2_pnl) / b["value"]) if (v2_pnl is not None and b["value"]) else None
+
         closed_both = bool(ex1) and bool(ex2)
         matched.append(
             {
@@ -1086,10 +1064,12 @@ def _match_opportunities(
                 "v1_exit_timestamp": (ex1 or {}).get("ts"),
                 "v1_exit_price": (ex1 or {}).get("exit_price"),
                 "v1_pnl": v1_pnl,
+                "v1_roi_pct": v1_roi_pct,
                 "v1_exit_reason": (ex1 or {}).get("exit_reason"),
                 "v2_exit_timestamp": (ex2 or {}).get("ts"),
                 "v2_exit_price": (ex2 or {}).get("exit_price"),
                 "v2_pnl": v2_pnl,
+                "v2_roi_pct": v2_roi_pct,
                 "v2_exit_reason": (ex2 or {}).get("exit_reason"),
                 "winner": winner,
                 "economic_difference": diff,
@@ -1097,6 +1077,8 @@ def _match_opportunities(
                 "status": "CLOSED_MATCHED" if closed_both else "OPEN_OR_PARTIAL",
                 "identity_matched": True,
                 "economically_comparable": True,
+                "capital_comparable": capital_comparable,
+                "capital_reason_code": capital_reason_code,
             }
         )
 
@@ -1218,17 +1200,25 @@ def _leaders(v1m: dict[str, Any], v2m: dict[str, Any], matched: list[dict[str, A
     if dd == "TIE":
         risk_adj = _cmp(v1m.get("expectancy"), v2m.get("expectancy"), higher_better=True)
 
+    # Overall/capture/loss-protection leaders are computed on ROI% (PnL / entry notional),
+    # not raw dollar PnL, so V1 (full position) vs V2 (tranche) sizing differences don't
+    # confound which arm actually performed better per dollar risked.
     closed_matched = [m for m in matched if m.get("closed_both")]
     if closed_matched:
-        v1_sum = sum(_f(m.get("v1_pnl")) for m in closed_matched)
-        v2_sum = sum(_f(m.get("v2_pnl")) for m in closed_matched)
-        overall = "TIE" if abs(v2_sum - v1_sum) < ATTRIBUTION_TOLERANCE_USD else ("V2" if v2_sum > v1_sum else "V1")
-        capture = overall  # without MFE fields, profit on matched closed is proxy
-        loss_prot = _cmp(
-            sum(_f(m.get("v1_pnl")) for m in closed_matched if _f(m.get("v1_pnl")) < 0),
-            sum(_f(m.get("v2_pnl")) for m in closed_matched if _f(m.get("v2_pnl")) < 0),
-            higher_better=True,  # less negative better → higher algebraically
+        v1_roi_avg = sum(_f(m.get("v1_roi_pct")) for m in closed_matched) / len(closed_matched)
+        v2_roi_avg = sum(_f(m.get("v2_roi_pct")) for m in closed_matched) / len(closed_matched)
+        overall = (
+            "TIE"
+            if abs(v2_roi_avg - v1_roi_avg) < ATTRIBUTION_TOLERANCE_ROI_PCT
+            else ("V2" if v2_roi_avg > v1_roi_avg else "V1")
         )
+        capture = overall  # without MFE fields, profit on matched closed is proxy
+        v1_loss_roi = sum(_f(m.get("v1_roi_pct")) for m in closed_matched if _f(m.get("v1_roi_pct")) < 0)
+        v2_loss_roi = sum(_f(m.get("v2_roi_pct")) for m in closed_matched if _f(m.get("v2_roi_pct")) < 0)
+        if abs(v1_loss_roi - v2_loss_roi) < ATTRIBUTION_TOLERANCE_ROI_PCT:
+            loss_prot = "TIE"
+        else:
+            loss_prot = "V1" if v1_loss_roi > v2_loss_roi else "V2"  # less negative ROI% is better protection
     else:
         overall = "INSUFFICIENT_COMPARABLE_SAMPLE"
         capture = "INSUFFICIENT_COMPARABLE_SAMPLE"
