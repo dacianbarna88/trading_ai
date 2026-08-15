@@ -1360,6 +1360,60 @@ with tabs[7]:
         else:
             st.info("Nu există încă tranzacții închise.")
 
+    st.divider()
+    st.subheader("⚖️ V1 vs V2 — Economic Comparison")
+    st.caption("PAPER_ONLY | ISOLATED_PARALLEL_PAPER | leader comparison normalized to ROI% (not raw $ PnL)")
+    try:
+        from research_core.economics.v1_v2_economic_comparison import get_v1_v2_economic_comparison
+
+        v1v2 = get_v1_v2_economic_comparison()
+    except Exception as e:
+        v1v2 = None
+        st.warning(f"Nu pot calcula comparația V1 vs V2: {e}")
+
+    if v1v2:
+        vc1, vc2, vc3 = st.columns(3)
+        vc1.metric("Overall Economic Leader", v1v2.get("overall_economic_leader") or "N/A")
+        vc2.metric("Verdict", v1v2.get("verdict") or "N/A")
+        v1v2_conf = v1v2.get("confidence")
+        vc3.metric("Confidence", f"{v1v2_conf * 100:.0f}%" if isinstance(v1v2_conf, (int, float)) else "N/A")
+        if v1v2.get("main_reason"):
+            st.caption(v1v2["main_reason"])
+
+        def _v1v2_money(v):
+            return f"${v:,.2f}" if isinstance(v, (int, float)) else "N/A"
+
+        def _v1v2_pct(v):
+            return f"{v * 100:.2f}%" if isinstance(v, (int, float)) else "N/A"
+
+        v1m = v1v2.get("v1") or {}
+        v2m = v1v2.get("v2") or {}
+        compare_df = pd.DataFrame(
+            [
+                {"Metric": "Account Value", "V1": _v1v2_money(v1m.get("account_value")), "V2": _v1v2_money(v2m.get("account_value"))},
+                {"Metric": "Realized PnL", "V1": _v1v2_money(v1m.get("realized_pnl")), "V2": _v1v2_money(v2m.get("realized_pnl"))},
+                {"Metric": "Unrealized PnL", "V1": _v1v2_money(v1m.get("unrealized_pnl")), "V2": _v1v2_money(v2m.get("unrealized_pnl"))},
+                {"Metric": "Total PnL", "V1": _v1v2_money(v1m.get("total_pnl")), "V2": _v1v2_money(v2m.get("total_pnl"))},
+                {"Metric": "ROI %", "V1": _v1v2_pct(v1m.get("roi_pct")), "V2": _v1v2_pct(v2m.get("roi_pct"))},
+            ]
+        )
+        st.dataframe(compare_df, width="stretch", hide_index=True)
+
+        dq = v1v2.get("data_quality") or {}
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("Identity-Matched", dq.get("identity_matched_opportunities", 0))
+        sc2.metric("Economically Comparable", dq.get("economically_comparable_opportunities", 0))
+        sc3.metric("Matched & Closed (both arms)", dq.get("matched_closed", 0))
+
+        narrative = (v1v2.get("attribution") or {}).get("narrative")
+        if narrative:
+            st.markdown("**Attribution (matched closed + open MTM)**")
+            st.code(narrative)
+        else:
+            st.info("Fără atribuire disponibilă (eșantion insuficient).")
+    else:
+        st.info("Comparația V1 vs V2 nu e disponibilă momentan.")
+
 with tabs[8]:
     st.subheader("🩺 Bot Health")
     bot_log = read_text("bot_output.log")
