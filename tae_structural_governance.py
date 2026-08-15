@@ -1129,7 +1129,7 @@ def run_structural_paper_cycle(root: Path | None = None) -> tuple[int, dict[str,
     )
 
     # Rank 17 — SELF-IMPROVE (autonomous PAPER learning orchestration)
-    r_self_improve = run_cli_step("self_improve", [py, "tae.py", "self-improve"], cwd=root)
+    r_self_improve = run_cli_step("self_improve", [py, "tae.py", "self-improve", "run"], cwd=root)
     cli_steps.append(r_self_improve)
     steps.append(
         step_from_cli(
