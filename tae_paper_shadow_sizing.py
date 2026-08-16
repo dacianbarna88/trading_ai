@@ -49,12 +49,21 @@ def paper_confidence_notional(
     *,
     cash_reserve: float = 0.0,
     max_pos: float = PAPER_MAX_POSITION_NOTIONAL,
+    atr_pct: float | None = None,
 ) -> float:
-    """Canonical PAPER confidence-weighted notional — shared execution path."""
+    """Canonical PAPER confidence-weighted notional — shared execution path.
+
+    ``atr_pct`` is optional and defaults to None (identical behavior to
+    before). When supplied, the base notional is scaled by the existing
+    volatility-normalized factor from
+    ``tae_risk_weighted_sizing_ab.size_b1_vol()`` (imported and reused,
+    not reimplemented) — higher ATR% shrinks the position, clipped to
+    [0.4, 1.6] exactly as in the original shadow formula.
+    """
     cash = float(cash_available)
     conf = float(confidence)
     investable = max(0.0, cash - float(cash_reserve))
-    return round(
+    base = round(
         min(
             cash * max(PAPER_CONFIDENCE_MIN_FRACTION, conf * PAPER_CONFIDENCE_MULT),
             cash * PAPER_CONFIDENCE_MAX_FRACTION,
@@ -63,6 +72,21 @@ def paper_confidence_notional(
         ),
         6,
     )
+    if atr_pct is None or base <= 0:
+        return base
+    try:
+        import pandas as pd
+
+        from tae_risk_weighted_sizing_ab import size_b1_vol
+
+        ts = pd.Timestamp.utcnow().tz_localize(None).normalize()
+        feat = pd.DataFrame({"ATR_Pct": [float(atr_pct)]}, index=pd.DatetimeIndex([ts]))
+        ev = {"ts": ts, "intent_notional": base, "price": 0.0, "shares": 0.0, "score": None}
+        state = type("_CashOnly", (), {"cash": cash})()
+        result = size_b1_vol(ev, feat, state, target_risk=0.01, median_atr_pct=2.0)
+        return round(float(result.get("notional", base)), 6)
+    except Exception:
+        return base
 
 # Reuse canonical formula IDs from entry risk snapshot.
 from tae_paper_entry_risk_snapshot import (

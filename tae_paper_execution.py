@@ -2706,6 +2706,35 @@ def _sell_shares(
     return realized, gross_proceeds, pos
 
 
+def _fetch_atr_pct_for_sizing(ticker: str) -> float | None:
+    """Isolated ATR% fetch for volatility-normalized position sizing.
+
+    Never blocks or delays a BUY on failure — any error or invalid data
+    returns None, which preserves today's confidence-only sizing exactly
+    (see paper_confidence_notional's atr_pct=None default). Deliberately
+    separate from core.market_data_layer.get_market_price() so a failure
+    here cannot affect fill-price resolution for any other caller.
+    """
+    try:
+        import math
+
+        import yfinance as yf
+
+        from research.momentum.context_intelligence_research_v18 import compute_atr
+
+        hist = yf.Ticker(str(ticker).strip()).history(period="3mo")
+        if hist is None or hist.empty or len(hist) < 14:
+            return None
+        atr_series = compute_atr(hist["High"], hist["Low"], hist["Close"])
+        last_atr = float(atr_series.iloc[-1])
+        last_close = float(hist["Close"].iloc[-1])
+        if not math.isfinite(last_atr) or not math.isfinite(last_close) or last_close <= 0 or last_atr <= 0:
+            return None
+        return round((last_atr / last_close) * 100.0, 6)
+    except Exception:
+        return None
+
+
 def _buy_shares(
     portfolio: dict[str, Any],
     ticker: str,
@@ -3319,7 +3348,8 @@ def execute_decision(
                             paper_confidence_notional,
                         )
 
-                        notional = paper_confidence_notional(cash, confidence)
+                        atr_pct = _fetch_atr_pct_for_sizing(ticker)
+                        notional = paper_confidence_notional(cash, confidence, atr_pct=atr_pct)
                         deployment_meta: dict[str, Any] = {}
                         sizing_result: dict[str, Any] = {}
                         try:
