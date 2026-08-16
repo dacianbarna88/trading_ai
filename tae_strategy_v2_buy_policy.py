@@ -683,7 +683,15 @@ def evaluate_buy_policy(
         # Price-driven ADD: log current thesis/score/PDE but do not veto.
         last_px = _f(cycle.get("last_tranche_price"))
         drop = float(cfg["add_tranche_drop_pct"])
-        if not price_drop_reached(mark_price=inp.mark_price, last_tranche_price=last_px, drop_pct=drop):
+        try:
+            from tae_paper_execution import _fetch_atr_pct_for_sizing
+
+            atr_pct = _fetch_atr_pct_for_sizing(inp.ticker)
+        except Exception:
+            atr_pct = None
+        factor = 1.0 if atr_pct is None else max(0.4, min(1.6, atr_pct / 2.0))
+        effective_drop_pct = drop * factor
+        if not price_drop_reached(mark_price=inp.mark_price, last_tranche_price=last_px, drop_pct=effective_drop_pct):
             out = _base_payload(
                 action="HOLD",
                 reason_code=REASON_HOLD_STEP,

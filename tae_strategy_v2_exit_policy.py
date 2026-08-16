@@ -141,7 +141,14 @@ def evaluate_exit_policy(
     enabled: bool | None = None,
 ) -> dict[str, Any]:
     cfg = dict(cfg or load_strategy_v2_config())
-    min_profit = float(cfg.get("minimum_cycle_profit_pct", 0.10))
+    try:
+        from tae_paper_execution import _fetch_atr_pct_for_sizing
+
+        atr_pct = _fetch_atr_pct_for_sizing(inp.ticker)
+    except Exception:
+        atr_pct = None
+    factor = 1.0 if atr_pct is None else max(0.4, min(1.6, atr_pct / 2.0))
+    min_profit = float(cfg.get("minimum_cycle_profit_pct", 0.10)) * factor
     thesis_invalid_exit = bool(cfg.get("thesis_invalid_exit", True))
     hard_risk_exit = bool(cfg.get("hard_risk_exit", True))
     close_fraction = float(cfg.get("close_fraction", 1.0))
