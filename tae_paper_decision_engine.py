@@ -876,6 +876,9 @@ def load_horizon_ssot() -> dict[str, Any]:
             "horizon_vote_summary.txt": file_age_hours(HORIZON_VOTE_TXT),
             "tae_intraday_fade_intelligence.json": file_age_hours(INTRADAY_FADE_JSON),
             "tae_cross_validation_report.json": file_age_hours(CROSS_VALIDATION_JSON),
+            "tae_confidence_evolution.json": file_age_hours(CONFIDENCE_JSON),
+            "tae_profit_protection_validation.json": file_age_hours(SHADOW_VALIDATION_JSON),
+            "tae_decision_replay.json": file_age_hours(REPLAY_JSON),
         },
     }
 
