@@ -1098,6 +1098,7 @@ def execute_proactive_hard_risk_exits(
             roi001_challenger=roi001_challenger,
             gii_by_ticker=gii_by_ticker,
             gii_meta=gii_meta,
+            apply_paper_tx_costs=True,
         )
         order["execution_source"] = "PROACTIVE_HARD_RISK_SCAN"
         order["proactive_hard_risk"] = risk
@@ -3057,7 +3058,9 @@ def execute_decision(
                 else:
                     cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
                     realized_pnl, gross_value, after_pos = _sell_shares(
-                        portfolio, ticker, sell_shares, fill_price
+                        portfolio, ticker, sell_shares, fill_price,
+                        apply_paper_tx_costs=apply_paper_tx_costs,
+                        paper_tx_cost_cfg=paper_tx_cost_cfg,
                     )
                     fill_shares = sell_shares
                     capital_impact = round(gross_value, 4)
@@ -3069,7 +3072,9 @@ def execute_decision(
             else:
                 cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
                 realized_pnl, gross_value, after_pos = _sell_shares(
-                    portfolio, ticker, sell_shares, fill_price
+                    portfolio, ticker, sell_shares, fill_price,
+                    apply_paper_tx_costs=apply_paper_tx_costs,
+                    paper_tx_cost_cfg=paper_tx_cost_cfg,
                 )
                 fill_shares = sell_shares
                 capital_impact = round(gross_value, 4)
@@ -3118,7 +3123,11 @@ def execute_decision(
                 is_trade = False
                 reason = f"REDUCE_PAPER zero shares (trim {trim_pct:.0f}% [{trim_source}]) — {reason}"
             else:
-                realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, trim_shares, fill_price)
+                realized_pnl, gross_value, after_pos = _sell_shares(
+                    portfolio, ticker, trim_shares, fill_price,
+                    apply_paper_tx_costs=apply_paper_tx_costs,
+                    paper_tx_cost_cfg=paper_tx_cost_cfg,
+                )
                 fill_shares = trim_shares
                 capital_impact = round(gross_value, 4)
                 after = _position_snapshot(after_pos)
@@ -3150,7 +3159,11 @@ def execute_decision(
                 trim_shares = _f(pos.get("shares")) * 0.1
                 avg = _f(before.get("avg_price"))
                 cost_basis = round(avg * trim_shares, 4) if avg > 0 else 0.0
-                realized_pnl, gross_value, after_pos = _sell_shares(portfolio, ticker, trim_shares, fill_price)
+                realized_pnl, gross_value, after_pos = _sell_shares(
+                    portfolio, ticker, trim_shares, fill_price,
+                    apply_paper_tx_costs=apply_paper_tx_costs,
+                    paper_tx_cost_cfg=paper_tx_cost_cfg,
+                )
                 fill_shares = trim_shares
                 after = _position_snapshot(after_pos)
                 reason = f"PROTECT_PAPER urgency trim 10% — {reason}"
@@ -3386,9 +3399,17 @@ def execute_decision(
                                 after_pos = portfolio.get("positions", {}).get(ticker) or {}
                             else:
                                 notional = _f(sizing.get("executed_notional"), notional)
-                                bought, after_pos = _buy_shares(portfolio, ticker, notional, fill_price)
+                                bought, after_pos = _buy_shares(
+                                    portfolio, ticker, notional, fill_price,
+                                    apply_paper_tx_costs=apply_paper_tx_costs,
+                                    paper_tx_cost_cfg=paper_tx_cost_cfg,
+                                )
                         except Exception:
-                            bought, after_pos = _buy_shares(portfolio, ticker, notional, fill_price)
+                            bought, after_pos = _buy_shares(
+                                portfolio, ticker, notional, fill_price,
+                                apply_paper_tx_costs=apply_paper_tx_costs,
+                                paper_tx_cost_cfg=paper_tx_cost_cfg,
+                            )
                         fill_shares = bought if notional > 0 else 0.0
                         if fill_shares > 0:
                             gross_value = round(notional, 4)
@@ -3457,7 +3478,11 @@ def execute_decision(
             sell_shares = _f(before.get("shares"))
             avg = _f(before.get("avg_price"))
             cost_basis = round(avg * sell_shares, 4) if avg > 0 else 0.0
-            realized_pnl, gross_value, _ = _sell_shares(portfolio, ticker, sell_shares, fill_price)
+            realized_pnl, gross_value, _ = _sell_shares(
+                portfolio, ticker, sell_shares, fill_price,
+                apply_paper_tx_costs=apply_paper_tx_costs,
+                paper_tx_cost_cfg=paper_tx_cost_cfg,
+            )
             rotate_notional = gross_value or _f(before.get("current_value")) or _f(portfolio.get("cash")) * 0.1
             target = best_rotate_target(all_decisions, ticker)
             buy_fill = 0.0
@@ -3475,7 +3500,11 @@ def execute_decision(
                 ):
                     reason = f"ROTATE_PAPER {ticker} sell-only — no valid mark for {tgt_ticker}"
                 else:
-                    buy_fill, after_pos = _buy_shares(portfolio, tgt_ticker, rotate_notional, tgt_price)
+                    buy_fill, after_pos = _buy_shares(
+                        portfolio, tgt_ticker, rotate_notional, tgt_price,
+                        apply_paper_tx_costs=apply_paper_tx_costs,
+                        paper_tx_cost_cfg=paper_tx_cost_cfg,
+                    )
                     after = _position_snapshot(after_pos)
                     reason = f"ROTATE_PAPER {ticker}→{tgt_ticker} — {reason}"
             else:
@@ -4372,6 +4401,7 @@ def _run_paper_execution_body(*, write_report_flag: bool = True) -> dict[str, An
             roi001_challenger=roi001_challenger,
             gii_by_ticker=gii_by_ticker,
             gii_meta=gii_meta,
+            apply_paper_tx_costs=True,
         )
         order["execution_reason"] = reason
         if reason.startswith("retry_after_non_terminal"):
@@ -4663,6 +4693,7 @@ def _run_post_learning_changed_execution_body(
             roi001_challenger=roi001_challenger,
             gii_by_ticker=gii_by_ticker,
             gii_meta=gii_meta,
+            apply_paper_tx_costs=True,
         )
         order["execution_reason"] = exec_reason
         order["action_changed"] = True
