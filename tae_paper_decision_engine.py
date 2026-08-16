@@ -2913,6 +2913,29 @@ def build_decision(ticker: str, ctx: dict[str, Any], *, seq: int) -> dict[str, A
         decision["deployment_experiment_arm"] = dep.get("experiment_arm")
     except Exception:
         pass
+    try:
+        if action != "HOLD_PAPER":
+            from tae_paper_shadow_sizing import PAPER_MIN_ORDER_USD
+            from tae_paper_transaction_costs import compute_transaction_cost
+
+            side = "BUY" if action == "BUY_PAPER" else "SELL"
+            cost_detail = compute_transaction_cost(PAPER_MIN_ORDER_USD, side=side)
+            est_cost = _f(cost_detail.get("total_transaction_cost"))
+            profit_delta = _f(decision.get("expected_profit_delta"))
+            decision["edge_vs_cost_estimate"] = {
+                "note": (
+                    "Informational only — does not affect action/score. Proxy notional "
+                    "(PAPER_MIN_ORDER_USD) is a conservative minimum; the real fill size "
+                    "is unknown until execution, so this is not an exact cost."
+                ),
+                "proxy_notional_usd": PAPER_MIN_ORDER_USD,
+                "estimated_cost_usd": round(est_cost, 6),
+                "expected_profit_delta_usd": profit_delta,
+                "edge_covers_estimated_cost": profit_delta >= est_cost,
+                "margin_usd": round(profit_delta - est_cost, 6),
+            }
+    except Exception:
+        pass
     return decision
 
 
