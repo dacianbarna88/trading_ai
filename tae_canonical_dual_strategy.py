@@ -210,6 +210,33 @@ def run_v2_challenger_cycle(*, mark_provider=None) -> dict[str, Any]:
     equity = _append_v2_equity(portfolio)
     acct_ok = pprun.accounting_pass(portfolio)
 
+    # Refresh accounting_snapshot.json / account.json (stale since the daemon
+    # retirement — nothing else regenerates them). Reuses existing runtime
+    # helpers (accounting_pass, accumulate_tx_cost_metrics, attribution) —
+    # does not duplicate their logic, only assembles the same schema the old
+    # daemon wrote via tae_parallel_paper_runtime.run_cycle().
+    acct2: dict[str, Any] = {
+        "arm": "V2",
+        "ts": portfolio["updated_at"],
+        "cash": _f(portfolio.get("cash")),
+        "invested": _f(portfolio.get("open_positions_value")),
+        "account_value": _f(portfolio.get("account_value") or portfolio.get("total_value")),
+        "realized_pnl": _f(portfolio.get("realized_pnl")),
+        "unrealized_pnl": _f(portfolio.get("unrealized_pnl")),
+        "reconciliation_pass": acct_ok,
+        "cash_delta_vs_cycle_start": _f(portfolio.get("cash")) - cash_before,
+        "transaction_cost_metrics": pprun.accumulate_tx_cost_metrics(p["v2_trades"]),
+    }
+    try:
+        from tae_paper_economic_attribution import refresh_parallel_attribution
+
+        attr = refresh_parallel_attribution(p, cfg=cfg)
+        acct2["economic_attribution"] = (attr.get("summary") or {}).get("v2")
+    except Exception as exc:
+        errors.append(f"accounting_snapshot_attribution:{exc}")
+    _atomic_write(p["v2_accounting"], acct2)
+    _atomic_write(p["v2_account"], acct2)
+
     # Learning handoff tag (no V1 contamination)
     learning = {
         "ok": True,
