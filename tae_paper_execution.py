@@ -3987,10 +3987,28 @@ def validate_trade_record(trade: dict[str, Any]) -> list[str]:
         cash_after = trade.get("cash_after")
         gross = _f(trade.get("gross_value"))
         if cash_before is not None and cash_after is not None and gross > 0 and action in {"SELL_PAPER", "REDUCE_PAPER", "ROTATE_PAPER"}:
-            expected_cash = round(_f(cash_before) + gross, 4)
-            if abs(expected_cash - _f(cash_after)) > RECONCILE_EPS:
+            expected_cash_no_cost = round(_f(cash_before) + gross, 4)
+            actual_cash = _f(cash_after)
+            ok = abs(expected_cash_no_cost - actual_cash) <= RECONCILE_EPS
+            expected_cash_with_cost = expected_cash_no_cost
+            if not ok:
+                # A sell may have PAPER_TX_COST applied (slippage/commission) — accept
+                # cash_before + gross - transaction_cost as valid too, using the same
+                # cost model execution already applies (not a duplicated formula).
+                try:
+                    from tae_paper_transaction_costs import compute_transaction_cost
+
+                    tx_cost = _f(
+                        compute_transaction_cost(gross, side="SELL").get("total_transaction_cost")
+                    )
+                    expected_cash_with_cost = round(_f(cash_before) + gross - tx_cost, 4)
+                    ok = abs(expected_cash_with_cost - actual_cash) <= RECONCILE_EPS
+                except Exception:
+                    pass
+            if not ok:
                 errors.append(
-                    f"{trade.get('decision_id')}: cash_after {cash_after} != cash_before + gross_value ({expected_cash})"
+                    f"{trade.get('decision_id')}: cash_after {cash_after} != cash_before + gross_value "
+                    f"({expected_cash_no_cost}) or minus transaction cost ({expected_cash_with_cost})"
                 )
     return errors
 
