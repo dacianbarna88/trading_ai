@@ -44,6 +44,7 @@ CYCLE_STATUSES = frozenset(
         "FULLY_ALLOCATED",
         "ACCUMULATION_STOPPED",
         "CLOSING",
+        "PARTIALLY_CLOSED",
         "CLOSED",
         "BLOCKED",
     }
@@ -55,7 +56,9 @@ TRANCHE_STATUSES = frozenset(
 V2_ACTIONS = frozenset(
     {"OPEN_CYCLE", "ADD_TRANCHE", "HOLD", "STOP_ACCUMULATION", "CLOSE_CYCLE"}
 )
-OPEN_LIKE = frozenset({"OPEN", "ACCUMULATING", "FULLY_ALLOCATED", "ACCUMULATION_STOPPED", "CLOSING"})
+OPEN_LIKE = frozenset(
+    {"OPEN", "ACCUMULATING", "FULLY_ALLOCATED", "ACCUMULATION_STOPPED", "CLOSING", "PARTIALLY_CLOSED"}
+)
 ADD_ALLOWED = frozenset({"OPEN", "ACCUMULATING"})
 
 STOP_ACCUMULATION_COOLDOWN_SECONDS = 3600
@@ -864,15 +867,18 @@ def apply_close_cycle(
     fx_rate: float = 1.0,
     close_reason: str = "CLOSE_CYCLE",
     close_execution_id: str | None = None,
+    close_fraction: float = 1.0,
     sell_fn: Callable[..., tuple[float, float, dict[str, Any] | None]] | None = None,
     persist: bool = True,
     cycle_path: Path | None = None,
     apply_paper_tx_costs: bool = False,
     paper_tx_cost_cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Full close via existing paper sell helper — no parallel accounting.
+    """Full or partial close via existing paper sell helper — no parallel accounting.
 
-    Status path: OPEN/ACCUMULATING/… → CLOSING → CLOSED.
+    Status path: OPEN/ACCUMULATING/… → CLOSING → CLOSED (close_fraction=1.0, default,
+    identical to prior behavior) or → PARTIALLY_CLOSED (close_fraction<1.0; cycle stays
+    open on the remaining quantity, trailing state left untouched for it).
     Duplicate close (already CLOSED or same close_execution_id) does not mutate capital.
     """
     import tae_paper_execution as pe
@@ -882,6 +888,7 @@ def apply_close_cycle(
     cycle = dict(cycle)
     store = dict(store)
     eid = _s(close_execution_id) or new_execution_id()
+    fraction = max(0.0, min(1.0, float(close_fraction)))
 
     if _s(cycle.get("status")) == "CLOSED":
         return {
@@ -924,26 +931,34 @@ def apply_close_cycle(
             save_cycle_store(store, cycle_path)
         return {"ok": True, "cycle": cycle, "store": store, "realized_pnl": 0.0, "portfolio": portfolio}
 
+    shares_to_sell = round(shares * fraction, 6)
     sell_kwargs: dict[str, Any] = {}
     if apply_paper_tx_costs:
         sell_kwargs["apply_paper_tx_costs"] = True
         sell_kwargs["paper_tx_cost_cfg"] = paper_tx_cost_cfg
-    realized, gross, _after = sell(portfolio, ticker, shares, float(mark_price), **sell_kwargs)
+    realized, gross, _after = sell(portfolio, ticker, shares_to_sell, float(mark_price), **sell_kwargs)
     realized_usd = round(float(realized) * float(fx_rate), 6)
     eco = portfolio.get("_last_paper_fill_economics")
-    cycle["status"] = "CLOSED"
-    cycle["closed_at"] = _now()
     cycle["close_reason"] = close_reason
     cycle["close_execution_id"] = eid
     cycle["updated_at"] = _now()
     cycle["realized_pnl"] = round(_f(cycle.get("realized_pnl")) + realized_usd, 6)
-    cycle["unrealized_pnl"] = 0.0
-    cycle["total_quantity"] = 0.0
-    # Clear trailing persistence on full close
-    cycle["trailing_armed"] = False
-    cycle["highest_price"] = None
-    cycle["trailing_stop"] = None
-    cycle["armed_at"] = None
+    if fraction >= 1.0:
+        cycle["status"] = "CLOSED"
+        cycle["closed_at"] = _now()
+        cycle["unrealized_pnl"] = 0.0
+        cycle["total_quantity"] = 0.0
+        # Clear trailing persistence on full close
+        cycle["trailing_armed"] = False
+        cycle["highest_price"] = None
+        cycle["trailing_stop"] = None
+        cycle["armed_at"] = None
+    else:
+        cycle["status"] = "PARTIALLY_CLOSED"
+        cycle["total_quantity"] = round(_f(cycle.get("total_quantity")) * (1.0 - fraction), 6)
+        cycle["unrealized_pnl"] = round(_f(cycle.get("unrealized_pnl")) * (1.0 - fraction), 6)
+        # Trailing persistence intentionally left untouched — remainder keeps riding
+        # whatever trail state (armed/highest/stop) it already had.
     store.setdefault("cycles", {})[cycle["cycle_id"]] = cycle
     seen_e = list(store.get("execution_ids_seen") or [])
     if eid and eid not in seen_e:
@@ -960,6 +975,7 @@ def apply_close_cycle(
         "close_execution_id": eid,
         "gross_proceeds": gross,
         "fill_economics": eco if isinstance(eco, dict) else None,
+        "close_fraction": fraction,
     }
 
 

@@ -355,15 +355,22 @@ def evaluate_exit_policy(
     ):
         mark_ok = is_finite_positive(inp.mark_price) and _s(inp.mark_freshness).upper() == "FRESH" and inp.data_fresh
         if mark_ok and inp.accounting_valid:
-            return _with_trail(
-                _base(
-                    "CLOSE_CYCLE",
-                    REASON_CLOSE_PROFIT,
-                    thesis,
-                    hard_risk_class=hr_class,
-                    close_reason=REASON_CLOSE_PROFIT,
+            if not cycle.get("partial_profit_taken"):
+                # First hit at the (ATR-adjusted) target: take half off, mark it taken,
+                # and let the existing trailing mechanism carry the remainder.
+                return _with_trail(
+                    _base(
+                        "CLOSE_CYCLE",
+                        REASON_CLOSE_PROFIT,
+                        thesis,
+                        hard_risk_class=hr_class,
+                        close_reason=REASON_CLOSE_PROFIT,
+                        close_fraction=0.5,
+                        partial_profit_taken=True,
+                    )
                 )
-            )
+            # Partial already taken this cycle — normal behavior resumes: trailing
+            # (evaluated above, higher priority) owns the exit for the remainder.
 
     if inp.first_tranche_price and is_finite_positive(float(inp.first_tranche_price)):
         first_hit = float(inp.mark_price) >= float(inp.first_tranche_price) * (1.0 + min_profit) - 1e-12

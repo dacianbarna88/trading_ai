@@ -2437,6 +2437,7 @@ def _run_v2_arm(
                     "trailing_stop",
                     "armed_at",
                     "updated_at",
+                    "partial_profit_taken",
                 )
                 if k in xd
             }
