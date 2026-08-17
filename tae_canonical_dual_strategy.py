@@ -136,13 +136,16 @@ def run_v2_challenger_cycle(*, mark_provider=None) -> dict[str, Any]:
     portfolio.setdefault("starting_capital", starting)
 
     provider = mark_provider or pprun.default_mark_provider
-    # Watchlist: open V2 names + canonical open names + config watchlist
+    # Watchlist: open V2 names + canonical open names + config watchlist + S&P 500 universe
     v1_port = pe.load_json(pe.PORTFOLIO_JSON) or {}
+    from research.market_scanner import get_sp500_tickers
+
     tickers = sorted(
         {
             *(str(t).upper() for t in (portfolio.get("positions") or {})),
             *(str(t).upper() for t in (v1_port.get("positions") or {})),
             *(str(t).upper() for t in (cfg.get("WATCHLIST") or [])),
+            *(str(t).upper() for t in get_sp500_tickers()),
         }
     )
     if not tickers:

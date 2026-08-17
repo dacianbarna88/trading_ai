@@ -19,7 +19,15 @@ TOP_N = 60
 
 def get_sp500_tickers():
     try:
-        tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+        import io
+        import urllib.request
+
+        req = urllib.request.Request(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        html = urllib.request.urlopen(req).read()
+        tables = pd.read_html(io.StringIO(html.decode("utf-8")))
         tickers = tables[0]["Symbol"].astype(str).str.replace(".", "-", regex=False).tolist()
         return tickers
     except Exception:
