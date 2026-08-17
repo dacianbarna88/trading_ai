@@ -969,7 +969,13 @@ def evaluate_buy_policy(
         # Fail-open on import/runtime errors — never invent a SKIP block from exceptions.
         pass
 
-    max_tr = int(inp.max_tranches_override or cfg["max_tranches"])
+    if inp.max_tranches_override is not None:
+        max_tr = int(inp.max_tranches_override)
+    elif inp.score is not None:
+        factor = max(0.0, min(1.0, float(inp.score) / 100.0))
+        max_tr = int(max(3, min(7, round(3 + factor * 4))))
+    else:
+        max_tr = int(cfg["max_tranches"])
     cycle_new = build_cycle(
         ticker=ticker,
         currency=inp.currency,
