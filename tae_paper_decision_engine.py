@@ -790,9 +790,12 @@ def file_age_hours(path: Path) -> float | None:
 
 
 def signal_age_hours(signal: dict[str, Any] | None) -> float | None:
-    """Age of a live_signals.csv row's own Time column (format: 'YYYY-MM-DD HH:MM:SS',
-    naive — treated as UTC, matching this system's convention elsewhere). Returns None
-    when the signal is missing or its Time value can't be parsed."""
+    """Age of a live_signals.csv row's own Time column (format: 'YYYY-MM-DD HH:MM:SS').
+    live_bot.py writes this with datetime.now() — naive local system time, not UTC — so
+    a naive value is interpreted as local time (via astimezone(), which resolves the
+    machine's actual local UTC offset at that date, DST included, rather than a
+    hardcoded offset) before comparing to now. Returns None when the signal is missing
+    or its Time value can't be parsed."""
     raw = _s((signal or {}).get("time"))
     if not raw:
         return None
@@ -801,7 +804,7 @@ def signal_age_hours(signal: dict[str, Any] | None) -> float | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.astimezone()
     return round((datetime.now(timezone.utc) - parsed).total_seconds() / 3600, 1)
 
 
