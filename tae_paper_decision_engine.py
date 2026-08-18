@@ -54,6 +54,7 @@ REPORT_MD = Path("TAE_PAPER_DECISION_ENGINE_REPORT.md")
 DISCIPLINE_REPORT_MD = Path("TAE_DECISION_DISCIPLINE_REPORT.md")
 PAPER_PORTFOLIO_JSON = Path("runtime_outputs/paper_execution/paper_portfolio.json")
 ORDERS_JSONL = Path("runtime_outputs/paper_execution/paper_orders.jsonl")
+PAPER_TRADES_JSONL = Path("runtime_outputs/paper_execution/paper_trades.jsonl")
 RULE_LIFECYCLE_JSON = Path("runtime_outputs/paper_execution/rule_lifecycle.json")
 HARD_RISK_JSON = Path("runtime_outputs/governance/hard_risk.json")
 CONFLICTS_JSON = Path("runtime_outputs/conflict_resolution/conflicts.json")
@@ -789,14 +790,13 @@ def file_age_hours(path: Path) -> float | None:
     return round((datetime.now(timezone.utc) - mtime).total_seconds() / 3600, 1)
 
 
-def signal_age_hours(signal: dict[str, Any] | None) -> float | None:
-    """Age of a live_signals.csv row's own Time column (format: 'YYYY-MM-DD HH:MM:SS').
-    live_bot.py writes this with datetime.now() — naive local system time, not UTC — so
-    a naive value is interpreted as local time (via astimezone(), which resolves the
-    machine's actual local UTC offset at that date, DST included, rather than a
-    hardcoded offset) before comparing to now. Returns None when the signal is missing
-    or its Time value can't be parsed."""
-    raw = _s((signal or {}).get("time"))
+def parse_signal_time_utc(raw: str | None) -> datetime | None:
+    """Parse a live_signals.csv Time value ('YYYY-MM-DD HH:MM:SS') to a UTC-aware
+    datetime. live_bot.py writes this with datetime.now() — naive local system time,
+    not UTC — so a naive value is interpreted as local time (via astimezone(), which
+    resolves the machine's actual local UTC offset at that date, DST included, rather
+    than a hardcoded offset). Returns None if raw is empty or unparseable."""
+    raw = _s(raw)
     if not raw:
         return None
     try:
@@ -805,7 +805,41 @@ def signal_age_hours(signal: dict[str, Any] | None) -> float | None:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.astimezone()
+    return parsed.astimezone(timezone.utc)
+
+
+def signal_age_hours(signal: dict[str, Any] | None) -> float | None:
+    """Age of a live_signals.csv row's own Time column. Returns None when the signal
+    is missing or its Time value can't be parsed."""
+    parsed = parse_signal_time_utc((signal or {}).get("time"))
+    if parsed is None:
+        return None
     return round((datetime.now(timezone.utc) - parsed).total_seconds() / 3600, 1)
+
+
+def index_held_scale_in_trades(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Latest EXECUTED held-position scale-in BUY_PAPER timestamp per ticker.
+    is_new_position=False on the trade record is the marker that distinguishes a
+    scale-in (position already held) from a genuine new entry — set by the execution
+    layer independently of this rule, so it's not something this dedup gate can spoof
+    or mismatch against new-entry BUYs."""
+    latest: dict[str, str] = {}
+    for row in rows:
+        if (
+            _s(row.get("action")).upper() != "BUY_PAPER"
+            or _s(row.get("status")).upper() != "EXECUTED"
+            or row.get("is_new_position") is not False
+        ):
+            continue
+        ticker = _s(row.get("ticker")).upper()
+        ts = _s(row.get("timestamp"))
+        if ticker and ts and (ticker not in latest or ts > latest[ticker]):
+            latest[ticker] = ts
+    return latest
+
+
+def last_held_scale_in_at(ticker: str, index: dict[str, str]) -> str | None:
+    return index.get(ticker.upper())
 
 
 def market_proxy_ticker(ticker: str) -> str:
@@ -1413,6 +1447,7 @@ def build_context() -> dict[str, Any]:
     signal_rows = read_csv_rows(SIGNALS_CSV) if SIGNALS_CSV.is_file() else []
     live_positions = open_positions_from_portfolio(portfolio_rows)
     signals = signals_by_ticker(signal_rows)
+    held_scale_in_by_ticker = index_held_scale_in_trades(load_jsonl(PAPER_TRADES_JSONL))
 
     gii_by = index_gii(gii)
     shadow_by = index_shadow(shadow)
@@ -1528,6 +1563,7 @@ def build_context() -> dict[str, Any]:
         "active_decisions": active_doc,
         "active_decisions_by_ticker": active_by,
         "signals": signals,
+        "held_scale_in_by_ticker": held_scale_in_by_ticker,
         "top_growth": top_growth,
         "horizon_ssot": horizon_ssot,
         "historical_runtime": hist_runtime,
@@ -2449,7 +2485,17 @@ def score_actions_for_ticker(
             scores["HOLD_PAPER"] += 20.0
             evidence.append("default hold for open position with partial evidence")
         sig_age = signal_age_hours(signal)
-        if sig_age is not None and sig_age <= HELD_BUY_SIGNAL_FRESHNESS_HOURS:
+        sig_time_utc = parse_signal_time_utc(signal.get("time"))
+        already_scaled_in = False
+        last_scale_in_at = last_held_scale_in_at(ticker, ctx.get("held_scale_in_by_ticker") or {})
+        if last_scale_in_at and sig_time_utc is not None:
+            try:
+                last_scale_in_utc = datetime.fromisoformat(last_scale_in_at)
+            except ValueError:
+                last_scale_in_utc = None
+            if last_scale_in_utc is not None and last_scale_in_utc >= sig_time_utc:
+                already_scaled_in = True
+        if sig_age is not None and sig_age <= HELD_BUY_SIGNAL_FRESHNESS_HOURS and not already_scaled_in:
             if signal_score >= 90.0 and "STRONG BUY" in signal_name:
                 scores["BUY_PAPER"] += 40.0
                 evidence.append(f"signal={signal_name} score={signal_score} age={sig_age:.1f}h (held — scale-in eligible)")
@@ -2459,6 +2505,11 @@ def score_actions_for_ticker(
             if ticker in (ctx.get("top_growth") or []):
                 scores["BUY_PAPER"] += 20.0 + growth_score * 0.15
                 evidence.append(f"top_growth_candidate growth_score={growth_score:.1f} age={sig_age:.1f}h (held — scale-in eligible)")
+        elif already_scaled_in:
+            evidence.append(
+                f"held BUY boost skipped — already scaled in since this signal "
+                f"(last_scale_in={last_scale_in_at}, signal_time={signal.get('time')})"
+            )
         elif ticker in (ctx.get("top_growth") or []) or signal_score >= 75.0:
             evidence.append(
                 f"held BUY boost skipped — signal stale or missing "
