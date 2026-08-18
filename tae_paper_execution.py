@@ -2893,6 +2893,14 @@ def _is_v1_owned_decision(
     return _decision_strategy_id(decision, portfolio) in {"V1", "CANONICAL_PAPER"}
 
 
+# In-memory only (per full-paper-cycle process), not a snapshot read from disk — records
+# a ticker's most recent EXECUTED SELL_PAPER within this run, so a same-run re-entry BUY
+# (e.g. after a stale decision-state snapshot let a SELL and BUY both fire in one cycle)
+# is deferred instead of churning immediately.
+_RECENT_SELL_AT: dict[str, str] = {}
+RECENT_SELL_COOLDOWN_MINUTES = 30.0
+
+
 def execute_decision(
     decision: dict[str, Any],
     portfolio: dict[str, Any],
@@ -2938,6 +2946,23 @@ def execute_decision(
     action = _s(decision.get("action")).upper()
     ticker = _s(decision.get("ticker")).upper()
     decision_id = _s(decision.get("decision_id"))
+    if action == "BUY_PAPER" and ticker in _RECENT_SELL_AT:
+        sold_at = _RECENT_SELL_AT[ticker]
+        elapsed_min = (datetime.now(timezone.utc) - _parse_ts(sold_at)).total_seconds() / 60.0 if _parse_ts(sold_at) else 0.0
+        if elapsed_min < RECENT_SELL_COOLDOWN_MINUTES:
+            return {
+                "timestamp": _now(),
+                "decision_id": decision_id,
+                "ticker": ticker,
+                "action": action,
+                "status": "DEFERRED_RECENT_SELL_SAME_RUN",
+                "executed": False,
+                "is_trade": False,
+                "reason": f"BUY deferred — same-run SELL_PAPER at {sold_at} ({elapsed_min:.1f}min ago, cooldown={RECENT_SELL_COOLDOWN_MINUTES:.0f}min)",
+                "mode": MODE,
+                "broker_executed": False,
+                "live_money": False,
+            }
     confidence = _f(decision.get("confidence"), 0.5)
     risk_score = _f(decision.get("risk_score"))
     expected_delta = _f(decision.get("expected_profit_delta"))
@@ -3671,6 +3696,8 @@ def execute_decision(
         )
         if order.get("trailing_exit_fill") and order.get("trailing_realized_pnl") is None:
             order["trailing_realized_pnl"] = round(_f(order.get("realized_pnl")), 6)
+    if action == "SELL_PAPER" and order.get("status") == "EXECUTED":
+        _RECENT_SELL_AT[ticker] = _s(order.get("timestamp")) or _now()
     return order
 
 
