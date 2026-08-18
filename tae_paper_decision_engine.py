@@ -1985,6 +1985,7 @@ def apply_experiment_capital_evidence(
 def estimate_deltas(ticker: str, action: str, ctx: dict[str, Any]) -> dict[str, float]:
     gii = (ctx.get("gii_by") or {}).get(ticker.upper()) or {}
     shadow = (ctx.get("shadow_by") or {}).get(ticker.upper()) or {}
+    paper_pos = (ctx.get("paper_positions") or {}).get(ticker.upper()) or {}
     missed = _f(gii.get("missed_usd") or shadow.get("missed_opportunity_usd"))
     cap_eff = _f(gii.get("capital_efficiency"))
     collapse = _f(gii.get("collapse_probability"))
@@ -2002,7 +2003,7 @@ def estimate_deltas(ticker: str, action: str, ctx: dict[str, Any]) -> dict[str, 
         return {"expected_profit_delta": 15.0, "expected_risk_delta": 0.05, "capital_efficiency_delta": 5.0}
     if action == "SELL_PAPER":
         return {
-            "expected_profit_delta": missed * 0.1,
+            "expected_profit_delta": _f(paper_pos.get("pnl")),
             "expected_risk_delta": -collapse * 0.2,
             "capital_efficiency_delta": max(0.0, 50.0 - cap_eff) * 0.1,
         }
