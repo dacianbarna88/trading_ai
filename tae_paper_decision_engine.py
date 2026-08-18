@@ -143,6 +143,7 @@ PAPER_SAFE_KB_RECOMMENDATIONS = frozenset(
 FORBIDDEN_KB_RECOMMENDATIONS = frozenset({"BUY", "SELL", "STOP", "TAKE_PROFIT", "PROMOTE_TO_LIVE"})
 MAX_KNOWLEDGE_SCORE_DELTA = 8.0
 MAX_PROFIT_TARGET_SCORE_DELTA = 22.0
+HELD_BUY_SIGNAL_FRESHNESS_HOURS = 24.0
 
 PROFIT_TARGET_URGENCY_DELTAS: dict[str, dict[str, float]] = {
     "CRITICAL": {"REDUCE_PAPER": 18.0, "PROTECT_PAPER": 14.0, "HOLD_PAPER": -12.0, "SELL_PAPER": 6.0},
@@ -786,6 +787,22 @@ def file_age_hours(path: Path) -> float | None:
         return None
     mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
     return round((datetime.now(timezone.utc) - mtime).total_seconds() / 3600, 1)
+
+
+def signal_age_hours(signal: dict[str, Any] | None) -> float | None:
+    """Age of a live_signals.csv row's own Time column (format: 'YYYY-MM-DD HH:MM:SS',
+    naive — treated as UTC, matching this system's convention elsewhere). Returns None
+    when the signal is missing or its Time value can't be parsed."""
+    raw = _s((signal or {}).get("time"))
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return round((datetime.now(timezone.utc) - parsed).total_seconds() / 3600, 1)
 
 
 def market_proxy_ticker(ticker: str) -> str:
@@ -2428,6 +2445,23 @@ def score_actions_for_ticker(
         if not any(scores[a] > 20 for a in ("SELL_PAPER", "REDUCE_PAPER", "PROTECT_PAPER", "ROTATE_PAPER", "HOLD_PAPER")):
             scores["HOLD_PAPER"] += 20.0
             evidence.append("default hold for open position with partial evidence")
+        sig_age = signal_age_hours(signal)
+        if sig_age is not None and sig_age <= HELD_BUY_SIGNAL_FRESHNESS_HOURS:
+            if signal_score >= 90.0 and "STRONG BUY" in signal_name:
+                scores["BUY_PAPER"] += 40.0
+                evidence.append(f"signal={signal_name} score={signal_score} age={sig_age:.1f}h (held — scale-in eligible)")
+            elif signal_score >= 75.0 and "BUY" in signal_name:
+                scores["BUY_PAPER"] += 25.0
+                evidence.append(f"signal={signal_name} age={sig_age:.1f}h (held — scale-in eligible)")
+            if ticker in (ctx.get("top_growth") or []):
+                scores["BUY_PAPER"] += 20.0 + growth_score * 0.15
+                evidence.append(f"top_growth_candidate growth_score={growth_score:.1f} age={sig_age:.1f}h (held — scale-in eligible)")
+        elif ticker in (ctx.get("top_growth") or []) or signal_score >= 75.0:
+            evidence.append(
+                f"held BUY boost skipped — signal stale or missing "
+                f"(age={'n/a' if sig_age is None else f'{sig_age:.1f}h'}, "
+                f"limit={HELD_BUY_SIGNAL_FRESHNESS_HOURS:.0f}h)"
+            )
     else:
         if signal_score >= 90.0 and "STRONG BUY" in signal_name:
             scores["BUY_PAPER"] += 40.0
