@@ -54,6 +54,7 @@ Available commands:
   parallel-paper-run-once
   parallel-paper-health
   parallel-paper-report
+  parallel-paper-report-3way
   parallel-paper-stop
   parallel-paper-cycle
   parallel-paper-autostart-install
@@ -136,6 +137,7 @@ Foundation (Stage 5): see TAE_FOUNDATION_STATUS.md · TAE_OPERATOR_RUNBOOK.md ·
   parallel-paper-run-once — run exactly one parallel cycle (explicit; not a start)
   parallel-paper-health — process/state/accounting/data health (RUNNING_* vs STOPPED_HEALTHY_STATE)
   parallel-paper-report — generate daily V1 vs V2 comparative report
+  parallel-paper-report-3way — generate daily V1/V2/V3 comparative report (Phase 4)
   parallel-paper-stop — stop persistent parallel PAPER runtime cleanly
   parallel-paper-cycle — alias of parallel-paper-run-once
   parallel-paper-autostart-install — install LaunchAgent KeepAlive for parallel PAPER only

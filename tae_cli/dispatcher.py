@@ -129,6 +129,7 @@ COMMANDS = {
     "parallel-paper-run-once": parallel_paper.run_once,
     "parallel-paper-health": parallel_paper.run_health,
     "parallel-paper-report": parallel_paper.run_report,
+    "parallel-paper-report-3way": parallel_paper.run_report_3way,
     "parallel-paper-stop": parallel_paper.run_stop,
     "parallel-paper-cycle": parallel_paper.run_cycle_cmd,
     "parallel-paper-autostart-install": parallel_paper.run_autostart_install,

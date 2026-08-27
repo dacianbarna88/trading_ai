@@ -36,6 +36,7 @@ else:
     ROOT = ROOT.resolve()
 V1_DIR = ROOT / "v1"
 V2_DIR = ROOT / "v2"
+V3_DIR = ROOT / "v3"
 REPORTS_DIR = ROOT / "reports"
 
 # Activation scopes — LIVE is never selectable via env
@@ -44,7 +45,8 @@ ALLOWED_SCOPES = frozenset(
 )
 
 # Policy handlers currently implemented in tae_parallel_paper_runtime.
-KNOWN_POLICY_BINDINGS = frozenset({"v1", "v2", "experimental"})
+# "v3" added Phase 3 (_run_v3_arm — tae_strategy_v3_learning_policy.decide_v3).
+KNOWN_POLICY_BINDINGS = frozenset({"v1", "v2", "v3", "experimental"})
 
 CLOCK_GROUP_DEFAULT = "parallel-paper-main"
 MARKET_MARK_GROUP_DEFAULT = "parallel-paper-main"
@@ -191,6 +193,17 @@ def sync_legacy_flags_from_arms(cfg: dict[str, Any], arms: list[dict[str, Any]])
         cfg["V2_STARTING_CAPITAL"] = float(v2.get("starting_capital") or 30000.0)
         cfg["V2_MIN_CASH_RESERVE"] = float(v2.get("min_cash_reserve") or 500.0)
         cfg["V2_MODE"] = "ISOLATED_PARALLEL_PAPER"
+    v3 = by_id.get("v3")
+    if v3:
+        # Phase 4: give v3 the same V{n}_STARTING_CAPITAL/V{n}_MIN_CASH_RESERVE
+        # legacy-style aliases v1/v2 already get, so generic per-arm report
+        # code (tae_today_activity_report.py, tae_parallel_paper_reports.py)
+        # can read `cfg[f"{arm}_STARTING_CAPITAL"]` for any of the three arms
+        # without a v1/v2-only special case.
+        cfg["V3_PARALLEL_ENABLED"] = bool(v3.get("enabled"))
+        cfg["V3_STARTING_CAPITAL"] = float(v3.get("starting_capital") or 30000.0)
+        cfg["V3_MIN_CASH_RESERVE"] = float(v3.get("min_cash_reserve") or 500.0)
+        cfg["V3_MODE"] = "ISOLATED_PARALLEL_PAPER"
 
 
 def validate_arm_topology(arms: list[dict[str, Any]]) -> list[str]:
@@ -398,6 +411,23 @@ def load_parallel_paper_config(path: Path | None = None) -> dict[str, Any]:
     payload["REPORT_OUTPUT_DIRECTORY"] = str(payload.get("REPORT_OUTPUT_DIRECTORY") or REPORTS_DIR)
     wl = payload.get("WATCHLIST") or []
     payload["WATCHLIST"] = [str(x).upper() for x in wl] if isinstance(wl, list) else []
+    if not payload["WATCHLIST"]:
+        # Found in the Phase 5 soak (2026-08-25): with WATCHLIST empty here,
+        # _watchlist() in tae_parallel_paper_runtime.py falls back to
+        # cfg.WATCHLIST ∪ already-held positions only — meaning V1/V2/V3
+        # could NEVER discover a ticker they didn't already hold, no matter
+        # how large watchlist.txt (the file live_bot.py's separate signal
+        # generation reads) was. Falls back to watchlist.txt as the single
+        # source of truth so parallel-paper actually sees the same universe
+        # live_bot.py does, rather than silently evaluating an ever-static
+        # set of previously-held tickers.
+        wl_path = PROJECT_ROOT / "watchlist.txt"
+        if wl_path.is_file():
+            payload["WATCHLIST"] = [
+                line.strip().upper()
+                for line in wl_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
 
     arms = configured_arms({**payload, "arms": normalize_arms(payload)})
     # Fail-closed: disable any enabled arm with unknown/missing policy rather than inventing a runner.

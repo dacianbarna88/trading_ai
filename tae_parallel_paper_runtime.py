@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import tae_paper_execution as pe
+import tae_strategy_v3_learning_policy as v3pol
 import tae_strategy_v2_buy_policy as pol
 import tae_strategy_v2_exit_policy as xp
 import tae_strategy_v2_foundation as v2
@@ -48,6 +49,14 @@ BLOCKED_PAPER_ISOLATION = "BLOCKED_PAPER_ISOLATION"
 PHASE_MANAGE = "manage"
 PHASE_ENTRY = "entry"
 PHASE_ALL = "all"
+
+# V1/V2 entry-eligibility score floor (matches live_bot.MIN_SCORE_TO_BUY,
+# duplicated here as three separate literal 80s until 2026-08-25, when it
+# was relaxed to 60 — too little candidate turnover was showstopping V1/V2
+# in the Phase 5 soak: with a 25-ticker watchlist, only 8 tickers cleared
+# 80 on a typical day, and once V1 held all of them there was nothing left
+# to evaluate. One named constant now, not three literals to keep in sync.
+V1_V2_ENTRY_MIN_SCORE = 60
 
 
 class _PhaseComplete(Exception):
@@ -846,7 +855,7 @@ def default_mark_provider(tickers: list[str]) -> dict[str, dict[str, Any]]:
             "mark_price": px,
             "score": score_f,
             "signal": signal,
-            "eligible": signal in {"STRONG BUY", "BUY"} or (score_f is not None and score_f >= 80),
+            "eligible": signal in {"STRONG BUY", "BUY"} or (score_f is not None and score_f >= V1_V2_ENTRY_MIN_SCORE),
             "mark_freshness": freshness,
             "mark_age_seconds": 0.0,
             "data_fresh": True,
@@ -1505,18 +1514,27 @@ def record_execution_learning_feedback(
 
     paths_map = p or paths()
     arm_l = arm_u.lower()
-    # Fail-closed: never silently remap unknown arms onto V2 learning journals.
-    if arm_l not in {"v1", "v2"}:
+    # Fail-closed: never silently remap unknown arms onto another arm's
+    # learning journals. v3 added alongside v1/v2 (Phase 3) — routes through
+    # the generic paths_map["arms"][arm_l] map (paths() builds this for every
+    # configured arm) rather than a v3_learning_events flat alias, since only
+    # v1/v2 get flat aliases today.
+    arm_paths_entry = paths_map.get("arms", {}).get(arm_l) if arm_l == "v3" else None
+    if arm_l not in {"v1", "v2"} and not arm_paths_entry:
         return {
             "ok": False,
             "consumed": False,
             "reason": "UNKNOWN_ARM_LEARNING_ROUTE",
             "arm": arm_u,
         }
-    events_key = f"{arm_l}_learning_events"
-    state_key = f"{arm_l}_learning_state"
-    events_path = paths_map[events_key]
-    state_path = paths_map[state_key]
+    if arm_paths_entry:
+        events_path = arm_paths_entry["learning_events"]
+        state_path = arm_paths_entry["learning_state"]
+    else:
+        events_key = f"{arm_l}_learning_events"
+        state_key = f"{arm_l}_learning_state"
+        events_path = paths_map[events_key]
+        state_path = paths_map[state_key]
 
     from tae_learning_persistence import atomic_write_json, load_json_safe
 
@@ -1874,7 +1892,7 @@ def _run_v1_arm(
     mark_ok, mark_status, mark = _mark_is_usable(snap)
     score = snap.get("score") if isinstance(snap, dict) else None
     signal = _s((snap or {}).get("signal"))
-    favorable = signal in {"STRONG BUY", "BUY"} or (score is not None and float(score) >= 80)
+    favorable = signal in {"STRONG BUY", "BUY"} or (score is not None and float(score) >= V1_V2_ENTRY_MIN_SCORE)
     pos = (portfolio.get("positions") or {}).get(ticker)
     action = "HOLD"
     reason = "V1_HOLD"
@@ -1996,6 +2014,7 @@ def _run_v1_arm(
                             "ts": _now(),
                             "ticker": ticker,
                             "action": "SELL",
+                            "reason": reason,
                             "shares": shares,
                             "price": mark,
                             "decision_id": decision_id,
@@ -2330,7 +2349,7 @@ def _run_v2_arm(
     mark_ok, mark_status, mark = _mark_is_usable(snap)
     score = snap.get("score") if isinstance(snap, dict) else None
     signal = _s((snap or {}).get("signal"))
-    favorable = signal in {"STRONG BUY", "BUY"} or (score is not None and float(score) >= 80)
+    favorable = signal in {"STRONG BUY", "BUY"} or (score is not None and float(score) >= V1_V2_ENTRY_MIN_SCORE)
     # Consume canonical Decision Brain / PDE action — do not invent BUY over SKIP.
     try:
         from tae_paper_execution import (
@@ -2582,7 +2601,7 @@ def _run_v2_arm(
                                     arm="V2",
                                     ticker=ticker,
                                     price=mark,
-                                    net=net,
+                                    net=net_credit,
                                     realized_pnl=realized_pnl_fill,
                                     cycle_id=cycle_id,
                                     decision_id=decision_id,
@@ -3237,6 +3256,318 @@ def classify_divergence(v1: dict[str, Any], v2d: dict[str, Any]) -> str:
     return "EXECUTION_DIVERGENCE"
 
 
+def _open_position_count(portfolio: dict[str, Any]) -> int:
+    return len(
+        [x for x in (portfolio.get("positions") or {}).values() if _f((x or {}).get("shares")) > 0]
+    )
+
+
+_PAPER_DECISIONS_PATH = Path("runtime_outputs/paper_decisions/paper_decisions.jsonl")
+
+
+def _load_today_pde_signals(day: str | None = None) -> dict[str, dict[str, Any]]:
+    """
+    V3's decide_v3() scores on growth_score/capital_efficiency/
+    horizon_alignment_score/confidence — but the market snapshot V1/V2/V3
+    all consume (default_mark_provider, sourced from signals.csv/
+    live_signals.csv) only carries Price/Score/Signal. Those richer fields
+    are computed by the CANONICAL PDE pass (tae.py full-paper-cycle) into
+    runtime_outputs/paper_decisions/paper_decisions.jsonl — which the hourly
+    script already runs before parallel-paper-run-once, so same-day data is
+    reliably present by the time this is called.
+
+    Found in the Phase 5 soak: without this, every ticker's snap had no
+    horizon_alignment_score (defaulted near 0), and because that feature has
+    by far the largest learned weight, every BUY prediction was suppressed
+    below the 0.5 floor — V3 never traded in its first two days. This wires
+    real same-day PDE signal in; tae_strategy_v3_learning_policy.py also got
+    a neutral (not 0.0) fallback default as a safety net for tickers this
+    lookup still misses.
+    """
+    day = day or _now()[:10]
+    out: dict[str, dict[str, Any]] = {}
+    if not _PAPER_DECISIONS_PATH.is_file():
+        return out
+    try:
+        with _PAPER_DECISIONS_PATH.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts = _s(rec.get("timestamp") or rec.get("ts"))
+                if not ts.startswith(day):
+                    continue
+                t = _s(rec.get("ticker")).upper()
+                if not t:
+                    continue
+                out[t] = {
+                    "confidence": rec.get("confidence"),
+                    "horizon_alignment_score": rec.get("horizon_alignment_score"),
+                    "horizon_conflict_flag": rec.get("horizon_conflict_flag"),
+                }
+    except OSError:
+        return {}
+    return out
+
+
+def _enrich_snap_for_v3(
+    snap: dict[str, Any], ticker: str, pde_signals: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """
+    Merge same-day canonical PDE signal (if any) into a copy of `snap`.
+    Always stamps `_v3_pde_enriched` (True/False) on the result so callers
+    can tell, per ticker per decision, whether the scored features came from
+    real same-day data or the neutral fallback in
+    tae_strategy_v3_learning_policy._extract_features. This is the exact
+    signal that was missing when horizon_alignment_score silently defaulted
+    to 0 for two days — surfaced now so a future gap of the same shape shows
+    up in the decision journal instead of only in a HOLD that looks
+    ordinary. See _run_v3_arm's decision record and tae_daily_check.sh's
+    "V3 feature coverage" section.
+    """
+    sig = pde_signals.get(_s(ticker).upper())
+    merged = dict(snap)
+    merged["_v3_pde_enriched"] = bool(sig)
+    if sig:
+        merged.update({k: v for k, v in sig.items() if v is not None})
+    return merged
+
+
+def _run_v3_arm(
+    *,
+    portfolio: dict[str, Any],
+    ticker: str,
+    snap: dict[str, Any],
+    cfg: dict[str, Any],
+    p: dict[str, Any],
+    decision_id: str,
+    scorer: "v3pol.LearningScorer",
+    candidate_pool_p_profit: list[float] | None,
+    phase: str = PHASE_ALL,
+    blocked_rebuy: bool = False,
+    pde_signals: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    V3 ("V_learning") — isolated parallel PAPER arm (Phase 3). No fixed
+    entry/exit thresholds: BUY/HOLD/SELL and size come entirely from
+    tae_strategy_v3_learning_policy.decide_v3 (logistic scorer trained on
+    realized longitudinal_memory outcomes + fractional-Kelly/vol-target
+    sizing). Guardrails (MAX_POSITIONS, cash reserve, MIN/MAX_TRADE_USD) are
+    the same constants V1/V2 already operate under — see
+    tae_strategy_v3_learning_policy.py module docstring.
+
+    Execution mechanics (buy/sell fills, transaction costs, error rollback)
+    are intentionally copy-pattern from _run_v1_arm rather than a shared
+    helper — V1/V2 don't share one either, and introducing one now would
+    touch their hot path for no benefit to this change.
+
+    Known Phase-3 simplification: `regime.trend` / `regime.vol_tercile`
+    default to "UNKNOWN" (see below) — this runtime has no per-ticker
+    historical-closes feed today (`snap` is a single current-mark snapshot,
+    not a price series; V1/V2 don't retain one either). This matches
+    training-data reality: market_regime was constant "BULL" and
+    volatility_regime constant "UNKNOWN" across all historical decisions
+    (the scorer was never trained on real regime variation), so this is not
+    a regression versus what the model can actually use today. Follow-up:
+    wire a real closes feed once one exists in this runtime, then this
+    function needs no change — only the `regime =` line below moves.
+    """
+    _assert_paper_isolation(cfg)
+    phase_n = _s(phase).lower() or PHASE_ALL
+    snap = _enrich_snap_for_v3(snap, ticker, pde_signals or {})
+    mark_ok, mark_status, mark = _mark_is_usable(snap)
+    pos = (portfolio.get("positions") or {}).get(ticker)
+    has_pos = bool(pos and _f(pos.get("shares")) > 0)
+    ts_now = _now()
+
+    regime = v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile="UNKNOWN", realized_vol_annualized=None)
+
+    def _record(
+        action: str,
+        reason: str,
+        *,
+        qty: float = 0.0,
+        value: float = 0.0,
+        p_profit: float | None = None,
+        executed: bool = False,
+        execution_id: str | None = None,
+        realized_pnl_fill: float | None = None,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dec = {
+            "decision_id": decision_id,
+            "arm": "V3",
+            "ticker": ticker,
+            "action": action,
+            "reason": reason,
+            "quantity": qty,
+            "value": value,
+            "p_profit": p_profit,
+            "mark_price": mark if mark_ok else None,
+            "mark_status": mark_status,
+            "ts": ts_now,
+            "phase": phase_n,
+            "mutates_portfolio": executed,
+            "mutates_canonical_paper": False,
+            "executor_called": executed,
+            "execution_id": execution_id,
+            "realized_pnl": realized_pnl_fill,
+            "pde_enriched": snap.get("_v3_pde_enriched"),
+            "diagnostics": diagnostics or {},
+        }
+        _append_jsonl(p["arms"]["v3"]["decisions"], dec)
+        return dec
+
+    # Two-pass capital cycle, same convention as V1/V2 (_arm_pass calls this
+    # once with phase="manage" — exits only — then once with phase="entry").
+    if phase_n == PHASE_MANAGE and not has_pos:
+        return _record("HOLD", "V3_MANAGE_FLAT")
+    if phase_n == PHASE_ENTRY and has_pos:
+        return _record("HOLD", "V3_ENTRY_ALREADY_OPEN", qty=_f(pos.get("shares")))
+    if not mark_ok:
+        return _record("HOLD", mark_status, qty=_f(pos.get("shares")) if has_pos else 0.0)
+
+    if has_pos and phase_n in {PHASE_MANAGE, PHASE_ALL}:
+        decision = v3pol.decide_v3(
+            ticker=ticker,
+            snap=snap,
+            scorer=scorer,
+            regime=regime,
+            has_position=True,
+            cash_available=_f(portfolio.get("cash")),
+            open_positions=_open_position_count(portfolio),
+        )
+        if decision.action != "SELL":
+            return _record(
+                "HOLD", decision.reason, qty=_f(pos.get("shares")),
+                p_profit=decision.p_profit, diagnostics=decision.diagnostics,
+            )
+
+        shares = _f(pos.get("shares"))
+        cash_before = _f(portfolio.get("cash"))
+        pos_snapshot = dict(pos)
+        cost_cfg = _paper_tx_cost_cfg(cfg)
+        realized, gross, after = pe._sell_shares(
+            portfolio, ticker, shares, mark,
+            apply_paper_tx_costs=True, paper_tx_cost_cfg=cost_cfg,
+        )
+        eco = _take_fill_economics(portfolio)
+        cash_after = _f(portfolio.get("cash"))
+        net_credit = _f(eco.get("net_proceeds"), cash_after - cash_before)
+        credited = abs((cash_after - cash_before) - net_credit) <= 1e-3
+        fully_closed = after is None and ticker not in (portfolio.get("positions") or {})
+        if not (credited and fully_closed):
+            # Fail closed — restore pre-sell cash/position, same as V1.
+            portfolio["cash"] = cash_before
+            portfolio.setdefault("positions", {})[ticker] = pos_snapshot
+            portfolio["realized_pnl"] = _f(portfolio.get("realized_pnl")) - _f(realized)
+            _append_jsonl(
+                p["arms"]["v3"]["errors"],
+                {
+                    "ts": ts_now, "ticker": ticker, "error": "V3_SELL_SETTLEMENT_FAILED",
+                    "cash_before": cash_before, "cash_after": cash_after, "gross": gross,
+                },
+            )
+            return _record("ERROR", "V3_SELL_SETTLEMENT_FAILED", qty=shares)
+
+        execution_id = f"V3EX-{uuid.uuid4().hex[:16].upper()}"
+        realized_pnl_fill = round(float(realized), 6)
+        cost_fields = _trade_cost_fields(eco, gross=gross, side="SELL")
+        _append_jsonl(
+            p["arms"]["v3"]["trades"],
+            {
+                "ts": ts_now, "ticker": ticker, "action": "SELL", "shares": shares,
+                "price": mark, "decision_id": decision_id, "arm": "V3",
+                "execution_id": execution_id, "realized_pnl": realized_pnl_fill,
+                "gross": gross, "net": net_credit, "cash_before": cash_before,
+                "cash_after": cash_after, **cost_fields,
+            },
+        )
+        record_execution_learning_feedback(
+            arm="V3", execution_id=execution_id, decision_id=decision_id,
+            action="SELL", ticker=ticker, price=mark, shares=shares, value=net_credit,
+            reason=decision.reason, realized_pnl=realized_pnl_fill,
+            strategy_variant="V3", p=p,
+        )
+        return _record(
+            "SELL", decision.reason, qty=shares, value=net_credit,
+            p_profit=decision.p_profit, executed=True, execution_id=execution_id,
+            realized_pnl_fill=realized_pnl_fill, diagnostics=decision.diagnostics,
+        )
+
+    if (not has_pos) and phase_n in {PHASE_ENTRY, PHASE_ALL}:
+        if blocked_rebuy:
+            # Same-run churn guard: this ticker was SOLD earlier in this
+            # exact cycle (manage phase) — don't let the entry phase reopen
+            # it a moment later. Matches the existing V1/V2 precedent
+            # ("Block same-run BUY after SELL on same ticker", 93d8f23).
+            return _record("HOLD", "V3_BLOCKED_SAME_RUN_REBUY_AFTER_SELL")
+        decision = v3pol.decide_v3(
+            ticker=ticker,
+            snap=snap,
+            scorer=scorer,
+            regime=regime,
+            has_position=False,
+            cash_available=_f(portfolio.get("cash")),
+            open_positions=_open_position_count(portfolio),
+            candidate_pool_p_profit=candidate_pool_p_profit,
+        )
+        if decision.action != "BUY":
+            return _record(
+                "HOLD", decision.reason, p_profit=decision.p_profit,
+                diagnostics=decision.diagnostics,
+            )
+
+        notional = decision.quantity_usd
+        cash_before = _f(portfolio.get("cash"))
+        cost_cfg = _paper_tx_cost_cfg(cfg)
+        shares, after = pe._buy_shares(
+            portfolio, ticker, notional, mark,
+            apply_paper_tx_costs=True, paper_tx_cost_cfg=cost_cfg,
+        )
+        if shares <= 0 or not after:
+            return _record(
+                "HOLD", "V3_BUY_FILL_REJECTED", p_profit=decision.p_profit,
+                diagnostics=decision.diagnostics,
+            )
+
+        after["strategy_version"] = "V3"
+        after["current_price"] = mark
+        after["last_valid_mark"] = mark
+        after["mark_status"] = "FRESH"
+        after["mark_timestamp"] = ts_now
+        eco = _take_fill_economics(portfolio)
+        cash_after = _f(portfolio.get("cash"))
+        execution_id = f"V3EX-{uuid.uuid4().hex[:16].upper()}"
+        value = shares * mark
+        cost_fields = _trade_cost_fields(eco, gross=value, side="BUY")
+        _append_jsonl(
+            p["arms"]["v3"]["trades"],
+            {
+                "ts": ts_now, "ticker": ticker, "action": "BUY", "shares": shares,
+                "price": mark, "decision_id": decision_id, "arm": "V3",
+                "execution_id": execution_id, "gross": value, "cash_before": cash_before,
+                "cash_after": cash_after, **cost_fields,
+            },
+        )
+        record_execution_learning_feedback(
+            arm="V3", execution_id=execution_id, decision_id=decision_id,
+            action="BUY", ticker=ticker, price=mark, shares=shares, value=value,
+            reason=decision.reason, strategy_variant="V3", p=p,
+        )
+        return _record(
+            "BUY", decision.reason, qty=shares, value=value,
+            p_profit=decision.p_profit, executed=True, execution_id=execution_id,
+            diagnostics=decision.diagnostics,
+        )
+
+    return _record("HOLD", "V3_NO_ACTION")
+
+
 def run_cycle(
     *,
     cfg: dict[str, Any] | None = None,
@@ -3265,6 +3596,7 @@ def run_cycle(
         "ok": True,
         "v1_ok": True,
         "v2_ok": True,
+        "v3_ok": True,
         "errors": [],
         "divergences": [],
         "n_arm_topology": True,
@@ -3330,12 +3662,48 @@ def run_cycle(
     tickers_run = _watchlist(cfg, marks, v1, v2p)
     v1_decisions: list[dict[str, Any]] = []
     v2_decisions: list[dict[str, Any]] = []
+    v3_decisions: list[dict[str, Any]] = []
     v1_by_ticker: dict[str, dict[str, Any]] = {}
     v2_by_ticker: dict[str, dict[str, Any]] = {}
+    v3_by_ticker: dict[str, dict[str, Any]] = {}
 
     # Deep copies so failures cannot cross-contaminate mid-flight
     v1_work = deepcopy(v1)
     v2_work = deepcopy(v2p)
+
+    # V3 ("V_learning") — additive third arm (Phase 3). Gated on the generic
+    # arms[]/enabled_arm_ids topology (not a V3_PARALLEL_ENABLED legacy flag —
+    # v1/v2 predate the arms[] mechanism and keep their own flags for
+    # backward compat, v3 doesn't need to). A scorer-fit failure disables v3
+    # for this cycle only (fail-isolated) — never touches v1_work/v2_work.
+    v3_enabled = "v3" in (cfg.get("enabled_arm_ids") or [])
+    v3_scorer: "v3pol.LearningScorer | None" = None
+    v3_before_cash = 0.0
+    v3_work: dict[str, Any] = {}
+    v3_pde_signals: dict[str, dict[str, Any]] = {}
+    if v3_enabled:
+        try:
+            v3_starting_capital = next(
+                (
+                    _f(a.get("starting_capital"), 30000.0)
+                    for a in (cfg.get("arms") or [])
+                    if a.get("arm_id") == "v3"
+                ),
+                30000.0,
+            )
+            v3p = load_portfolio(p["arms"]["v3"]["portfolio"], starting=v3_starting_capital, arm="V3")
+            v3_before_cash = _f(v3p.get("cash"))
+            v3_work = deepcopy(v3p)
+            v3_scorer = v3pol.LearningScorer().fit()
+            v3_pde_signals = _load_today_pde_signals()
+        except Exception as exc:
+            v3_enabled = False
+            result["v3_ok"] = False
+            result["errors"].append(f"V3:SETUP:{exc}")
+            _append_jsonl(p["arms"]["v3"]["errors"], {"ts": ts, "error": f"SETUP:{exc}"})
+
+    v3_candidate_pool: list[float] = []
+    v3_sold_this_cycle: set[str] = set()
 
     def _arm_pass(phase: str) -> None:
         for t in tickers_run:
@@ -3387,6 +3755,34 @@ def run_cycle(
             else:
                 d2 = {"action": "SKIP", "reason": "V2_DISABLED", "ticker": t, "arm": "V2", "phase": phase}
 
+            d3: dict[str, Any]
+            if v3_enabled and v3_scorer is not None:
+                try:
+                    d3 = _run_v3_arm(
+                        portfolio=v3_work,
+                        ticker=t,
+                        snap=snap,
+                        cfg=cfg,
+                        p=p,
+                        decision_id=f"{did}-V3-{phase}",
+                        scorer=v3_scorer,
+                        candidate_pool_p_profit=v3_candidate_pool if phase == PHASE_ENTRY else None,
+                        phase=phase,
+                        blocked_rebuy=t in v3_sold_this_cycle,
+                        pde_signals=v3_pde_signals,
+                    )
+                except Exception as exc:
+                    result["v3_ok"] = False
+                    result["errors"].append(f"V3:{t}:{phase}:{exc}")
+                    _append_jsonl(
+                        p["arms"]["v3"]["errors"], {"ts": ts, "ticker": t, "phase": phase, "error": str(exc)}
+                    )
+                    if not cfg.get("FAIL_ISOLATION_ENABLED"):
+                        raise
+                    d3 = {"action": "ERROR", "reason": str(exc), "ticker": t, "arm": "V3", "phase": phase}
+            else:
+                d3 = {"action": "SKIP", "reason": "V3_DISABLED", "ticker": t, "arm": "V3", "phase": phase}
+
             # Prefer capital-mutating decisions when merging manage+entry passes.
             prev1 = v1_by_ticker.get(t)
             if prev1 is None or _s(d1.get("action")).upper() in {"BUY", "SELL", "ERROR"}:
@@ -3400,17 +3796,50 @@ def run_cycle(
                 "BLOCKED",
             }:
                 v2_by_ticker[t] = d2
+            prev3 = v3_by_ticker.get(t)
+            if prev3 is None or _s(d3.get("action")).upper() in {"BUY", "SELL", "ERROR"}:
+                v3_by_ticker[t] = d3
 
     # Capital cycle order: settle all SELL/CLOSE first, then BUY/REBUY/ADD.
     _assert_paper_isolation(cfg)
     _arm_pass(PHASE_MANAGE)
+    v3_sold_this_cycle = {
+        t for t, d in v3_by_ticker.items() if _s(d.get("action")).upper() == "SELL"
+    }
+
+    if v3_enabled and v3_scorer is not None:
+        # Pre-pass: score today's V3 entry candidates (no open position) so
+        # decide_v3 can calibrate its BUY threshold from *this cycle's* own
+        # distribution instead of a fixed constant (research note §5). Must
+        # run after the manage phase (which may have closed positions) and
+        # before the entry phase (which consumes this pool).
+        regime = v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile="UNKNOWN", realized_vol_annualized=None)
+        for t in tickers_run:
+            snap = marks.get(t)
+            if not snap:
+                continue
+            pos = (v3_work.get("positions") or {}).get(t)
+            if pos and _f(pos.get("shares")) > 0:
+                continue
+            enriched_snap = _enrich_snap_for_v3(snap, t, v3_pde_signals)
+            pseudo = v3pol.build_pseudo_record(enriched_snap, regime)
+            p_profit, _diag = v3_scorer.predict_proba("BUY_PAPER", pseudo)
+            v3_candidate_pool.append(p_profit)
+
     _arm_pass(PHASE_ENTRY)
 
     for t in tickers_run:
         d1 = v1_by_ticker.get(t) or {"action": "HOLD", "ticker": t, "arm": "V1"}
         d2 = v2_by_ticker.get(t) or {"action": "HOLD", "ticker": t, "arm": "V2"}
+        d3 = v3_by_ticker.get(t) or {"action": "HOLD", "ticker": t, "arm": "V3"}
         v1_decisions.append(d1)
         v2_decisions.append(d2)
+        v3_decisions.append(d3)
+        # V1-vs-V2 divergence journal is unchanged/not extended to V3 in
+        # Phase 3 — that schema (V1_action/V2_action columns) is specific to
+        # the 2-arm comparison already relied on by existing reports; a
+        # 3-way divergence view is a separate follow-up, not silently
+        # folded in here.
         klass = classify_divergence(d1, d2)
         div = {
             "timestamp": ts,
@@ -3459,6 +3888,10 @@ def run_cycle(
         save_portfolio(p["v1_portfolio"], v1_work)
     av2, inv2 = portfolio_mtm(v2_work, mark_px, mark_meta=mark_meta)
     save_portfolio(p["v2_portfolio"], v2_work)
+    av3 = inv3 = 0.0
+    if v3_enabled:
+        av3, inv3 = portfolio_mtm(v3_work, mark_px, mark_meta=mark_meta)
+        save_portfolio(p["arms"]["v3"]["portfolio"], v3_work)
 
     acct1 = {
         "arm": "V1",
@@ -3490,6 +3923,23 @@ def run_cycle(
         "cash_delta_vs_cycle_start": _f(v2_work.get("cash")) - v2_before_cash,
         "transaction_cost_metrics": accumulate_tx_cost_metrics(p["v2_trades"]),
     }
+    acct3: dict[str, Any] | None = None
+    if v3_enabled:
+        acct3 = {
+            "arm": "V3",
+            "ts": ts,
+            "cash": _f(v3_work.get("cash")),
+            "invested": inv3,
+            "account_value": av3,
+            "realized_pnl": _f(v3_work.get("realized_pnl")),
+            "unrealized_pnl": _f(v3_work.get("unrealized_pnl")),
+            "reconciliation_pass": accounting_pass(v3_work),
+            "cash_delta_vs_cycle_start": _f(v3_work.get("cash")) - v3_before_cash,
+            "transaction_cost_metrics": accumulate_tx_cost_metrics(p["arms"]["v3"]["trades"]),
+        }
+        _atomic_write_json(p["arms"]["v3"]["accounting"], acct3)
+        _atomic_write_json(p["arms"]["v3"]["account"], acct3)
+
     _atomic_write_json(p["v1_accounting"], acct1)
     _atomic_write_json(p["v2_accounting"], acct2)
     _atomic_write_json(p["v1_account"], acct1)
@@ -3525,14 +3975,18 @@ def run_cycle(
         "v1_cash_unchanged_by_v2": True,  # separate objects
         "v1_cash": _f(v1_work.get("cash")),
         "v2_cash": _f(v2_work.get("cash")),
+        "v3_cash": _f(v3_work.get("cash")) if v3_enabled else None,
         "v1_cash_before": v1_before_cash,
         "v2_cash_before": v2_before_cash,
+        "v3_cash_before": v3_before_cash if v3_enabled else None,
         "shared_snapshot_id": snap_id,
     }
     result["accounting_v1"] = acct1
     result["accounting_v2"] = acct2
+    result["accounting_v3"] = acct3
     result["v1_decisions"] = v1_decisions
     result["v2_decisions"] = v2_decisions
+    result["v3_decisions"] = v3_decisions
     # Profit-first tranche gate tallies (ADD path evaluations only).
     gate_counts: dict[str, int] = {
         pol.V2_TRANCHE_ALLOWED: 0,
@@ -3558,5 +4012,7 @@ def run_cycle(
         "counts": gate_counts,
     }
     result["health"] = health_snapshot(cfg)
-    result["ok"] = bool(result["v1_ok"] or result["v2_ok"])  # either arm healthy is ok under isolation
+    result["ok"] = bool(
+        result["v1_ok"] or result["v2_ok"] or result["v3_ok"]
+    )  # any arm healthy is ok under isolation
     return result

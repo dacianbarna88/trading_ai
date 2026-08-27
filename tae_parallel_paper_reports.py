@@ -782,3 +782,266 @@ def update_cumulative_report(*, day_report: dict[str, Any], cfg: dict[str, Any] 
         for d in days:
             w.writerow(d)
     return cum
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — V1/V2/V3 three-way comparison. Additive: does not modify
+# compute_daily_verdict/generate_daily_report/update_cumulative_report above,
+# which remain the authoritative V1-vs-V2 report other tooling already
+# depends on (p["latest_conclusion"], the cumulative report, etc.). This is
+# a separate, parallel report answering the newer "which of V1/V2/V3 leads"
+# question introduced by the V3 ("V_learning") arm.
+# ---------------------------------------------------------------------------
+
+# Per-arm action -> class normalization for divergence comparison. Raw action
+# strings differ by arm (V1: BUY/SELL, V2: OPEN/ADD/CLOSE, V3: BUY/SELL) even
+# when they mean the same economic thing — classify_divergence() already
+# encodes this for the V1-vs-V2 pair; this generalizes the same idea to
+# three arms rather than duplicating classify_divergence's pairwise branches.
+_ACTION_CLASS: dict[str, dict[str, str]] = {
+    "V1": {
+        "BUY": "ENTRY", "SELL": "EXIT", "HOLD": "HOLD",
+        "BLOCKED": "BLOCKED", "ERROR": "ERROR", "SKIP": "HOLD",
+    },
+    "V2": {
+        "OPEN": "ENTRY", "ADD": "ENTRY", "CLOSE": "EXIT", "HOLD": "HOLD",
+        "BLOCKED": "BLOCKED", "ERROR": "ERROR", "STOP_ACCUMULATION": "HOLD", "SKIP": "HOLD",
+    },
+    "V3": {
+        "BUY": "ENTRY", "SELL": "EXIT", "HOLD": "HOLD",
+        "BLOCKED": "BLOCKED", "ERROR": "ERROR", "SKIP": "HOLD",
+    },
+}
+
+
+def _action_class(arm: str, action: Any) -> str:
+    return _ACTION_CLASS.get(arm, {}).get(_s(action).upper(), "OTHER")
+
+
+def compute_three_way_verdict(arms: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """
+    Generalizes compute_daily_verdict's materiality-gated winner logic to N
+    arms without touching that function. Winner = arm with the highest
+    ending_av; a win requires beating the runner-up by
+    materiality_threshold_usd — the same $ definition compute_daily_verdict
+    uses, so for exactly two arms this reduces to the same comparison (just
+    not literally the same code path — compute_daily_verdict stays untouched
+    as the authoritative V1-vs-V2 verdict).
+    """
+    names = [n for n in arms if arms.get(n)]
+    if not names:
+        return {"verdict": "NO_ARMS", "winner": None, "ranked": [], "main_reason": "No arm data available."}
+
+    accounting_ok = all(bool(arms[n].get("reconciliation_pass")) for n in names)
+    start = max((_f(arms[n].get("starting_av"), 30000.0) for n in names), default=30000.0) or 1.0
+    threshold = materiality_threshold_usd(start)
+    ranked = sorted(names, key=lambda n: _f(arms[n].get("ending_av")), reverse=True)
+
+    if not accounting_ok:
+        return {
+            "verdict": "INCONCLUSIVE_DATA_QUALITY",
+            "winner": None,
+            "ranked": ranked,
+            "materiality_threshold_usd": threshold,
+            "main_reason": "Accounting reconciliation failed for at least one arm — no leader declared.",
+        }
+
+    if len(ranked) == 1:
+        return {
+            "verdict": f"{ranked[0]}_ONLY",
+            "winner": ranked[0],
+            "ranked": ranked,
+            "materiality_threshold_usd": threshold,
+            "main_reason": f"Only {ranked[0]} has data this cycle.",
+        }
+
+    leader, runner_up = ranked[0], ranked[1]
+    lead_margin = _f(arms[leader].get("ending_av")) - _f(arms[runner_up].get("ending_av"))
+    material = lead_margin >= threshold
+    return {
+        "verdict": f"{leader}_WIN" if material else "NO_MATERIAL_LEADER",
+        "winner": leader if material else None,
+        "ranked": ranked,
+        "lead_margin_usd": round(lead_margin, 4),
+        "materiality_threshold_usd": threshold,
+        "main_reason": (
+            f"{leader} leads {runner_up} by ${lead_margin:.2f} (threshold ${threshold:.2f})."
+            if material
+            else f"Largest gap ({leader} vs {runner_up}) is ${lead_margin:.2f}, "
+            f"below materiality threshold ${threshold:.2f} — no material leader."
+        ),
+    }
+
+
+def _latest_decisions_by_ticker(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Journals are append-only chronological — last row per ticker wins."""
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        t = _s(r.get("ticker"))
+        if t:
+            out[t] = r
+    return out
+
+
+def compute_three_way_divergence(p: dict[str, Any], day: str) -> list[dict[str, Any]]:
+    """
+    N-arm divergence matrix computed at report-generation time from each
+    arm's persisted decisions journal, rather than a new per-cycle write
+    into (or a schema change to) divergence_journal.jsonl. That file's
+    V1_action/V2_action columns are read directly by generate_daily_report's
+    "Top divergences" section above and are left exactly as-is. Computing
+    this from journals that already exist means no change to run_cycle()'s
+    hot path (the same cron-driven path V1/V2 run through every hour) —
+    the tradeoff is this reflects "latest decision per ticker today" rather
+    than a literal per-cycle-timestamped divergence event stream.
+    """
+    v1_rows = [r for r in _read_jsonl(p["v1_decisions"]) if day in _s(r.get("ts") or r.get("timestamp"))]
+    v2_rows = [r for r in _read_jsonl(p["v2_decisions"]) if day in _s(r.get("ts") or r.get("timestamp"))]
+    v3_path = p.get("arms", {}).get("v3", {}).get("decisions")
+    v3_rows = [r for r in _read_jsonl(v3_path)] if v3_path else []
+    v3_rows = [r for r in v3_rows if day in _s(r.get("ts") or r.get("timestamp"))]
+
+    v1d = _latest_decisions_by_ticker(v1_rows)
+    v2d = _latest_decisions_by_ticker(v2_rows)
+    v3d = _latest_decisions_by_ticker(v3_rows)
+
+    tickers = sorted(set(v1d) | set(v2d) | set(v3d))
+    rows: list[dict[str, Any]] = []
+    for t in tickers:
+        d1, d2, d3 = v1d.get(t) or {}, v2d.get(t) or {}, v3d.get(t) or {}
+        # NO_DECISION (arm never evaluated this ticker today — e.g. V2's
+        # universe is wider than V1/V3's) is distinct from a real action
+        # class. Comparing it as if it were a strategic disagreement was a
+        # bug caught while validating this function: it inflated the first
+        # run's disagreement count to 514 for an ~18-25 ticker watchlist,
+        # almost entirely "V1/V3 didn't look at this ticker" noise rather
+        # than genuine cross-arm disagreement.
+        c1 = _action_class("V1", d1.get("action")) if d1 else "NO_DECISION"
+        c2 = _action_class("V2", d2.get("action")) if d2 else "NO_DECISION"
+        c3 = _action_class("V3", d3.get("action")) if d3 else "NO_DECISION"
+        pairwise = {
+            "V1_V2": "SAME_CLASS" if c1 == c2 else ("N/A" if "NO_DECISION" in (c1, c2) else "DIFFER"),
+            "V1_V3": "SAME_CLASS" if c1 == c3 else ("N/A" if "NO_DECISION" in (c1, c3) else "DIFFER"),
+            "V2_V3": "SAME_CLASS" if c2 == c3 else ("N/A" if "NO_DECISION" in (c2, c3) else "DIFFER"),
+        }
+        present = [c for c in (c1, c2, c3) if c != "NO_DECISION"]
+        meaningful_disagreement = len(present) >= 2 and len(set(present)) > 1
+        rows.append({
+            "ticker": t,
+            "V1_action": d1.get("action"), "V1_reason": d1.get("reason"), "V1_class": c1,
+            "V2_action": d2.get("action"), "V2_reason": d2.get("reason"), "V2_class": c2,
+            "V3_action": d3.get("action"), "V3_reason": d3.get("reason"), "V3_class": c3,
+            "pairwise": pairwise,
+            "arms_with_decision": len(present),
+            "all_agree": not meaningful_disagreement,
+        })
+    return rows
+
+
+def generate_three_way_report(
+    *,
+    date: str | None = None,
+    cfg: dict[str, Any] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """V1/V2/V3 daily comparison — separate artifact from generate_daily_report."""
+    cfg = cfg or load_parallel_paper_config()
+    p = paths()
+    day = date or _today(cfg)
+    md_path = p["reports"] / f"TAE_PARALLEL_DAILY_REPORT_3WAY_{day}.md"
+    json_path = p["reports"] / f"tae_parallel_daily_report_3way_{day}.json"
+
+    if json_path.is_file() and not force:
+        existing = json.loads(json_path.read_text(encoding="utf-8"))
+        existing["idempotent_reuse"] = True
+        return existing
+
+    v1 = load_v1_portfolio(cfg)
+    v2 = load_portfolio(p["v2_portfolio"], starting=float(cfg["V2_STARTING_CAPITAL"]), arm="V2")
+    v3_enabled = "v3" in (cfg.get("enabled_arm_ids") or [])
+    v3 = (
+        load_portfolio(p["arms"]["v3"]["portfolio"], starting=float(cfg.get("V3_STARTING_CAPITAL") or 30000.0), arm="V3")
+        if v3_enabled
+        else None
+    )
+
+    marks = {
+        t: _f(pos.get("current_price") or pos.get("avg_price"))
+        for t, pos in {
+            **(v1.get("positions") or {}),
+            **(v2.get("positions") or {}),
+            **((v3.get("positions") or {}) if v3 else {}),
+        }.items()
+    }
+
+    m1 = _arm_day_metrics("V1", v1, cfg, marks)
+    m2 = _arm_day_metrics("V2", v2, cfg, marks)
+    arms_metrics = {"V1": m1, "V2": m2}
+    if v3 is not None:
+        arms_metrics["V3"] = _arm_day_metrics("V3", v3, cfg, marks)
+
+    verdict = compute_three_way_verdict(arms_metrics)
+    divergences = compute_three_way_divergence(p, day)
+    disagreements = [d for d in divergences if not d["all_agree"]]
+    comparable = [d for d in divergences if d["arms_with_decision"] >= 2]
+
+    report = {
+        "schema": "tae.parallel_paper.daily_report_3way.v1",
+        "date": day,
+        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "arms_present": sorted(arms_metrics),
+        "executive_conclusion": verdict,
+        "metrics": arms_metrics,
+        "divergences": divergences,
+        "disagreement_count": len(disagreements),
+        "comparable_ticker_count": len(comparable),
+        "single_arm_only_ticker_count": len(divergences) - len(comparable),
+        "disclaimer": "Single-day verdict is operational, not permanent strategic superiority. See generate_daily_report() for the authoritative V1-vs-V2 report this does not replace.",
+        "paths": {"md": str(md_path), "json": str(json_path)},
+    }
+
+    md = [
+        f"# TAE Parallel PAPER Daily Report — V1/V2/V3 — {day}",
+        "",
+        f"**Verdict:** `{verdict['verdict']}` · winner={verdict.get('winner')} · ranked={verdict.get('ranked')}",
+        "",
+        verdict["main_reason"],
+        "",
+        "## Comparative table",
+        "",
+        "| Metric | " + " | ".join(arms_metrics) + " |",
+        "|---" * (len(arms_metrics) + 1) + "|",
+    ]
+    row_defs = [
+        ("Ending AV", "ending_av", "{:.2f}"),
+        ("Cash", "cash", "{:.2f}"),
+        ("Invested", "invested", "{:.2f}"),
+        ("Realized PnL (cum.)", "realized_pnl_cumulative", "{:.2f}"),
+        ("Unrealized PnL", "unrealized_pnl", "{:.2f}"),
+        ("Daily total PnL", "daily_total_pnl", "{:.2f}"),
+        ("Drawdown", "drawdown", "{:.2f}"),
+        ("Open positions", "open_positions", "{}"),
+        ("Capital util", "capital_utilization", "{:.3f}"),
+        ("Accounting", "reconciliation_pass", "{}"),
+    ]
+    for label, key, fmt in row_defs:
+        cells = [fmt.format(arms_metrics[a].get(key) or 0) for a in arms_metrics]
+        md.append(f"| {label} | " + " | ".join(cells) + " |")
+
+    md += [
+        "",
+        f"## Divergences ({len(disagreements)} of {len(comparable)} tickers evaluated by 2+ arms disagree on action class; "
+        f"{len(divergences) - len(comparable)} more tickers were evaluated by only one arm and are not comparable)",
+        "",
+    ]
+    for d in disagreements[:15]:
+        md.append(
+            f"- {d['ticker']}: V1={d['V1_action']}({d['V1_class']}) · "
+            f"V2={d['V2_action']}({d['V2_class']}) · V3={d['V3_action']}({d['V3_class']})"
+        )
+    md += ["", "## Disclaimer", "", report["disclaimer"], ""]
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text("\n".join(md), encoding="utf-8")
+    _atomic_write_json(json_path, report)
+    return report

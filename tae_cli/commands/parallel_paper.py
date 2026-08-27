@@ -96,6 +96,20 @@ def run_report(_args: list[str] | None = None) -> int:
     return 0 if rep.get("accounting_status") == "PASS" else 1
 
 
+def run_report_3way(_args: list[str] | None = None) -> int:
+    from tae_parallel_paper_reports import generate_three_way_report
+
+    print("===== TAE PARALLEL-PAPER-REPORT-3WAY (V1/V2/V3) =====")
+    force = bool(_args and "--force" in _args)
+    rep = generate_three_way_report(force=force)
+    verdict = rep.get("executive_conclusion", {})
+    print("date", rep.get("date"), "arms", rep.get("arms_present"))
+    print("verdict", verdict.get("verdict"), "winner", verdict.get("winner"), "ranked", verdict.get("ranked"))
+    print("disagreements", rep.get("disagreement_count"))
+    print("report", rep.get("paths", {}).get("md"))
+    return 0
+
+
 def run_stop(_args: list[str] | None = None) -> int:
     from tae_parallel_paper_runtime import stop_runtime
 

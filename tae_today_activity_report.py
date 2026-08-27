@@ -25,6 +25,7 @@ from tae_parallel_paper_config import (
     REPORTS_DIR,
     V1_DIR,
     V2_DIR,
+    V3_DIR,
     load_parallel_paper_config,
 )
 
@@ -941,8 +942,8 @@ def build_today_report(
     """Build the canonical read-only daily decision trace."""
     if strategy is not None:
         strategy = strategy.upper()
-        if strategy not in {"V1", "V2"}:
-            raise ValueError("--strategy must be V1 or V2")
+        if strategy not in {"V1", "V2", "V3"}:
+            raise ValueError("--strategy must be V1, V2, or V3")
     ticker = _s(ticker) or None
     start, end = _day_bounds(day)
     selected_day = start.date().isoformat()
@@ -969,7 +970,7 @@ def build_today_report(
     raw_events: list[dict[str, Any]] = []
     all_tickers: set[str] = set()
 
-    for arm, arm_dir in (("V1", V1_DIR), ("V2", V2_DIR)):
+    for arm, arm_dir in (("V1", V1_DIR), ("V2", V2_DIR), ("V3", V3_DIR)):
         account = _read_json(arm_dir / "account.json") or {}
         portfolio = _read_json(arm_dir / "portfolio.json") or {}
         positions = {
@@ -1035,13 +1036,7 @@ def build_today_report(
                 "account_value": account_value,
                 "cash": _f(account.get("cash")),
                 "invested": _f(account.get("invested")),
-                "starting_capital": _f(
-                    config.get(
-                        "V1_STARTING_CAPITAL"
-                        if arm == "V1"
-                        else "V2_STARTING_CAPITAL"
-                    )
-                ),
+                "starting_capital": _f(config.get(f"{arm}_STARTING_CAPITAL")),
                 "open_positions": len(positions),
                 "reconciliation_pass": account.get("reconciliation_pass"),
                 "prior_close_AV": prior,
@@ -1371,7 +1366,7 @@ def build_today_report(
     }
     capital = {
         arm: arm_data[arm]["capital"]
-        for arm in ("V1", "V2")
+        for arm in ("V1", "V2", "V3")
         if strategy is None or strategy == arm
     }
     conclusion = {
@@ -1811,7 +1806,7 @@ def format_report_text(doc: dict[str, Any]) -> str:
 def _usage() -> str:
     return (
         "Usage: python3 tae.py today [--day YYYY-MM-DD] [--json] "
-        "[--ticker TICKER] [--strategy V1|V2] [--all-events] [--cio]"
+        "[--ticker TICKER] [--strategy V1|V2|V3] [--all-events] [--cio]"
     )
 
 
