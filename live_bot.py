@@ -679,6 +679,17 @@ def generate_signals():
             if len(data.columns.names) > 1:
                 data.columns = data.columns.droplevel(1)
 
+            # yfinance occasionally returns a NaN Close for the most recent
+            # trading day (source data not yet fully settled at request
+            # time) while other columns (Open, Volume) are populated. Left
+            # unfiltered, float(NaN) doesn't raise, so a NaN price silently
+            # flows into live_signals.csv as an empty Price cell for every
+            # ticker at once — found 2026-08-29, made SMA50/RSI/last_close
+            # all live off the last genuinely valid close instead.
+            data = data[data["Close"].notna()]
+            if data.empty:
+                continue
+
             data["SMA50"] = data["Close"].rolling(window=50).mean()
             data["RSI"] = calculate_rsi(data["Close"])
 
