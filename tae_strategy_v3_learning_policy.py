@@ -574,23 +574,42 @@ def decide_v3(
     if has_position:
         p_exit, diag = scorer.predict_proba("SELL_PAPER", pseudo_record)
         # MIN_EXIT_SHRINKAGE guards against acting on a coin-flip prior.
-        # SELL_PAPER has very few resolved outcomes today (n=4 as of Phase 3
-        # integration testing) -> shrinkage_weight stays near 0 and
-        # predict_proba returns ~base_rate (~0.5) for every ticker. An
-        # unguarded `p_exit >= 0.5` fires on that tie for essentially every
-        # open position, which (caught in Phase-3 dry-run testing) causes a
-        # same-cycle SELL-then-immediately-BUY-back churn loop that only
-        # burns transaction costs. Requiring a minimum trained-signal weight
-        # before allowing a SELL keeps V3 HOLDING open positions until the
-        # exit model has actually learned something, exactly like the entry
-        # side's calibrated threshold already refuses to fire on noise.
+        # SELL_PAPER has very few resolved outcomes (n=3 as of the Phase 5
+        # soak) -> shrinkage_weight stays near 0 and predict_proba returns
+        # ~base_rate (~0.5) for every ticker. An unguarded `p_exit >= 0.5`
+        # fires on that tie for essentially every open position, which
+        # (caught in Phase-3 dry-run testing) causes a same-cycle
+        # SELL-then-immediately-BUY-back churn loop that only burns
+        # transaction costs. Requiring a minimum trained-signal weight
+        # before trusting SELL_PAPER keeps that specific model out of the
+        # decision until it has actually learned something.
         has_real_exit_signal = diag.get("shrinkage_weight", 0.0) >= MIN_EXIT_SHRINKAGE
-        if has_real_exit_signal and p_exit > 0.5:
+
+        # But SELL_PAPER staying starved of data (V3 never sells -> never
+        # generates a SELL_PAPER outcome -> never earns enough data to
+        # sell) combined with hitting MAX_POSITIONS on day one freezes the
+        # whole arm permanently: can't buy (full), can't sell (no exit
+        # signal ever clears the bar). Found in the Phase 5 soak — V3 sat
+        # on the same 12 positions for a week with zero realized PnL.
+        # Fallback: re-score the held ticker with the much more mature
+        # BUY_PAPER model — "would I still buy this today, at the current
+        # price?" is a standard portfolio-review heuristic, not a new
+        # fixed rule; p_rebuy < 0.5 means the model itself, with real
+        # trained weight behind it, now leans against this position.
+        p_rebuy, rebuy_diag = scorer.predict_proba("BUY_PAPER", pseudo_record)
+        rebuy_has_signal = rebuy_diag.get("shrinkage_weight", 0.0) >= MIN_EXIT_SHRINKAGE
+        sell_via_exit_model = has_real_exit_signal and p_exit > 0.5
+        sell_via_rebuy_check = rebuy_has_signal and p_rebuy < 0.5
+
+        if sell_via_exit_model or sell_via_rebuy_check:
+            reason = "V3_LEARNED_EXIT_SIGNAL" if sell_via_exit_model else "V3_NO_LONGER_BUY_WORTHY"
+            chosen_p = p_exit if sell_via_exit_model else p_rebuy
+            chosen_diag = diag if sell_via_exit_model else rebuy_diag
             return V3Decision(
-                ticker=ticker, action="SELL", reason="V3_LEARNED_EXIT_SIGNAL",
-                quantity_usd=0.0, p_profit=p_exit, regime=regime.regime_id, diagnostics=diag,
+                ticker=ticker, action="SELL", reason=reason,
+                quantity_usd=0.0, p_profit=chosen_p, regime=regime.regime_id, diagnostics=chosen_diag,
             )
-        reason = "V3_LEARNED_HOLD_OPEN" if has_real_exit_signal else "V3_INSUFFICIENT_EXIT_SIGNAL"
+        reason = "V3_LEARNED_HOLD_OPEN" if (has_real_exit_signal or rebuy_has_signal) else "V3_INSUFFICIENT_EXIT_SIGNAL"
         return V3Decision(
             ticker=ticker, action="HOLD", reason=reason,
             quantity_usd=0.0, p_profit=p_exit, regime=regime.regime_id, diagnostics=diag,
