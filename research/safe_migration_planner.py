@@ -5,13 +5,22 @@ from config.allocation_settings import (
     CORE_US_TICKERS,
     MIN_GLOBAL_RANK_SCORE,
 )
+from core.portfolio import open_buy_row_mask
 
 transfer = pd.read_csv("capital_transfer_plan.csv")
 reduce_df = pd.read_csv("capital_reduce_candidates.csv")
 add_df = pd.read_csv("capital_add_candidates.csv")
 gap_df = pd.read_csv("allocation_gap.csv")
 
-portfolio_value = float(pd.read_csv("portfolio.csv")["Current_Value"].fillna(0).sum())
+# Summing Current_Value across every row double-counts: SELL rows carry
+# sale proceeds in Current_Value, and a closed-then-reopened ticker leaves
+# a stale closed BUY row alongside the fresh one. Only open BUY rows
+# represent value still held.
+_portfolio = pd.read_csv("portfolio.csv")
+_portfolio["Current_Value"] = pd.to_numeric(_portfolio["Current_Value"], errors="coerce")
+portfolio_value = float(
+    _portfolio.loc[open_buy_row_mask(_portfolio), "Current_Value"].fillna(0).sum()
+)
 
 max_cycle = round(
     portfolio_value * MAX_MIGRATION_PCT / 100,
