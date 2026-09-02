@@ -425,14 +425,20 @@ def compute_open_positions(portfolio_df):
     open_rows = []
     for ticker in df["Ticker"].dropna().unique():
         rows = df[df["Ticker"] == ticker]
+
+        # SELLs in this system always fully liquidate the current holding, so
+        # only rows after the most recent SELL belong to the open position —
+        # otherwise a closed-then-reopened ticker would blend the stale closed
+        # lot's cost basis into the new position's average price.
+        sell_idx = rows.index[rows["Action"].astype(str).str.upper() == "SELL"]
+        if len(sell_idx):
+            rows = rows[rows.index > sell_idx.max()]
+
         buy_rows = rows[rows["Action"].astype(str).str.upper() == "BUY"]
-        sell_rows = rows[rows["Action"].astype(str).str.upper() == "SELL"]
-        buy_shares = buy_rows["Shares"].sum()
-        sell_shares = sell_rows["Shares"].sum()
-        open_shares = buy_shares - sell_shares
+        open_shares = buy_rows["Shares"].sum()
 
         if open_shares > 0:
-            avg_price = (buy_rows["Price"] * buy_rows["Shares"]).sum() / buy_shares
+            avg_price = (buy_rows["Price"] * buy_rows["Shares"]).sum() / open_shares
             current_price = get_live_price(ticker) or avg_price
             invested = open_shares * avg_price
             current_value = open_shares * current_price
