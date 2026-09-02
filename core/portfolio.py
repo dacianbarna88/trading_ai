@@ -39,6 +39,34 @@ def get_open_positions(portfolio):
     return positions
 
 
+def open_buy_row_mask(portfolio):
+    """Boolean mask of BUY rows that belong to a currently-open position.
+
+    SELLs in this system always fully liquidate the current holding, so a
+    BUY row only belongs to the open position if it comes after that
+    ticker's most recent SELL. A ticker-only check (BUY row for a ticker
+    that has *some* open position) is not enough: a closed-then-reopened
+    ticker has both a stale closed BUY row and a fresh open BUY row, and
+    the stale row must stay excluded even though its ticker is "open".
+    """
+    mask = pd.Series(False, index=portfolio.index)
+
+    if portfolio.empty:
+        return mask
+
+    actions = portfolio["Action"].astype(str).str.upper()
+
+    for ticker in portfolio["Ticker"].dropna().unique():
+        ticker_mask = portfolio["Ticker"] == ticker
+        sell_idx = portfolio.index[ticker_mask & (actions == "SELL")]
+        open_mask = ticker_mask
+        if len(sell_idx):
+            open_mask = open_mask & (portfolio.index > sell_idx.max())
+        mask = mask | (open_mask & (actions == "BUY"))
+
+    return mask
+
+
 def get_cash_available(portfolio):
     if portfolio.empty:
         return STARTING_CAPITAL

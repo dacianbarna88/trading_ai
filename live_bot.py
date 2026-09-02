@@ -10,6 +10,7 @@ import yfinance as yf
 from core.allocation import get_allocation_weight
 from core.forecast_risk import get_forecast_multiplier
 from core.historical_risk import get_risk_multiplier
+from core.portfolio import open_buy_row_mask
 
 
 STARTING_CAPITAL = 30000
@@ -259,8 +260,11 @@ def update_portfolio_prices():
     portfolio["Price"] = pd.to_numeric(portfolio["Price"], errors="coerce")
     portfolio["Shares"] = pd.to_numeric(portfolio["Shares"], errors="coerce")
 
-    open_positions = get_open_positions(portfolio)
-    open_tickers = set(open_positions.keys())
+    # A ticker-only "is this ticker open" check is not enough: a
+    # closed-then-reopened ticker has both a stale closed BUY row and a
+    # fresh open BUY row sharing the same ticker name. Only rows after that
+    # ticker's most recent SELL are the open position.
+    open_rows = open_buy_row_mask(portfolio)
 
     for i, row in portfolio.iterrows():
         ticker = row["Ticker"]
@@ -277,7 +281,7 @@ def update_portfolio_prices():
             continue
 
         # Closed positions: do not rewrite historical BUY marks.
-        if action == "BUY" and ticker not in open_tickers:
+        if action == "BUY" and not open_rows.loc[i]:
             continue
 
         current_price = get_latest_price(ticker)
