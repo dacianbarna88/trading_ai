@@ -298,6 +298,19 @@ def _build_steps(root: Path) -> list[StepSpec]:
             command=[PYTHON, str(root / "tae_actionable_signal_audit.py")],
             artifact="tae_actionable_signal_audit.json",
         ),
+        StepSpec(
+            name="advisory_index",
+            command=[PYTHON, str(root / "tae_advisory_index_demo.py")],
+            artifact="tae_advisory_index.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="live_advisory_bridge",
+            command=[PYTHON, str(root / "tae_live_advisory_demo.py")],
+            artifact="tae_live_advisory.json",
+            requires_artifacts=("tae_advisory_index.json",),
+            needs_pythonpath=True,
+        ),
     ]
 
 
