@@ -20,15 +20,18 @@ open_rows = []
 
 for ticker in df["Ticker"].dropna().unique():
     rows = df[df["Ticker"] == ticker]
-    buy_shares = rows[rows["Action"] == "BUY"]["Shares"].sum()
-    sell_shares = rows[rows["Action"] == "SELL"]["Shares"].sum()
+    buys = rows[rows["Action"] == "BUY"]
+    sells = rows[rows["Action"] == "SELL"]
+    buy_shares = buys["Shares"].sum()
+    sell_shares = sells["Shares"].sum()
     open_shares = buy_shares - sell_shares
 
     if open_shares > 0:
-        last_buy = rows[rows["Action"] == "BUY"].iloc[-1]
+        last_buy = buys.iloc[-1]
         current_price = float(last_buy["Current_Price"])
-        entry_price = float(last_buy["Price"])
-        pnl_pct = round(((current_price - entry_price) / entry_price) * 100, 2)
+        buy_value = (buys["Price"] * buys["Shares"]).sum()
+        entry_price = buy_value / buy_shares if buy_shares else 0
+        pnl_pct = round(((current_price - entry_price) / entry_price) * 100, 2) if entry_price else 0.0
 
         status = "OK"
         action = "HOLD"
