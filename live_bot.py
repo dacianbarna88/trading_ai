@@ -334,13 +334,17 @@ def get_cash_available(portfolio):
     portfolio["Price"] = pd.to_numeric(portfolio["Price"], errors="coerce")
     portfolio["Shares"] = pd.to_numeric(portfolio["Shares"], errors="coerce")
 
-    buys = portfolio[portfolio["Action"].astype(str).str.upper() == "BUY"]
-    sells = portfolio[portfolio["Action"].astype(str).str.upper() == "SELL"]
+    actions = portfolio["Action"].astype(str).str.upper()
+
+    buys = portfolio[actions == "BUY"]
+    sells = portfolio[actions == "SELL"]
+    deposits = portfolio[actions == "DEPOSIT"]
 
     spent = (buys["Price"] * buys["Shares"]).sum()
     received = (sells["Price"] * sells["Shares"]).sum()
+    deposited = (deposits["Price"] * deposits["Shares"]).sum()
 
-    return STARTING_CAPITAL - spent + received
+    return STARTING_CAPITAL + deposited - spent + received
 
 
 def save_alert(row):
