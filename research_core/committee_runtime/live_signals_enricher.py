@@ -5,6 +5,7 @@ Live signals committee enricher — read-only context from existing committee ar
 from __future__ import annotations
 
 import csv
+import os
 import re
 import statistics
 from dataclasses import dataclass, field
@@ -355,10 +356,12 @@ def enrich_live_signals_file(
         for c in strong_buy_committee[:5]
     ]
 
-    with path.open("w", encoding="utf-8", newline="") as handle:
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+    os.replace(tmp_path, path)
 
     strong_buy = sum(1 for r in rows if str(r.get("Signal", "")).upper() == "STRONG BUY")
     return {
