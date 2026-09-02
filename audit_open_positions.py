@@ -7,7 +7,6 @@ import yfinance as yf
 from config.settings import STARTING_CAPITAL
 
 PORTFOLIO_FILE = "portfolio.csv"
-CAPITAL_BASELINE = 30000
 
 
 def load_portfolio(path=PORTFOLIO_FILE):
@@ -154,8 +153,8 @@ def main():
     open_pnl_pct = (open_pnl / total_open_invested * 100) if total_open_invested else 0
 
     account_value = cash + total_open_value
-    account_pnl = account_value - CAPITAL_BASELINE
-    account_return_pct = (account_pnl / CAPITAL_BASELINE * 100) if CAPITAL_BASELINE else 0
+    account_pnl = account_value - STARTING_CAPITAL
+    account_return_pct = (account_pnl / STARTING_CAPITAL * 100) if STARTING_CAPITAL else 0
 
     print("===== REAL OPEN POSITIONS =====")
     print()
@@ -172,7 +171,7 @@ def main():
     print(f"Open PnL: {format_money(open_pnl)}")
     print(f"Open PnL %: {format_pct(open_pnl_pct)}")
     print()
-    print(f"Capital Baseline: {format_money(CAPITAL_BASELINE)}")
+    print(f"Capital Baseline: {format_money(STARTING_CAPITAL)}")
     print(f"Current Cash: {format_money(cash)}")
     print(f"Open Position Value: {format_money(total_open_value)}")
     print(f"Account Value: {format_money(account_value)}")
