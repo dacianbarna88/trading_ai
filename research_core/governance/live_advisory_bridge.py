@@ -462,14 +462,20 @@ class LiveAdvisoryBridge:
             if open_shares <= 0:
                 continue
             open_count += 1
-            pnl_pct = None
+            avg_entry_price = (
+                bucket["buy_value"] / bucket["buy_shares"] if bucket["buy_shares"] else None
+            )
+            current_price = None
             for row in reversed(rows):
                 if str(row.get("Ticker", "")).upper() != ticker:
                     continue
                 if str(row.get("Action", "")).upper() != "BUY":
                     continue
-                pnl_pct = _parse_float(row.get("PnL_%"))
+                current_price = _parse_float(row.get("Current_Price"))
                 break
+            pnl_pct = None
+            if avg_entry_price and current_price is not None:
+                pnl_pct = ((current_price - avg_entry_price) / avg_entry_price) * 100
             if pnl_pct is not None and pnl_pct <= -3.0:
                 losing_open += 1
 
