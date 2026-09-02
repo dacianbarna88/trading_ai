@@ -20,7 +20,10 @@ for ticker in df["Ticker"].dropna().unique():
         continue
 
     latest = buys.iloc[-1]
-    pnl_pct = float(latest.get("PnL_%", 0))
+    buy_value = (buys["Price"] * buys["Shares"]).sum()
+    avg_entry_price = buy_value / buys["Shares"].sum() if buys["Shares"].sum() else 0
+    current_price = float(latest["Current_Price"])
+    pnl_pct = ((current_price - avg_entry_price) / avg_entry_price) * 100 if avg_entry_price else 0.0
 
     if pnl_pct <= -3:
         action = "EXIT_NOW"
@@ -41,8 +44,8 @@ for ticker in df["Ticker"].dropna().unique():
     rows_out.append({
         "Ticker": ticker,
         "Open_Shares": round(open_shares, 4),
-        "Entry_Price": round(float(latest["Price"]), 2),
-        "Current_Price": round(float(latest["Current_Price"]), 2),
+        "Entry_Price": round(avg_entry_price, 2),
+        "Current_Price": round(current_price, 2),
         "PnL_%": round(pnl_pct, 2),
         "Risk_Level": risk,
         "Recommended_Action": action,
