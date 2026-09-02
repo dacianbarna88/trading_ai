@@ -565,6 +565,8 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
     log(f"Market Regime activ: {market_regime}")
     log_market_session_summary()
 
+    exit_checked_tickers = set()
+
     for _, row in signals_df.iterrows():
         ticker = row["Ticker"]
         signal = row["Signal"]
@@ -671,6 +673,7 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
                 )
 
         else:
+            exit_checked_tickers.add(ticker)
             avg_price = positions[ticker]["avg_price"]
             pnl_pct = ((price - avg_price) / avg_price) * 100
 
@@ -689,6 +692,41 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
             elif pnl_pct <= STOP_LOSS_PCT:
                 portfolio = sell_position(row, portfolio, f"STOP LOSS {pnl_pct:.2f}%")
                 positions = get_open_positions(portfolio)
+
+    # Safety net: a held position whose ticker failed to produce a row this
+    # cycle (a transient yfinance download error, or every download failing
+    # so signals_df came back empty) would otherwise silently skip its
+    # STOP_LOSS/TAKE_PROFIT check for the whole cycle. Fetch a fresh price
+    # directly for any such ticker so the exit check still runs.
+    for ticker in list(positions.keys()):
+        if ticker in exit_checked_tickers:
+            continue
+
+        fallback_price = get_latest_price(ticker)
+        if fallback_price is None or fallback_price <= 0:
+            log(f"Exit check sărit pentru {ticker}: preț indisponibil în acest ciclu.")
+            continue
+
+        avg_price = positions[ticker]["avg_price"]
+        pnl_pct = ((fallback_price - avg_price) / avg_price) * 100
+        fallback_row = {"Ticker": ticker, "Price": fallback_price, "Score": 0, "Signal": "WAIT"}
+
+        log(
+            f"Exit check fallback pentru {ticker} (lipsă din signals_df): "
+            f"preț {fallback_price:.2f} | PnL {pnl_pct:.2f}%"
+        )
+
+        if TEST_SELL_MODE:
+            portfolio = sell_position(fallback_row, portfolio, "TEST SELL MODE")
+            positions = get_open_positions(portfolio)
+
+        elif pnl_pct >= TAKE_PROFIT_PCT:
+            portfolio = sell_position(fallback_row, portfolio, f"PROFIT +{pnl_pct:.2f}% (fallback)")
+            positions = get_open_positions(portfolio)
+
+        elif pnl_pct <= STOP_LOSS_PCT:
+            portfolio = sell_position(fallback_row, portfolio, f"STOP LOSS {pnl_pct:.2f}% (fallback)")
+            positions = get_open_positions(portfolio)
 
     save_portfolio(portfolio)
 
@@ -778,22 +816,33 @@ def generate_signals():
         os.replace(tmp_path, LIVE_SIGNALS_FILE)
 
         log("live_signals.csv actualizat.")
-        manage_portfolio(
-            df,
-            advisory_state=advisory_state,
-            live_bot_cycle_id=live_bot_cycle_id,
+    else:
+        log(
+            "Niciun semnal generat în acest ciclu (toate descărcările au eșuat) — "
+            "verific poziții deschise pentru STOP_LOSS/TAKE_PROFIT oricum."
         )
-        update_portfolio_prices()
 
-        try:
-            import subprocess
-            subprocess.run(
-                ["python3", "position_intelligence.py"],
-                check=False
-            )
-            log("Position Intelligence actualizat automat.")
-        except Exception as e:
-            log(f"Eroare Position Intelligence auto-refresh: {e}")
+    # These must run every cycle, not only when signals_df is non-empty:
+    # if every ticker's download failed (e.g. a yfinance outage), skipping
+    # them would silently skip STOP_LOSS/TAKE_PROFIT checks on already-held
+    # positions for the whole cycle. manage_portfolio() itself also has a
+    # per-ticker fallback for a partial failure (see exit_checked_tickers).
+    manage_portfolio(
+        df,
+        advisory_state=advisory_state,
+        live_bot_cycle_id=live_bot_cycle_id,
+    )
+    update_portfolio_prices()
+
+    try:
+        import subprocess
+        subprocess.run(
+            ["python3", "position_intelligence.py"],
+            check=False
+        )
+        log("Position Intelligence actualizat automat.")
+    except Exception as e:
+        log(f"Eroare Position Intelligence auto-refresh: {e}")
 
 
 if __name__ == "__main__":

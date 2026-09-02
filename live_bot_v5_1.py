@@ -140,6 +140,8 @@ def manage_portfolio(signals_df):
         if not any_open_candidate:
             log("Nicio piață relevantă deschisă pentru candidații STRONG BUY. Nu execut BUY.")
 
+    exit_checked_tickers = set()
+
     for _, row in signals_df.iterrows():
         ticker = row["Ticker"]
         signal = row["Signal"]
@@ -208,6 +210,7 @@ def manage_portfolio(signals_df):
                     )
 
         else:
+            exit_checked_tickers.add(ticker)
             avg_price = positions[ticker]["avg_price"]
             pnl_pct = ((price - avg_price) / avg_price) * 100
             portfolio, trailing_sell, trailing_stop = update_trailing_state(
@@ -229,6 +232,48 @@ def manage_portfolio(signals_df):
             elif pnl_pct <= STOP_LOSS_PCT:
                 portfolio = sell_position(row, portfolio, f"STOP LOSS {pnl_pct:.2f}%")
                 positions = get_open_positions(portfolio)
+
+    # Safety net: a held position whose ticker failed to produce a row this
+    # cycle (a transient yfinance download error, or every download failing
+    # so signals_df came back empty) would otherwise silently skip its
+    # STOP_LOSS/trailing-stop check for the whole cycle. Fetch a fresh price
+    # directly for any such ticker so the exit check still runs.
+    for ticker in list(positions.keys()):
+        if ticker in exit_checked_tickers:
+            continue
+
+        fallback_price = get_latest_price(ticker)
+        if fallback_price is None or fallback_price <= 0:
+            log(f"Exit check sărit pentru {ticker}: preț indisponibil în acest ciclu.")
+            continue
+
+        avg_price = positions[ticker]["avg_price"]
+        pnl_pct = ((fallback_price - avg_price) / avg_price) * 100
+        portfolio, trailing_sell, trailing_stop = update_trailing_state(
+            portfolio, ticker, fallback_price, avg_price
+        )
+        fallback_row = {"Ticker": ticker, "Price": fallback_price, "Score": 0, "Signal": "WAIT"}
+
+        log(
+            f"Exit check fallback pentru {ticker} (lipsă din signals_df): "
+            f"preț {fallback_price:.2f} | PnL {pnl_pct:.2f}%"
+        )
+
+        if TEST_SELL_MODE:
+            portfolio = sell_position(fallback_row, portfolio, "TEST SELL MODE")
+            positions = get_open_positions(portfolio)
+
+        elif trailing_sell:
+            portfolio = sell_position(
+                fallback_row,
+                portfolio,
+                f"TRAILING STOP | price {fallback_price:.2f} <= stop {trailing_stop:.2f} (fallback)",
+            )
+            positions = get_open_positions(portfolio)
+
+        elif pnl_pct <= STOP_LOSS_PCT:
+            portfolio = sell_position(fallback_row, portfolio, f"STOP LOSS {pnl_pct:.2f}% (fallback)")
+            positions = get_open_positions(portfolio)
 
     save_portfolio(portfolio)
 

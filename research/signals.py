@@ -136,7 +136,16 @@ def generate_signals(manage_portfolio, update_portfolio_prices):
 
         if V41_SAFE_MODE:
             run_v41_shadow(df)
+    else:
+        log(
+            "Niciun semnal generat în acest ciclu (toate descărcările au eșuat) — "
+            "verific poziții deschise pentru STOP_LOSS/TAKE_PROFIT/trailing oricum."
+        )
 
-        manage_portfolio(df)
-        update_portfolio_prices()
+    # These must run every cycle, not only when df is non-empty: if every
+    # ticker's download failed (e.g. a yfinance outage), skipping them would
+    # silently skip STOP_LOSS/TAKE_PROFIT/trailing checks on already-held
+    # positions for the whole cycle.
+    manage_portfolio(df)
+    update_portfolio_prices()
 
