@@ -1,6 +1,11 @@
+import os
+
 import requests
 
-TOKEN = "8971662894:AAGMxvrTkzPB_4qYR15Rg7BF29hPTZ9If1o"
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+
+if not TOKEN:
+    raise SystemExit("TELEGRAM_BOT_TOKEN must be set in the environment.")
 
 url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
 
