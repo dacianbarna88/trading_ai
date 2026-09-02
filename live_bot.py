@@ -241,6 +241,17 @@ def load_portfolio():
         "Current_Value",
         "PnL",
         "PnL_%",
+        # live_bot.py itself doesn't use these (it has no trailing-stop
+        # logic), but load_csv_safe() projects the loaded frame down to
+        # exactly this column list, and save_portfolio() writes that frame
+        # straight back to the same portfolio.csv shared with other tools
+        # (dashboard_v2.py, core/trailing.py, hard_risk_guardian.py,
+        # overnight_gap_risk_guard.py, live_bot_v5_1.py, ...) that do read
+        # and rely on them. Omitting them here silently erased them from
+        # the CSV on this bot's very first save cycle.
+        "Highest_Price",
+        "Trailing_Active",
+        "Trailing_Stop",
     ]
 
     return load_csv_safe(PORTFOLIO_FILE, columns)
