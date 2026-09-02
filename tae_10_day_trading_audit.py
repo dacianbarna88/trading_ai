@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from config.settings import MIN_SCORE_TO_BUY
 from markets.market_config import MARKETS
 from markets.market_hours import get_ticker_market
 
@@ -26,7 +27,6 @@ AUDIT_MODE = "FORENSIC_AUDIT_ONLY"
 NO_EXECUTION = True
 WINDOW_DAYS = 10
 INTERVAL_SECONDS = 60
-MIN_SCORE_TO_BUY = 80
 DEFAULT_TRADE_USD = 2500.0
 LOG_TIMESTAMP_TZ = "US/Eastern"
 
