@@ -441,24 +441,25 @@ class LiveAdvisoryBridge:
                 spent += price * shares
                 if ticker:
                     bucket = positions.setdefault(
-                        ticker, {"buy_shares": 0.0, "sell_shares": 0.0, "buy_value": 0.0}
+                        ticker, {"buy_shares": 0.0, "buy_value": 0.0}
                     )
                     bucket["buy_shares"] += shares
                     bucket["buy_value"] += price * shares
             elif action == "SELL":
                 received += price * shares
                 if ticker:
-                    bucket = positions.setdefault(
-                        ticker, {"buy_shares": 0.0, "sell_shares": 0.0, "buy_value": 0.0}
-                    )
-                    bucket["sell_shares"] += shares
+                    # SELLs in this system always fully liquidate the current
+                    # holding, so reset the lot rather than partially reducing
+                    # it — otherwise a closed-then-reopened ticker would blend
+                    # the stale closed lot's cost basis into the new position.
+                    positions[ticker] = {"buy_shares": 0.0, "buy_value": 0.0}
             elif action == "DEPOSIT":
                 deposited += price * shares
 
         open_count = 0
         losing_open = 0
         for ticker, bucket in positions.items():
-            open_shares = bucket["buy_shares"] - bucket["sell_shares"]
+            open_shares = bucket["buy_shares"]
             if open_shares <= 0:
                 continue
             open_count += 1

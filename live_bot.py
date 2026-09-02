@@ -314,20 +314,25 @@ def get_open_positions(portfolio):
 
     for ticker in portfolio["Ticker"].dropna().unique():
         rows = portfolio[portfolio["Ticker"] == ticker]
+        actions = rows["Action"].astype(str).str.upper()
+
+        # SELLs in this system always fully liquidate the current holding, so
+        # only BUY rows after the most recent SELL belong to the open position —
+        # otherwise a closed-then-reopened ticker would blend the stale closed
+        # lot's cost basis into the new position's average price.
+        sell_idx = rows.index[actions == "SELL"]
+        if len(sell_idx):
+            rows = rows[rows.index > sell_idx.max()]
 
         buys = rows[rows["Action"].astype(str).str.upper() == "BUY"]
-        sells = rows[rows["Action"].astype(str).str.upper() == "SELL"]
-
         buy_shares = buys["Shares"].sum()
-        sell_shares = sells["Shares"].sum()
-        open_shares = buy_shares - sell_shares
 
-        if open_shares > 0:
+        if buy_shares > 0:
             buy_value = (buys["Price"] * buys["Shares"]).sum()
-            avg_price = buy_value / buy_shares if buy_shares else 0
+            avg_price = buy_value / buy_shares
 
             positions[ticker] = {
-                "shares": open_shares,
+                "shares": buy_shares,
                 "avg_price": avg_price,
             }
 

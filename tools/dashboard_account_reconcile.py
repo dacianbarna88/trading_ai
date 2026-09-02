@@ -65,27 +65,24 @@ def _open_pnl_from_portfolio_marks(portfolio_df: pd.DataFrame) -> float:
     if portfolio_df.empty:
         return 0.0
     rows = _portfolio_rows(portfolio_df)
-    net: dict[str, float] = {}
+    open_pnl_by_ticker: dict[str, float] = {}
     for row in rows:
         ticker = row.get("Ticker", "").strip()
         action = row.get("Action", "").upper()
-        shares = float(row.get("Shares") or 0)
         if not ticker or ticker == "CASH":
             continue
         if action == "BUY":
-            net[ticker] = net.get(ticker, 0.0) + shares
+            open_pnl_by_ticker[ticker] = open_pnl_by_ticker.get(ticker, 0.0) + float(
+                row.get("PnL") or 0
+            )
         elif action == "SELL":
-            net[ticker] = net.get(ticker, 0.0) - shares
+            # SELLs in this system always fully liquidate the current holding,
+            # so reset rather than partially reduce — otherwise a
+            # closed-then-reopened ticker would blend the stale closed lot's
+            # PnL into the new position's total.
+            open_pnl_by_ticker[ticker] = 0.0
 
-    open_pnl = 0.0
-    for row in rows:
-        ticker = row.get("Ticker", "").strip()
-        if row.get("Action", "").upper() != "BUY":
-            continue
-        if net.get(ticker, 0.0) <= 0.0001:
-            continue
-        open_pnl += float(row.get("PnL") or 0)
-    return round(open_pnl, 2)
+    return round(sum(open_pnl_by_ticker.values()), 2)
 
 
 def _execution_realized_pnl(portfolio_df: pd.DataFrame) -> float:

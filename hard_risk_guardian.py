@@ -20,17 +20,23 @@ open_rows = []
 
 for ticker in df["Ticker"].dropna().unique():
     rows = df[df["Ticker"] == ticker]
-    buys = rows[rows["Action"] == "BUY"]
-    sells = rows[rows["Action"] == "SELL"]
-    buy_shares = buys["Shares"].sum()
-    sell_shares = sells["Shares"].sum()
-    open_shares = buy_shares - sell_shares
 
-    if open_shares > 0:
+    # SELLs in this system always fully liquidate the current holding, so
+    # only rows after the most recent SELL belong to the open position —
+    # otherwise a closed-then-reopened ticker would blend the stale closed
+    # lot's cost basis into the new position's average price.
+    sell_idx = rows.index[rows["Action"] == "SELL"]
+    if len(sell_idx):
+        rows = rows[rows.index > sell_idx.max()]
+
+    buys = rows[rows["Action"] == "BUY"]
+    buy_shares = buys["Shares"].sum()
+
+    if buy_shares > 0:
         last_buy = buys.iloc[-1]
         current_price = float(last_buy["Current_Price"])
         buy_value = (buys["Price"] * buys["Shares"]).sum()
-        entry_price = buy_value / buy_shares if buy_shares else 0
+        entry_price = buy_value / buy_shares
         pnl_pct = round(((current_price - entry_price) / entry_price) * 100, 2) if entry_price else 0.0
 
         status = "OK"
