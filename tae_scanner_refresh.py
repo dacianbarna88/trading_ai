@@ -311,6 +311,18 @@ def _build_steps(root: Path) -> list[StepSpec]:
             requires_artifacts=("tae_advisory_index.json",),
             needs_pythonpath=True,
         ),
+        StepSpec(
+            name="historical_patterns",
+            command=[PYTHON, str(root / "research/historical_patterns.py")],
+            artifact="historical_pattern_summary.txt",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="market_forecast",
+            command=[PYTHON, str(root / "research/market_forecast.py")],
+            artifact="market_forecast.csv",
+            needs_pythonpath=True,
+        ),
     ]
 
 
