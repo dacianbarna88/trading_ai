@@ -1,4 +1,5 @@
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -313,12 +314,22 @@ if __name__ == "__main__":
         last_scanner_run = time.time()
 
         while True:
-            if time.time() - last_scanner_run >= 1800:
-                log("Market Scanner: rulare periodică.")
-                run_market_scanner()
-                last_scanner_run = time.time()
+            # An unhandled exception anywhere inside a cycle (network
+            # error, unexpected data, a bug) must not silently kill the
+            # whole process: that would permanently stop STOP_LOSS/
+            # TAKE_PROFIT/trailing checks on live positions until a human
+            # notices and restarts the bot. Log it, alert, and keep looping.
+            try:
+                if time.time() - last_scanner_run >= 1800:
+                    log("Market Scanner: rulare periodică.")
+                    run_market_scanner()
+                    last_scanner_run = time.time()
 
-            generate_signals(manage_portfolio, update_portfolio_prices)
+                generate_signals(manage_portfolio, update_portfolio_prices)
+            except Exception as e:
+                log(f"CICLU EROARE NEAȘTEPTATĂ: {e}\n{traceback.format_exc()}")
+                send_telegram(f"⚠️ Bot cycle error (continuing): {e}")
+
             time.sleep(INTERVAL_SECONDS)
 
     except KeyboardInterrupt:

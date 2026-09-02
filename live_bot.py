@@ -1,5 +1,6 @@
 import os
 import time
+import traceback
 from datetime import datetime, time as dtime
 from pathlib import Path
 
@@ -860,7 +861,17 @@ if __name__ == "__main__":
 
     try:
         while True:
-            generate_signals()
+            # An unhandled exception anywhere inside a cycle (network
+            # error, unexpected data, a bug) must not silently kill the
+            # whole process: that would permanently stop STOP_LOSS/
+            # TAKE_PROFIT checks on live positions until a human notices
+            # and restarts the bot. Log it, alert, and keep looping.
+            try:
+                generate_signals()
+            except Exception as e:
+                log(f"CICLU EROARE NEAȘTEPTATĂ: {e}\n{traceback.format_exc()}")
+                send_telegram(f"⚠️ Bot cycle error (continuing): {e}")
+
             time.sleep(INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
