@@ -32,29 +32,26 @@ def read_portfolio_open_pnl():
     with path.open() as f:
         rows = list(csv.DictReader(f))
 
-    shares_by_ticker = {}
+    open_pnl_by_ticker = {}
     for row in rows:
         ticker = row.get("Ticker")
         if not ticker:
             continue
-        try:
-            shares = float(row.get("Shares", 0) or 0)
-        except Exception:
-            shares = 0.0
-        if row.get("Action") == "BUY":
-            shares_by_ticker[ticker] = shares_by_ticker.get(ticker, 0.0) + shares
-        elif row.get("Action") == "SELL":
-            shares_by_ticker[ticker] = shares_by_ticker.get(ticker, 0.0) - shares
-
-    open_tickers = {ticker for ticker, shares in shares_by_ticker.items() if shares > 0}
-
-    total = 0.0
-    for row in rows:
-        if row.get("Action") == "BUY" and row.get("Ticker") in open_tickers:
+        action = row.get("Action")
+        if action == "BUY":
             try:
-                total += float(row.get("PnL", 0) or 0)
+                pnl = float(row.get("PnL", 0) or 0)
             except Exception:
-                pass
+                pnl = 0.0
+            open_pnl_by_ticker[ticker] = open_pnl_by_ticker.get(ticker, 0.0) + pnl
+        elif action == "SELL":
+            # SELLs in this system always fully liquidate the current holding,
+            # so reset rather than partially reduce — otherwise a
+            # closed-then-reopened ticker would blend the stale closed lot's
+            # PnL into the new position's total.
+            open_pnl_by_ticker[ticker] = 0.0
+
+    total = sum(open_pnl_by_ticker.values())
     return round(total, 2)
 
 def calculate_suggested_risk():

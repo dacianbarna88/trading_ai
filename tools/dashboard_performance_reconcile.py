@@ -73,17 +73,27 @@ def _open_tickers(rows: list[dict[str, str]]) -> dict[str, float]:
     return {t: s for t, s in net.items() if s > MIN_OPEN_SHARES}
 
 
-def _last_row_per_ticker(rows: list[dict[str, str]], tickers: set[str]) -> dict[str, dict[str, str]]:
+def _open_lot_rows_per_ticker(
+    rows: list[dict[str, str]], tickers: set[str]
+) -> dict[str, list[dict[str, str]]]:
+    """BUY rows belonging to each ticker's *current* open round.
+
+    SELLs in this system always fully liquidate the current holding, so the
+    accumulated lot resets to empty on every SELL — otherwise a
+    closed-then-reopened ticker would blend the stale closed lot's rows in
+    with the new position's.
+    """
     grouped: dict[str, list[dict[str, str]]] = {t: [] for t in tickers}
     for row in rows:
         ticker = row.get("Ticker", "").strip()
-        if ticker in grouped:
+        if ticker not in grouped:
+            continue
+        action = row.get("Action", "").upper()
+        if action == "BUY":
             grouped[ticker].append(row)
-    out: dict[str, dict[str, str]] = {}
-    for ticker, items in grouped.items():
-        if items:
-            out[ticker] = items[-1]
-    return out
+        elif action == "SELL":
+            grouped[ticker] = []
+    return grouped
 
 
 def _compute_cash(rows: list[dict[str, str]]) -> float:
@@ -190,15 +200,13 @@ def compute_canonical_performance(portfolio_df: pd.DataFrame) -> dict[str, Any]:
         )
 
     open_map = _open_tickers(rows)
-    last_rows = _last_row_per_ticker(rows, set(open_map))
+    open_lot_rows = _open_lot_rows_per_ticker(rows, set(open_map))
     open_pnl = 0.0
     open_value = 0.0
     for ticker in sorted(open_map):
-        last = last_rows.get(ticker)
-        if not last or last.get("Action", "").upper() != "BUY":
-            continue
-        open_pnl += _safe_float(last.get("PnL"))
-        open_value += _safe_float(last.get("Current_Value"))
+        for lot_row in open_lot_rows.get(ticker) or []:
+            open_pnl += _safe_float(lot_row.get("PnL"))
+            open_value += _safe_float(lot_row.get("Current_Value"))
 
     count = len(closed_trades)
     win_rate = (wins / count * 100.0) if count else 0.0
