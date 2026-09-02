@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import re
 import socket
 import statistics
 import subprocess
@@ -1058,12 +1059,9 @@ class LiveAdvisoryBridge:
         for line in historical.get("research_conclusions") or []:
             text = str(line)
             if "profit_pct" in text and "averages" in text.lower():
-                parts = text.replace(",", "").split()
-                for token in parts:
-                    try:
-                        mean_profit = float(token)
-                    except ValueError:
-                        continue
+                match = re.search(r"profit_pct\s+(-?\d+(?:\.\d+)?)", text)
+                if match:
+                    mean_profit = float(match.group(1))
                 break
 
         if (
