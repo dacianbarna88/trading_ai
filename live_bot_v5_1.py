@@ -28,7 +28,7 @@ from core.market_regime import get_market_regime, get_max_positions
 from core.status import set_status
 from utils.telegram import send_telegram
 from core.market_hours import is_market_open
-from markets.market_hours import is_market_open as is_named_market_open
+from markets.market_hours import is_ticker_market_open
 from data.storage import load_watchlist, load_csv_safe, load_portfolio, save_portfolio
 from core.portfolio import get_open_positions, get_cash_available
 from core.indicators import calculate_rsi, get_latest_price
@@ -44,21 +44,6 @@ from research.market_scanner import run_market_scanner
 from research.multi_market_scanner import main as run_multi_market_scanner
 from research.global_candidates import main as run_global_candidates
 from research.auto_rebalance_engine import get_auto_rebalance_plan
-
-def get_ticker_market(ticker):
-    ticker = str(ticker).upper()
-
-    if ticker.endswith(".PA") or ticker.endswith(".DE"):
-        return "EU"
-
-    if ticker.endswith(".L"):
-        return "UK"
-
-    return "US"
-
-
-def is_ticker_market_open(ticker):
-    return is_named_market_open(get_ticker_market(ticker))
 
 def log_allocation_signals():
     path = Path("allocation_signals.csv")
