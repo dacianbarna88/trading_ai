@@ -376,7 +376,25 @@ def get_cash_available(portfolio):
 
 
 def save_alert(row):
-    columns = ["Time", "Ticker", "Price", "SMA50", "RSI", "Score", "Signal"]
+    # live_bot.py's own scoring doesn't compute SMA20/Volume/Avg_Volume_20/
+    # Breakout_20 (data/alerts.py's richer save_alert(), used via
+    # research/signals.py, does), but load_csv_safe() projects the loaded
+    # frame down to exactly this column list before writing it back to the
+    # same shared alerts_log.csv — omitting those columns here would
+    # silently erase them if the other writer had already populated them.
+    columns = [
+        "Time",
+        "Ticker",
+        "Price",
+        "SMA20",
+        "SMA50",
+        "RSI",
+        "Volume",
+        "Avg_Volume_20",
+        "Breakout_20",
+        "Score",
+        "Signal",
+    ]
 
     alerts = load_csv_safe(ALERTS_FILE, columns)
     alerts = pd.concat([alerts, pd.DataFrame([row])], ignore_index=True)
