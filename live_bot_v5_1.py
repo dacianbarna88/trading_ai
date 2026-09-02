@@ -90,6 +90,27 @@ def manage_portfolio(signals_df):
     portfolio = load_portfolio()
     positions = get_open_positions(portfolio)
 
+    from research_core.governance.live_advisory_runtime import (
+        advisory_runtime_summary,
+        get_advisory_action,
+        load_live_advisory,
+        should_block_new_buy,
+    )
+    from research_core.governance.shadow_validation_ledger import (
+        log_buy_allowed,
+        log_buy_blocked_by_tae,
+        log_buy_skipped_other_reason,
+    )
+
+    advisory_state = load_live_advisory()
+    live_bot_cycle_id = datetime.now().strftime("%Y%m%d%H%M%S")
+
+    tae_action = get_advisory_action(advisory_state)
+    block_new_buy, tae_block_reason = should_block_new_buy(advisory_state)
+    log(f"TAE Live Advisory: {advisory_runtime_summary(advisory_state)}")
+    if advisory_state.warning:
+        log(f"TAE Live Advisory warning: {advisory_state.warning}")
+
     market_open = is_market_open()
     market_regime = get_market_regime()
     trade_size = get_dynamic_trade_size(signals_df, portfolio, market_regime)
@@ -135,12 +156,56 @@ def manage_portfolio(signals_df):
                     and score >= MIN_SCORE_TO_BUY
                     and market_regime != "BEAR"
                 ):
-                    if len(positions) < get_max_positions(market_regime):
-                        portfolio = buy_position(row, portfolio, get_score_adjusted_trade_size(trade_size, score))
+                    if block_new_buy:
+                        log(f"BUY blocat pentru {ticker}: {tae_block_reason}")
+                        log_buy_blocked_by_tae(
+                            ticker=ticker,
+                            signal=signal,
+                            score=score,
+                            price=price,
+                            advisory_state=advisory_state,
+                            block_reason=tae_block_reason,
+                            live_bot_cycle_id=live_bot_cycle_id,
+                            warn_fn=log,
+                        )
+                    elif len(positions) < get_max_positions(market_regime):
+                        if tae_action == "BUY_ADVISORY":
+                            log(f"TAE advisory supportive pentru {ticker}")
+                        ticker_trade_size = get_score_adjusted_trade_size(trade_size, score)
+                        est_shares = (
+                            round(float(ticker_trade_size) / float(price), 4)
+                            if ticker_trade_size and price > 0
+                            else None
+                        )
+                        log_buy_allowed(
+                            ticker=ticker,
+                            signal=signal,
+                            score=score,
+                            price=price,
+                            intended_trade_usd=ticker_trade_size,
+                            shares=est_shares,
+                            advisory_state=advisory_state,
+                            block_new_buy=block_new_buy,
+                            live_bot_cycle_id=live_bot_cycle_id,
+                            warn_fn=log,
+                        )
+                        portfolio = buy_position(row, portfolio, ticker_trade_size)
                         positions = get_open_positions(portfolio)
 
                 elif signal == "STRONG BUY":
-                    log(f"BUY blocat pentru {ticker}: Market Regime {market_regime}")
+                    skip_reason = f"Market Regime {market_regime}"
+                    log(f"BUY blocat pentru {ticker}: {skip_reason}")
+                    log_buy_skipped_other_reason(
+                        ticker=ticker,
+                        signal=signal,
+                        score=score,
+                        price=price,
+                        block_reason=skip_reason,
+                        advisory_state=advisory_state,
+                        block_new_buy=block_new_buy,
+                        live_bot_cycle_id=live_bot_cycle_id,
+                        warn_fn=log,
+                    )
 
         else:
             avg_price = positions[ticker]["avg_price"]
