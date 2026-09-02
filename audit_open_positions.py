@@ -81,18 +81,23 @@ def reconstruct_open_positions(portfolio):
             continue
 
         ticker_rows = portfolio[portfolio["Ticker"] == ticker]
-        buy_rows = ticker_rows[ticker_rows["Action"] == "BUY"]
-        sell_rows = ticker_rows[ticker_rows["Action"] == "SELL"]
 
-        buy_shares = buy_rows["Shares"].sum()
-        sell_shares = sell_rows["Shares"].sum()
-        shares_open = buy_shares - sell_shares
+        # SELLs in this system always fully liquidate the current holding, so
+        # only rows after the most recent SELL belong to the open position —
+        # otherwise a closed-then-reopened ticker would blend the stale closed
+        # lot's cost basis into the new position's average price.
+        sell_idx = ticker_rows.index[ticker_rows["Action"] == "SELL"]
+        if len(sell_idx):
+            ticker_rows = ticker_rows[ticker_rows.index > sell_idx.max()]
+
+        buy_rows = ticker_rows[ticker_rows["Action"] == "BUY"]
+        shares_open = buy_rows["Shares"].sum()
 
         if shares_open <= 0:
             continue
 
         buy_cost = (buy_rows["Price"] * buy_rows["Shares"]).sum()
-        avg_price = buy_cost / buy_shares if buy_shares else 0
+        avg_price = buy_cost / shares_open
         invested = shares_open * avg_price
 
         current_price = get_live_price(ticker)
