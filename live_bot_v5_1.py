@@ -295,21 +295,35 @@ if __name__ == "__main__":
     )
 
     try:
-        log("Market Scanner: rulare inițială la pornire.")
-        run_market_scanner()
+        # This startup sequence (market scanners, global candidates, the
+        # rebalance plan) does substantial yfinance work across many
+        # tickers - much more exposed to a transient failure than a single
+        # cycle. It ran outside any per-cycle guard, inside the same outer
+        # try that only catches KeyboardInterrupt below: a startup failure
+        # here would have killed the bot before it ever reached the main
+        # loop's own crash recovery, defeating that protection entirely.
+        # Best-effort startup: log and continue into the main loop even if
+        # a step fails - the loop's periodic scanner refresh and its own
+        # per-cycle fallback checks recover from a partial/failed startup.
+        try:
+            log("Market Scanner: rulare inițială la pornire.")
+            run_market_scanner()
 
-        log("Multi-Market Scanner: rulare inițială.")
-        run_multi_market_scanner()
-        run_global_candidates()
+            log("Multi-Market Scanner: rulare inițială.")
+            run_multi_market_scanner()
+            run_global_candidates()
 
-        if Path("watchlist_global.txt").exists():
-            Path("watchlist.txt").write_text(Path("watchlist_global.txt").read_text())
-            log("Global Execution Bridge: watchlist.txt actualizat din watchlist_global.txt.")
+            if Path("watchlist_global.txt").exists():
+                Path("watchlist.txt").write_text(Path("watchlist_global.txt").read_text())
+                log("Global Execution Bridge: watchlist.txt actualizat din watchlist_global.txt.")
 
-        plan = get_auto_rebalance_plan()
-        log(f"Auto Rebalance Plan: REDUCE {plan['reduce']} | BUY {plan['buy']}")
+            plan = get_auto_rebalance_plan()
+            log(f"Auto Rebalance Plan: REDUCE {plan['reduce']} | BUY {plan['buy']}")
 
-        log_allocation_signals()
+            log_allocation_signals()
+        except Exception as e:
+            log(f"STARTUP EROARE NEAȘTEPTATĂ: {e}\n{traceback.format_exc()}")
+            send_telegram(f"⚠️ Bot startup error (continuing to main loop): {e}")
 
         last_scanner_run = time.time()
 
