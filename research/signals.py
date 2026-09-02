@@ -5,9 +5,10 @@ import yfinance as yf
 
 from config.settings import MIN_SCORE_TO_BUY, LIVE_SIGNALS_FILE, V41_SAFE_MODE
 from core.indicators import calculate_rsi
+from core.portfolio import get_open_positions
 from core.v41_shadow import run_v41_shadow
 from data.alerts import save_alert
-from data.storage import load_watchlist
+from data.storage import load_portfolio, load_watchlist
 from utils.logger import log
 
 
@@ -15,7 +16,15 @@ def generate_signals(manage_portfolio, update_portfolio_prices):
     results = []
     tickers = load_watchlist()
 
-    log(f"Analizez {len(tickers)} tickere din watchlist.txt")
+    portfolio_for_risk = load_portfolio()
+    open_positions_for_risk = get_open_positions(portfolio_for_risk)
+
+    for open_ticker in open_positions_for_risk.keys():
+        if open_ticker not in tickers:
+            tickers.append(open_ticker)
+            log(f"Risk Guard: adăugat {open_ticker} în ciclul curent pentru verificare SELL")
+
+    log(f"Analizez {len(tickers)} tickere din watchlist.txt + poziții deschise")
 
     for ticker in tickers:
         try:
