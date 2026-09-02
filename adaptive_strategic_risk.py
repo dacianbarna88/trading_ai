@@ -29,11 +29,28 @@ def read_portfolio_open_pnl():
     path = Path("portfolio.csv")
     if not path.exists():
         return 0.0
-    total = 0.0
     with path.open() as f:
         rows = list(csv.DictReader(f))
+
+    shares_by_ticker = {}
     for row in rows:
+        ticker = row.get("Ticker")
+        if not ticker:
+            continue
+        try:
+            shares = float(row.get("Shares", 0) or 0)
+        except Exception:
+            shares = 0.0
         if row.get("Action") == "BUY":
+            shares_by_ticker[ticker] = shares_by_ticker.get(ticker, 0.0) + shares
+        elif row.get("Action") == "SELL":
+            shares_by_ticker[ticker] = shares_by_ticker.get(ticker, 0.0) - shares
+
+    open_tickers = {ticker for ticker, shares in shares_by_ticker.items() if shares > 0}
+
+    total = 0.0
+    for row in rows:
+        if row.get("Action") == "BUY" and row.get("Ticker") in open_tickers:
             try:
                 total += float(row.get("PnL", 0) or 0)
             except Exception:
@@ -80,13 +97,13 @@ if __name__ == "__main__":
     output = []
     output.append("===== ADAPTIVE STRATEGIC RISK =====")
     output.append("")
-    output.append(f"Base Effective Risk: {result["base_effective_risk"]}")
-    output.append(f"Suggested Risk: {result["suggested_risk"]}")
-    output.append(f"Risk Delta: {result["risk_delta"]}")
+    output.append(f"Base Effective Risk: {result['base_effective_risk']}")
+    output.append(f"Suggested Risk: {result['suggested_risk']}")
+    output.append(f"Risk Delta: {result['risk_delta']}")
     output.append("")
-    output.append(f"Market Regime: {result["market_regime"]}")
-    output.append(f"Strong Buy Count: {result["strong_buy_count"]}")
-    output.append(f"Open PnL: {result["open_pnl"]}")
+    output.append(f"Market Regime: {result['market_regime']}")
+    output.append(f"Strong Buy Count: {result['strong_buy_count']}")
+    output.append(f"Open PnL: {result['open_pnl']}")
     output.append("")
     output.append("Reasons:")
     for reason in result["reasons"]:
