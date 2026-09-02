@@ -359,7 +359,9 @@ def save_alert(row):
 
     alerts = load_csv_safe(ALERTS_FILE, columns)
     alerts = pd.concat([alerts, pd.DataFrame([row])], ignore_index=True)
-    alerts.to_csv(ALERTS_FILE, index=False)
+    tmp_path = f"{ALERTS_FILE}.tmp"
+    alerts.to_csv(tmp_path, index=False)
+    os.replace(tmp_path, ALERTS_FILE)
 
 
 def get_dynamic_trade_size(signals_df, portfolio, market_regime):
@@ -762,7 +764,9 @@ def generate_signals():
 
     if not df.empty:
         df = df.sort_values(by="Score", ascending=False)
-        df.to_csv(LIVE_SIGNALS_FILE, index=False)
+        tmp_path = f"{LIVE_SIGNALS_FILE}.tmp"
+        df.to_csv(tmp_path, index=False)
+        os.replace(tmp_path, LIVE_SIGNALS_FILE)
 
         log("live_signals.csv actualizat.")
         manage_portfolio(

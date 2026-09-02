@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 
 from config.settings import ALERTS_FILE
@@ -21,4 +23,6 @@ def save_alert(row):
 
     alerts = load_csv_safe(ALERTS_FILE, columns)
     alerts = pd.concat([alerts, pd.DataFrame([row])], ignore_index=True)
-    alerts.to_csv(ALERTS_FILE, index=False)
+    tmp_path = f"{ALERTS_FILE}.tmp"
+    alerts.to_csv(tmp_path, index=False)
+    os.replace(tmp_path, ALERTS_FILE)

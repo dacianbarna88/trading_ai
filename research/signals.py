@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 import pandas as pd
@@ -127,7 +128,9 @@ def generate_signals(manage_portfolio, update_portfolio_prices):
 
     if not df.empty:
         df = df.sort_values(by="Score", ascending=False)
-        df.to_csv(LIVE_SIGNALS_FILE, index=False)
+        tmp_path = f"{LIVE_SIGNALS_FILE}.tmp"
+        df.to_csv(tmp_path, index=False)
+        os.replace(tmp_path, LIVE_SIGNALS_FILE)
 
         log("live_signals.csv actualizat.")
 
