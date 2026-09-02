@@ -25,8 +25,55 @@ DEFAULT_ROOT = Path(".")
 LOG_FILE = "tae_scanner_refresh.log"
 OUTPUT_JSON = "tae_scanner_refresh.json"
 OUTPUT_MD = "tae_scanner_refresh.md"
+LOCK_FILE = "tae_scanner_refresh.pid"
 
 PYTHON = sys.executable
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _acquire_lock(root: Path) -> bool:
+    """Best-effort single-instance lock so an overlapping cron run (this
+    pipeline's steps allow up to 900s each across ~35 steps, while cron
+    fires every 30 minutes) can't run concurrently with a still-running
+    prior instance and race on the same output/report files - several of
+    which (tae_advisory_index.json, tae_live_advisory.json) now directly
+    feed the live bots' BUY-blocking decision."""
+    lock_path = root / LOCK_FILE
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            existing_pid = int(lock_path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            existing_pid = None
+        if existing_pid is not None and _pid_alive(existing_pid):
+            return False
+        # Stale lock from a prior run that died without cleanup - reclaim it.
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return False
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(str(os.getpid()))
+    return True
+
+
+def _release_lock(root: Path) -> None:
+    try:
+        (root / LOCK_FILE).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @dataclass
@@ -568,29 +615,40 @@ def run_refresh(root: Path | str = DEFAULT_ROOT) -> dict[str, Any]:
 
 def main() -> int:
     root = Path(".")
-    report = run_refresh(root)
 
-    print("===== TAE SCANNER REFRESH =====")
-    print(f"Verdict: {report['final_verdict']}")
-    print(f"Total runtime: {report['total_runtime_seconds']}s")
-    print(
-        f"Steps: OK={report['step_counts']['ok']} "
-        f"FAIL={report['step_counts']['fail']} "
-        f"SKIPPED={report['step_counts']['skipped']}"
-    )
-    for step in report["steps"]:
+    if not _acquire_lock(root):
         print(
-            f"  - {step['name']}: {step['status']} ({step['runtime_seconds']}s) "
-            f"artifact={step.get('artifact') or '—'} rows={step.get('row_count', '—')}"
+            "SKIP: another tae_scanner_refresh run is already in progress "
+            f"(lock file: {LOCK_FILE})."
         )
-    downstream = report.get("downstream") or {}
-    print(f"Candidate queue action: {downstream.get('candidate_queue_action')}")
-    print(
-        f"Watchlist proposal recommended additions: "
-        f"{downstream.get('watchlist_proposal_recommended_count')}"
-    )
-    print(f"Output: {OUTPUT_JSON}, {OUTPUT_MD}, {LOG_FILE}")
-    return 0 if report["final_verdict"] in {"OK", "WARNING"} else 1
+        return 0
+
+    try:
+        report = run_refresh(root)
+
+        print("===== TAE SCANNER REFRESH =====")
+        print(f"Verdict: {report['final_verdict']}")
+        print(f"Total runtime: {report['total_runtime_seconds']}s")
+        print(
+            f"Steps: OK={report['step_counts']['ok']} "
+            f"FAIL={report['step_counts']['fail']} "
+            f"SKIPPED={report['step_counts']['skipped']}"
+        )
+        for step in report["steps"]:
+            print(
+                f"  - {step['name']}: {step['status']} ({step['runtime_seconds']}s) "
+                f"artifact={step.get('artifact') or '—'} rows={step.get('row_count', '—')}"
+            )
+        downstream = report.get("downstream") or {}
+        print(f"Candidate queue action: {downstream.get('candidate_queue_action')}")
+        print(
+            f"Watchlist proposal recommended additions: "
+            f"{downstream.get('watchlist_proposal_recommended_count')}"
+        )
+        print(f"Output: {OUTPUT_JSON}, {OUTPUT_MD}, {LOG_FILE}")
+        return 0 if report["final_verdict"] in {"OK", "WARNING"} else 1
+    finally:
+        _release_lock(root)
 
 
 if __name__ == "__main__":
