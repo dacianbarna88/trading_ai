@@ -78,12 +78,13 @@ def _open_pnl_from_portfolio_marks(portfolio_df: pd.DataFrame) -> float:
             net[ticker] = net.get(ticker, 0.0) - shares
 
     open_pnl = 0.0
-    for ticker, shares in net.items():
-        if shares <= 0.0001:
+    for row in rows:
+        ticker = row.get("Ticker", "").strip()
+        if row.get("Action", "").upper() != "BUY":
             continue
-        ticker_rows = [r for r in rows if r.get("Ticker") == ticker]
-        if ticker_rows and ticker_rows[-1].get("Action", "").upper() == "BUY":
-            open_pnl += float(ticker_rows[-1].get("PnL") or 0)
+        if net.get(ticker, 0.0) <= 0.0001:
+            continue
+        open_pnl += float(row.get("PnL") or 0)
     return round(open_pnl, 2)
 
 
