@@ -7,16 +7,21 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+from core.allocation import get_allocation_weight
+from core.forecast_risk import get_forecast_multiplier
+from core.historical_risk import get_risk_multiplier
+
 
 STARTING_CAPITAL = 30000
 INTERVAL_SECONDS = 60
 
-MIN_SCORE_TO_BUY = 80
+MIN_SCORE_TO_BUY = 90
 TAKE_PROFIT_PCT = 5
 STOP_LOSS_PCT = -3
 MAX_POSITIONS = 12
 MIN_TRADE_USD = 250
 MAX_TRADE_USD = 2500
+MIN_CASH_RESERVE = 500
 
 MARKET_REGIME_FILTER = True
 MARKET_REGIME_TICKER = "SPY"
@@ -359,6 +364,7 @@ def save_alert(row):
 
 def get_dynamic_trade_size(signals_df, portfolio, market_regime):
     cash = get_cash_available(portfolio)
+    investable_cash = max(cash - MIN_CASH_RESERVE, 0)
     positions = get_open_positions(portfolio)
 
     candidates = signals_df[
@@ -373,18 +379,37 @@ def get_dynamic_trade_size(signals_df, portfolio, market_regime):
 
     available_slots = max(MAX_POSITIONS - len(positions), 0)
 
-    if candidates.empty or available_slots <= 0 or cash <= 0:
+    if candidates.empty or available_slots <= 0 or investable_cash <= 0:
         return 0
 
     buy_count = min(len(candidates), available_slots)
 
-    return round(cash / buy_count, 2)
+    candidates = candidates.sort_values("Score", ascending=False).head(buy_count)
+    weights = candidates["Score"].apply(get_allocation_weight)
+    total_weight = weights.sum()
+
+    if total_weight <= 0:
+        return 0
+
+    trade_size = investable_cash / total_weight
+    trade_size *= get_risk_multiplier()
+    trade_size *= get_forecast_multiplier()
+
+    return round(trade_size, 2)
+
+
+def get_score_adjusted_trade_size(base_trade_size, score):
+    if score < MIN_SCORE_TO_BUY:
+        return 0
+
+    return round(base_trade_size * get_allocation_weight(score), 2)
 
 
 def buy_position(row, portfolio, trade_usd):
     ticker = row["Ticker"]
     price = float(row["Price"])
     cash = get_cash_available(portfolio)
+    investable_cash = max(cash - MIN_CASH_RESERVE, 0)
 
     if trade_usd <= 0:
         return portfolio
@@ -396,8 +421,12 @@ def buy_position(row, portfolio, trade_usd):
     if trade_usd > MAX_TRADE_USD:
         trade_usd = MAX_TRADE_USD
 
-    if cash < trade_usd:
-        trade_usd = cash
+    if investable_cash <= 0:
+        log(f"BUY blocat pentru {ticker}: cash reserve ${MIN_CASH_RESERVE:.2f} păstrat.")
+        return portfolio
+
+    if investable_cash < trade_usd:
+        trade_usd = investable_cash
 
     shares = round(trade_usd / price, 4)
     invested = round(price * shares, 4)
@@ -565,9 +594,10 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
                             f"BUY permis pentru {ticker}: piața {ticker_market} deschisă, "
                             f"signal={signal}, score={score}"
                         )
+                        ticker_trade_size = get_score_adjusted_trade_size(trade_size, score)
                         est_shares = (
-                            round(float(trade_size) / float(price), 4)
-                            if trade_size and price > 0
+                            round(float(ticker_trade_size) / float(price), 4)
+                            if ticker_trade_size and price > 0
                             else None
                         )
                         log_buy_allowed(
@@ -575,14 +605,14 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
                             signal=signal,
                             score=score,
                             price=price,
-                            intended_trade_usd=trade_size,
+                            intended_trade_usd=ticker_trade_size,
                             shares=est_shares,
                             advisory_state=advisory_state,
                             block_new_buy=block_new_buy,
                             live_bot_cycle_id=live_bot_cycle_id,
                             warn_fn=log,
                         )
-                        portfolio = buy_position(row, portfolio, trade_size)
+                        portfolio = buy_position(row, portfolio, ticker_trade_size)
                         positions = get_open_positions(portfolio)
                     elif len(positions) >= MAX_POSITIONS:
                         skip_reason = f"MAX_POSITIONS ({MAX_POSITIONS})"
