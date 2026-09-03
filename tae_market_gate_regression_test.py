@@ -120,6 +120,7 @@ class MarketGateRegressionHarness:
             patch.object(live_bot, "buy_position", side_effect=self.fake_buy),
             patch.object(live_bot, "is_ticker_market_open", side_effect=open_fn),
             patch.object(live_bot, "log_market_session_summary"),
+            patch.object(live_bot, "run_v51_policy_shadow"),
             patch(
                 "research_core.governance.shadow_validation_ledger.get_default_ledger",
                 return_value=ledger,

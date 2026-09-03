@@ -13,6 +13,7 @@ from core.indicators import calculate_rsi, get_latest_price
 from core.portfolio import get_cash_available, get_open_positions, open_buy_row_mask
 from core.status import set_status
 from data.storage import load_csv_safe, load_portfolio, load_watchlist, save_portfolio
+from core.v51_policy_shadow import run_v51_policy_shadow
 from markets.market_hours import get_ticker_market, is_ticker_market_open
 from utils.logger import log
 from utils.telegram import send_telegram
@@ -36,6 +37,12 @@ MARKET_REGIME_SMA = 200
 TEST_SELL_MODE = False
 ALLOW_BUY_WHEN_MARKET_CLOSED = False
 GLOBAL_MARKET_GATE_ENABLED = False
+
+# Observation-only: logs where live_bot_v5_1.py's dynamic policy (regime,
+# MAX_POSITIONS, entry threshold, trailing-stop) would have decided
+# differently, without ever blocking a BUY or forcing a SELL here. Building
+# an evidence base before any decision to migrate this bot's policy.
+V51_POLICY_SHADOW_MODE = True
 
 ALERTS_FILE = "alerts_log.csv"
 
@@ -556,6 +563,20 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
             positions = get_open_positions(portfolio)
 
     save_portfolio(portfolio)
+
+    if V51_POLICY_SHADOW_MODE:
+        run_v51_policy_shadow(
+            signals_df,
+            positions,
+            live_regime=market_regime,
+            live_max_positions=MAX_POSITIONS,
+            live_min_score_to_buy=MIN_SCORE_TO_BUY,
+            live_take_profit_pct=TAKE_PROFIT_PCT,
+            live_stop_loss_pct=STOP_LOSS_PCT,
+            live_bot_cycle_id=live_bot_cycle_id,
+            warn_fn=log,
+        )
+
 
 def generate_signals():
     from research_core.governance.live_advisory_runtime import load_live_advisory
