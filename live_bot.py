@@ -45,6 +45,7 @@ GLOBAL_MARKET_GATE_ENABLED = False
 V51_POLICY_SHADOW_MODE = True
 
 ALERTS_FILE = "alerts_log.csv"
+LIVE_SIGNALS_FILE = "live_signals.csv"
 
 
 def log_market_session_summary():
