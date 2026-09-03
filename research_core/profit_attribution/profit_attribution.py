@@ -41,7 +41,7 @@ LEDGER_JSON = Path("tae_cash_flow_ledger.json")
 STRATEGIC_JSON = Path("tae_strategic_performance_audit.json")
 FALLBACK_STARTING_CAPITAL = 30000.0
 MIN_SHARES = 0.0001
-EUROPE_SUFFIXES = (".DE", ".PA", ".AS", ".MI", ".SW", ".BR")
+EUROPE_SUFFIXES = (".DE", ".PA", ".AS", ".MI", ".SW", ".BR", ".MC", ".HE", ".ST")
 UK_SUFFIX = ".L"
 
 HOLDING_BUCKETS = [

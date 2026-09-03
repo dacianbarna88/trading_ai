@@ -99,7 +99,7 @@ def _region_for_ticker(ticker: str) -> str:
         return "UK"
     if any(
         upper.endswith(suffix)
-        for suffix in (".DE", ".PA", ".AS", ".MI", ".SW", ".HE", ".ST")
+        for suffix in (".DE", ".PA", ".AS", ".MI", ".SW", ".BR", ".MC", ".HE", ".ST")
     ):
         return "Europe"
     return "US"
