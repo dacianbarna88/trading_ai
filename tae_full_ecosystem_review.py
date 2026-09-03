@@ -45,7 +45,6 @@ SCHEMA = "tae.full_ecosystem_review.v1"
 MODE = "OBSERVABILITY_FINANCIAL_ANALYSIS"
 LIVE_TRADING_IMPACT = "NONE"
 STARTING_CAPITAL = 30000.0
-MIN_BUY_SCORE = 80
 
 # Bot cycle is 60s; treat logs/signals as fresh within 5 minutes.
 BOT_LOG_FRESH_SECONDS = 300
