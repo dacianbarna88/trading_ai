@@ -7,7 +7,6 @@ import yfinance as yf
 from config.settings import STARTING_CAPITAL
 
 PORTFOLIO_FILE = "portfolio.csv"
-CAPITAL_BASELINE = 30000
 
 
 def load_portfolio(path=PORTFOLIO_FILE):
@@ -82,18 +81,23 @@ def reconstruct_open_positions(portfolio):
             continue
 
         ticker_rows = portfolio[portfolio["Ticker"] == ticker]
-        buy_rows = ticker_rows[ticker_rows["Action"] == "BUY"]
-        sell_rows = ticker_rows[ticker_rows["Action"] == "SELL"]
 
-        buy_shares = buy_rows["Shares"].sum()
-        sell_shares = sell_rows["Shares"].sum()
-        shares_open = buy_shares - sell_shares
+        # SELLs in this system always fully liquidate the current holding, so
+        # only rows after the most recent SELL belong to the open position —
+        # otherwise a closed-then-reopened ticker would blend the stale closed
+        # lot's cost basis into the new position's average price.
+        sell_idx = ticker_rows.index[ticker_rows["Action"] == "SELL"]
+        if len(sell_idx):
+            ticker_rows = ticker_rows[ticker_rows.index > sell_idx.max()]
+
+        buy_rows = ticker_rows[ticker_rows["Action"] == "BUY"]
+        shares_open = buy_rows["Shares"].sum()
 
         if shares_open <= 0:
             continue
 
         buy_cost = (buy_rows["Price"] * buy_rows["Shares"]).sum()
-        avg_price = buy_cost / buy_shares if buy_shares else 0
+        avg_price = buy_cost / shares_open
         invested = shares_open * avg_price
 
         current_price = get_live_price(ticker)
@@ -154,8 +158,8 @@ def main():
     open_pnl_pct = (open_pnl / total_open_invested * 100) if total_open_invested else 0
 
     account_value = cash + total_open_value
-    account_pnl = account_value - CAPITAL_BASELINE
-    account_return_pct = (account_pnl / CAPITAL_BASELINE * 100) if CAPITAL_BASELINE else 0
+    account_pnl = account_value - STARTING_CAPITAL
+    account_return_pct = (account_pnl / STARTING_CAPITAL * 100) if STARTING_CAPITAL else 0
 
     print("===== REAL OPEN POSITIONS =====")
     print()
@@ -172,7 +176,7 @@ def main():
     print(f"Open PnL: {format_money(open_pnl)}")
     print(f"Open PnL %: {format_pct(open_pnl_pct)}")
     print()
-    print(f"Capital Baseline: {format_money(CAPITAL_BASELINE)}")
+    print(f"Capital Baseline: {format_money(STARTING_CAPITAL)}")
     print(f"Current Cash: {format_money(cash)}")
     print(f"Open Position Value: {format_money(total_open_value)}")
     print(f"Account Value: {format_money(account_value)}")

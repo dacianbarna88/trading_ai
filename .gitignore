@@ -21,6 +21,9 @@ restore_2026_06_22/
 bot_status.txt
 bot_pid.txt
 
+# ...but not source-controlled manifests that happen to be .txt
+!requirements.txt
+
 # Keep source code and markdown tracked manually
 
 # Python cache

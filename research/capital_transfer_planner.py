@@ -1,9 +1,17 @@
 import pandas as pd
 
+from core.portfolio import open_buy_row_mask
+
 gap = pd.read_csv("allocation_gap.csv")
 portfolio = pd.read_csv("portfolio.csv")
 
-total_value = portfolio["Current_Value"].fillna(0).sum()
+# Summing Current_Value across every row (as before) double-counts: SELL
+# rows carry the sale proceeds in Current_Value, and a closed-then-reopened
+# ticker leaves a stale closed BUY row alongside the fresh one. Only open
+# BUY rows represent value still held.
+portfolio["Current_Value"] = pd.to_numeric(portfolio["Current_Value"], errors="coerce")
+open_value = portfolio.loc[open_buy_row_mask(portfolio), "Current_Value"].fillna(0).sum()
+total_value = open_value
 
 rows = []
 

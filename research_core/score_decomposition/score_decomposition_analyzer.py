@@ -92,7 +92,7 @@ def _region_for_ticker(ticker: str) -> str:
     upper = ticker.upper()
     if upper.endswith(".L"):
         return "UK"
-    if any(upper.endswith(s) for s in (".DE", ".PA", ".AS", ".MI", ".SW", ".HE", ".ST")):
+    if any(upper.endswith(s) for s in (".DE", ".PA", ".AS", ".MI", ".SW", ".BR", ".MC", ".HE", ".ST")):
         return "Europe"
     return "US"
 

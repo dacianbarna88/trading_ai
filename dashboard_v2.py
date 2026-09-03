@@ -425,14 +425,20 @@ def compute_open_positions(portfolio_df):
     open_rows = []
     for ticker in df["Ticker"].dropna().unique():
         rows = df[df["Ticker"] == ticker]
+
+        # SELLs in this system always fully liquidate the current holding, so
+        # only rows after the most recent SELL belong to the open position —
+        # otherwise a closed-then-reopened ticker would blend the stale closed
+        # lot's cost basis into the new position's average price.
+        sell_idx = rows.index[rows["Action"].astype(str).str.upper() == "SELL"]
+        if len(sell_idx):
+            rows = rows[rows.index > sell_idx.max()]
+
         buy_rows = rows[rows["Action"].astype(str).str.upper() == "BUY"]
-        sell_rows = rows[rows["Action"].astype(str).str.upper() == "SELL"]
-        buy_shares = buy_rows["Shares"].sum()
-        sell_shares = sell_rows["Shares"].sum()
-        open_shares = buy_shares - sell_shares
+        open_shares = buy_rows["Shares"].sum()
 
         if open_shares > 0:
-            avg_price = (buy_rows["Price"] * buy_rows["Shares"]).sum() / buy_shares
+            avg_price = (buy_rows["Price"] * buy_rows["Shares"]).sum() / open_shares
             current_price = get_live_price(ticker) or avg_price
             invested = open_shares * avg_price
             current_value = open_shares * current_price
@@ -502,33 +508,33 @@ def _sum_deposits(portfolio_df: pd.DataFrame) -> float:
 
 
 def _open_pnl_from_portfolio_marks(portfolio_df: pd.DataFrame) -> float:
-    """Mark-to-market open PnL from latest open BUY row per ticker in portfolio.csv."""
+    """Mark-to-market open PnL, summed across all open BUY rows per ticker."""
     if portfolio_df.empty:
         return 0.0
     rows = _portfolio_df_to_rows(portfolio_df)
-    net: dict[str, float] = {}
+    open_pnl_by_ticker: dict[str, float] = {}
     for row in rows:
         ticker = row.get("Ticker", "").strip()
         action = row.get("Action", "").upper()
-        shares = float(row.get("Shares") or 0)
         if not ticker or ticker == "CASH":
             continue
         if action == "BUY":
-            net[ticker] = net.get(ticker, 0.0) + shares
+            # A position can be built via several separate BUY rows before
+            # any SELL (e.g. incremental buys). Summing each row's own PnL
+            # captures the whole position; taking only the most recent BUY
+            # row's PnL - the previous implementation - silently dropped
+            # every earlier partial buy's contribution.
+            open_pnl_by_ticker[ticker] = open_pnl_by_ticker.get(ticker, 0.0) + float(
+                row.get("PnL") or 0
+            )
         elif action == "SELL":
-            net[ticker] = net.get(ticker, 0.0) - shares
+            # SELLs in this system always fully liquidate the current holding,
+            # so reset rather than partially reduce - otherwise a
+            # closed-then-reopened ticker would blend the stale closed lot's
+            # PnL into the new position's total.
+            open_pnl_by_ticker[ticker] = 0.0
 
-    open_pnl = 0.0
-    for ticker, shares in net.items():
-        if shares <= 0.0001:
-            continue
-        ticker_rows = [r for r in rows if r.get("Ticker") == ticker]
-        if not ticker_rows:
-            continue
-        last = ticker_rows[-1]
-        if last.get("Action", "").upper() == "BUY":
-            open_pnl += float(last.get("PnL") or 0)
-    return round(open_pnl, 2)
+    return round(sum(open_pnl_by_ticker.values()), 2)
 
 
 def compute_dashboard_performance_metrics(

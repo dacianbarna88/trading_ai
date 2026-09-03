@@ -1,7 +1,7 @@
 # Trading AI V5.1 - Settings
 # Centralized configuration extracted from V4 Step5
 
-STARTING_CAPITAL = 20000
+STARTING_CAPITAL = 30000
 INTERVAL_SECONDS = 60
 
 MIN_SCORE_TO_BUY = 90

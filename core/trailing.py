@@ -5,10 +5,20 @@ from utils.logger import log
 
 
 def update_trailing_state(portfolio, ticker, price, avg_price):
-    buy_mask = (
-        (portfolio["Ticker"].astype(str).str.upper() == str(ticker).upper())
-        & (portfolio["Action"].astype(str).str.upper() == "BUY")
-    )
+    ticker_mask = portfolio["Ticker"].astype(str).str.upper() == str(ticker).upper()
+
+    # SELLs in this system always fully liquidate the current holding, so
+    # only rows after the most recent SELL belong to the open position —
+    # otherwise a closed-then-reopened ticker could pick up a stale
+    # Highest_Price from the earlier, now-closed round and set the new
+    # position's trailing stop off a phantom peak.
+    sell_idx = portfolio.index[
+        ticker_mask & (portfolio["Action"].astype(str).str.upper() == "SELL")
+    ]
+    if len(sell_idx):
+        ticker_mask = ticker_mask & (portfolio.index > sell_idx.max())
+
+    buy_mask = ticker_mask & (portfolio["Action"].astype(str).str.upper() == "BUY")
 
     if not buy_mask.any():
         return portfolio, False, None

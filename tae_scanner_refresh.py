@@ -25,8 +25,55 @@ DEFAULT_ROOT = Path(".")
 LOG_FILE = "tae_scanner_refresh.log"
 OUTPUT_JSON = "tae_scanner_refresh.json"
 OUTPUT_MD = "tae_scanner_refresh.md"
+LOCK_FILE = "tae_scanner_refresh.pid"
 
 PYTHON = sys.executable
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _acquire_lock(root: Path) -> bool:
+    """Best-effort single-instance lock so an overlapping cron run (this
+    pipeline's steps allow up to 900s each across ~35 steps, while cron
+    fires every 30 minutes) can't run concurrently with a still-running
+    prior instance and race on the same output/report files - several of
+    which (tae_advisory_index.json, tae_live_advisory.json) now directly
+    feed the live bots' BUY-blocking decision."""
+    lock_path = root / LOCK_FILE
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            existing_pid = int(lock_path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            existing_pid = None
+        if existing_pid is not None and _pid_alive(existing_pid):
+            return False
+        # Stale lock from a prior run that died without cleanup - reclaim it.
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return False
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(str(os.getpid()))
+    return True
+
+
+def _release_lock(root: Path) -> None:
+    try:
+        (root / LOCK_FILE).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @dataclass
@@ -53,6 +100,7 @@ class StepResult:
     errors: str = ""
     stdout_tail: str = ""
     stderr_tail: str = ""
+    critical: bool = False
 
 
 def _utc_now_iso() -> str:
@@ -298,6 +346,31 @@ def _build_steps(root: Path) -> list[StepSpec]:
             command=[PYTHON, str(root / "tae_actionable_signal_audit.py")],
             artifact="tae_actionable_signal_audit.json",
         ),
+        StepSpec(
+            name="advisory_index",
+            command=[PYTHON, str(root / "tae_advisory_index_demo.py")],
+            artifact="tae_advisory_index.json",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="live_advisory_bridge",
+            command=[PYTHON, str(root / "tae_live_advisory_demo.py")],
+            artifact="tae_live_advisory.json",
+            requires_artifacts=("tae_advisory_index.json",),
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="historical_patterns",
+            command=[PYTHON, str(root / "research/historical_patterns.py")],
+            artifact="historical_pattern_summary.txt",
+            needs_pythonpath=True,
+        ),
+        StepSpec(
+            name="market_forecast",
+            command=[PYTHON, str(root / "research/market_forecast.py")],
+            artifact="market_forecast.csv",
+            needs_pythonpath=True,
+        ),
     ]
 
 
@@ -316,6 +389,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
                 runtime_seconds=round(time.monotonic() - started, 3),
                 artifact=spec.artifact,
                 errors=reason,
+                critical=spec.critical,
             )
 
     env = os.environ.copy()
@@ -342,6 +416,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
             runtime_seconds=round(time.monotonic() - started, 3),
             artifact=spec.artifact,
             errors="Step timed out after 900 seconds",
+            critical=spec.critical,
         )
     except OSError as exc:
         _log_line(f"FAIL {spec.name}: {exc}", root)
@@ -352,6 +427,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
             runtime_seconds=round(time.monotonic() - started, 3),
             artifact=spec.artifact,
             errors=str(exc),
+            critical=spec.critical,
         )
 
     runtime = round(time.monotonic() - started, 3)
@@ -374,6 +450,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
             errors=err or f"Exit code {completed.returncode}",
             stdout_tail=_tail(completed.stdout),
             stderr_tail=_tail(completed.stderr),
+            critical=spec.critical,
         )
 
     if spec.artifact and not artifact_ok:
@@ -399,6 +476,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
         errors="" if status == "OK" else err,
         stdout_tail=_tail(completed.stdout),
         stderr_tail=_tail(completed.stderr),
+        critical=spec.critical,
     )
 
 
@@ -415,7 +493,13 @@ def _load_json_summary(root: Path, filename: str) -> dict[str, Any]:
 
 def _final_verdict(results: list[StepResult]) -> str:
     statuses = {r.status for r in results}
-    if any(r.status == "FAIL" and r.name in {"global_market_scanner", "multi_market_scanner"} for r in results):
+    # Steps marked critical=True in _build_steps() (global_market_scanner,
+    # us_market_scanner, multi_market_scanner) drive a hard FAIL when they
+    # fail. This used to be a hardcoded name check here that predated
+    # us_market_scanner's critical=True flag and never included it - any
+    # future addition/removal of critical=True on a step now takes effect
+    # here automatically instead of needing a second edit in this function.
+    if any(r.status == "FAIL" and r.critical for r in results):
         return "FAIL"
     if "FAIL" in statuses:
         return "WARNING"
@@ -543,29 +627,40 @@ def run_refresh(root: Path | str = DEFAULT_ROOT) -> dict[str, Any]:
 
 def main() -> int:
     root = Path(".")
-    report = run_refresh(root)
 
-    print("===== TAE SCANNER REFRESH =====")
-    print(f"Verdict: {report['final_verdict']}")
-    print(f"Total runtime: {report['total_runtime_seconds']}s")
-    print(
-        f"Steps: OK={report['step_counts']['ok']} "
-        f"FAIL={report['step_counts']['fail']} "
-        f"SKIPPED={report['step_counts']['skipped']}"
-    )
-    for step in report["steps"]:
+    if not _acquire_lock(root):
         print(
-            f"  - {step['name']}: {step['status']} ({step['runtime_seconds']}s) "
-            f"artifact={step.get('artifact') or '—'} rows={step.get('row_count', '—')}"
+            "SKIP: another tae_scanner_refresh run is already in progress "
+            f"(lock file: {LOCK_FILE})."
         )
-    downstream = report.get("downstream") or {}
-    print(f"Candidate queue action: {downstream.get('candidate_queue_action')}")
-    print(
-        f"Watchlist proposal recommended additions: "
-        f"{downstream.get('watchlist_proposal_recommended_count')}"
-    )
-    print(f"Output: {OUTPUT_JSON}, {OUTPUT_MD}, {LOG_FILE}")
-    return 0 if report["final_verdict"] in {"OK", "WARNING"} else 1
+        return 0
+
+    try:
+        report = run_refresh(root)
+
+        print("===== TAE SCANNER REFRESH =====")
+        print(f"Verdict: {report['final_verdict']}")
+        print(f"Total runtime: {report['total_runtime_seconds']}s")
+        print(
+            f"Steps: OK={report['step_counts']['ok']} "
+            f"FAIL={report['step_counts']['fail']} "
+            f"SKIPPED={report['step_counts']['skipped']}"
+        )
+        for step in report["steps"]:
+            print(
+                f"  - {step['name']}: {step['status']} ({step['runtime_seconds']}s) "
+                f"artifact={step.get('artifact') or '—'} rows={step.get('row_count', '—')}"
+            )
+        downstream = report.get("downstream") or {}
+        print(f"Candidate queue action: {downstream.get('candidate_queue_action')}")
+        print(
+            f"Watchlist proposal recommended additions: "
+            f"{downstream.get('watchlist_proposal_recommended_count')}"
+        )
+        print(f"Output: {OUTPUT_JSON}, {OUTPUT_MD}, {LOG_FILE}")
+        return 0 if report["final_verdict"] in {"OK", "WARNING"} else 1
+    finally:
+        _release_lock(root)
 
 
 if __name__ == "__main__":

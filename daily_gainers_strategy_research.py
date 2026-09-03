@@ -50,7 +50,7 @@ def load_tickers_from_file(path: Path) -> list[str]:
 def infer_region(ticker: str) -> str:
     if ticker.endswith(".L"):
         return "UK"
-    for suffix in (".DE", ".PA", ".AS", ".MI", ".SW", ".BR"):
+    for suffix in (".DE", ".PA", ".AS", ".MI", ".SW", ".BR", ".MC"):
         if ticker.endswith(suffix):
             return "EU"
     return "US"

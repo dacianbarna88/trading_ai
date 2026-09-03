@@ -390,12 +390,18 @@ class ResearchPrioritizer:
         return "Investigate meta-learning insight in next research council cycle."
 
     def _score_opportunity(self, draft: _OpportunityDraft) -> ResearchPriorityEntry:
+        # VALUE_SCORE mirrors EFFORT_SCORE (research_cost's source) but was
+        # never actually folded into the formula below - scientific_value
+        # was computed and shown in the report but had no effect on ranking.
+        value_bonus = VALUE_SCORE.get(draft.scientific_value, VALUE_SCORE["MEDIUM"])
+
         factors = {
             "novelty": draft.novelty,
             "evidence_quality": draft.evidence_quality,
             "robustness": draft.robustness,
             "validation_gaps": draft.validation_gap_score,
             "expected_information_gain": draft.information_gain,
+            "scientific_value_bonus": value_bonus,
             "duplicate_risk_penalty": draft.duplicate_risk,
             "research_cost_penalty": draft.research_cost,
         }
@@ -406,6 +412,7 @@ class ResearchPrioritizer:
             + draft.robustness * 0.10
             + draft.validation_gap_score * 0.22
             + draft.information_gain * 0.28
+            + value_bonus * 0.14
             - draft.duplicate_risk * 0.12
             - draft.research_cost * 0.14
         )

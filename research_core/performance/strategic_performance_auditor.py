@@ -44,7 +44,7 @@ RECOMMENDATIONS_PATH = Path("tae_strategy_recommendations.json")
 PROCESS_HEALTH_PATH = Path("process_health.json")
 BOT_STATUS_PATH = Path("bot_status.txt")
 
-EUROPE_SUFFIXES = (".DE", ".PA", ".AS", ".MI", ".SW", ".BR")
+EUROPE_SUFFIXES = (".DE", ".PA", ".AS", ".MI", ".SW", ".BR", ".MC", ".HE", ".ST")
 UK_SUFFIX = ".L"
 NEAR_ZERO_INVESTED = 1.0
 MIN_SHARES_OPEN = 0.0001

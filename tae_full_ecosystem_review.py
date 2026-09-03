@@ -45,7 +45,6 @@ SCHEMA = "tae.full_ecosystem_review.v1"
 MODE = "OBSERVABILITY_FINANCIAL_ANALYSIS"
 LIVE_TRADING_IMPACT = "NONE"
 STARTING_CAPITAL = 30000.0
-MIN_BUY_SCORE = 80
 
 # Bot cycle is 60s; treat logs/signals as fresh within 5 minutes.
 BOT_LOG_FRESH_SECONDS = 300
@@ -748,7 +747,7 @@ def _portfolio_financials(root: Path) -> dict[str, Any]:
 
     result["portfolio_readable"] = True
     spent = received = deposited = 0.0
-    positions: dict[str, dict[str, Any]] = {}
+    positions: dict[str, list[dict[str, Any]]] = {}
     trading_realized = 0.0
     raw_pnl_sum = 0.0
     cash_flow_pnl_sum = 0.0
@@ -788,18 +787,16 @@ def _portfolio_financials(root: Path) -> dict[str, Any]:
 
         if action == "BUY":
             spent += price * shares
-            bucket = positions.setdefault(
-                ticker,
-                {"buy_shares": 0.0, "sell_shares": 0.0, "last_buy_row": None},
-            )
-            bucket["buy_shares"] += shares
-            bucket["last_buy_row"] = row
+            positions.setdefault(ticker, []).append(row)
         elif action == "SELL":
             received += price * shares
             if pnl is not None:
                 trading_realized += pnl
-            if ticker in positions:
-                positions[ticker]["sell_shares"] += shares
+            # SELLs in this system always fully liquidate the current holding,
+            # so reset rather than partially reduce — otherwise a
+            # closed-then-reopened ticker would blend the stale closed lot's
+            # figures into the new position's totals.
+            positions[ticker] = []
 
     cash = STARTING_CAPITAL + deposited - spent + received
     result["cash_available"] = round(cash, 2)
@@ -810,35 +807,43 @@ def _portfolio_financials(root: Path) -> dict[str, Any]:
     positions_value = 0.0
     missing_marks = 0
 
-    for ticker, bucket in positions.items():
+    for ticker, buy_rows in positions.items():
         if ticker.upper() == "CASH":
             continue
-        open_shares = bucket["buy_shares"] - bucket["sell_shares"]
+        open_shares = sum(_parse_float(r.get("Shares")) or 0.0 for r in buy_rows)
         if open_shares <= 1e-9:
             continue
-        last = bucket["last_buy_row"] or {}
-        invested = _parse_float(last.get("Invested"))
-        current_value = _parse_float(last.get("Current_Value"))
-        pnl_pct = _parse_float(last.get("PnL_%"))
-        pnl = _parse_float(last.get("PnL"))
+        last = buy_rows[-1]
         current_price = _parse_float(last.get("Current_Price"))
 
-        if pnl is not None:
-            trading_unrealized += pnl
-        elif invested is not None and current_value is not None:
-            trading_unrealized += current_value - invested
+        ticker_unrealized = 0.0
+        ticker_value = 0.0
+        ticker_invested = 0.0
+        for buy_row in buy_rows:
+            invested = _parse_float(buy_row.get("Invested"))
+            current_value = _parse_float(buy_row.get("Current_Value"))
+            pnl = _parse_float(buy_row.get("PnL"))
+            if invested is not None:
+                ticker_invested += invested
+            if pnl is not None:
+                ticker_unrealized += pnl
+            elif invested is not None and current_value is not None:
+                ticker_unrealized += current_value - invested
+            if current_value is not None:
+                ticker_value += current_value
+            elif invested is not None:
+                ticker_value += invested
+                missing_marks += 1
 
-        if current_value is not None:
-            positions_value += current_value
-        elif invested is not None:
-            positions_value += invested
-            missing_marks += 1
+        trading_unrealized += ticker_unrealized
+        positions_value += ticker_value
+        pnl_pct = (ticker_unrealized / ticker_invested * 100) if ticker_invested else None
 
         open_positions.append(
             {
                 "ticker": ticker,
                 "shares": round(open_shares, 4),
-                "pnl": round(pnl, 4) if pnl is not None else None,
+                "pnl": round(ticker_unrealized, 4),
                 "pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else None,
                 "current_price": current_price,
             }
