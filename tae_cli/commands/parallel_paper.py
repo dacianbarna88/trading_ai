@@ -61,6 +61,20 @@ def run_once(_args: list[str] | None = None) -> int:
     return 0 if c.get("ok") else 1
 
 
+def run_short_margin_once(_args: list[str] | None = None) -> int:
+    """Explicit single cycle for the new isolated short/margin arm
+    (exp_short_margin). Self-contained — does not touch V1/V2/V3."""
+    from tae_parallel_paper_short_margin import run_short_margin_cycle
+
+    print("===== TAE PARALLEL-PAPER-RUN-SHORT-MARGIN-ONCE =====")
+    c = run_short_margin_cycle()
+    print("arm", c.get("arm"))
+    print("account_value", c.get("account_value"), "cash", c.get("cash"))
+    print("open_shorts", c.get("open_shorts"), "margin_utilization_pct", c.get("margin_utilization_pct"))
+    print("reconciliation_pass", c.get("reconciliation_pass"))
+    return 0 if c.get("reconciliation_pass") else 1
+
+
 def run_health(_args: list[str] | None = None) -> int:
     from tae_parallel_paper_autostart import status_autostart
     from tae_parallel_paper_runtime import health_snapshot

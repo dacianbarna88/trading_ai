@@ -1,0 +1,16 @@
+# TAE canonical crontab SSOT (HEAD/main)
+# PAPER_ONLY | NO_BROKER | NO_LIVE_TRADING_CHANGE
+# Install (Terminal.app with Full Disk Access if required):
+#   crontab /Users/book/Desktop/trading_ai/.cron_tae_canonical.install
+#
+# Policy (2026-08-03 operational closure):
+# - Active jobs MUST reference existing targets on HEAD/main.
+# - No active references to tae.py until that CLI and owners are restored onto HEAD
+#   in a separate sprint (do not stash-apply / do not legacy-merge by accident).
+# - Scanner refresh is the only active cron economic-adjacent job currently.
+
+*/30 * * * 1-5 cd "/Users/book/Desktop/trading_ai" && TAE_SCHEDULER_SOURCE=cron /bin/bash "/Users/book/Desktop/trading_ai/tae_scanner_refresh.sh" >> "/Users/book/Desktop/trading_ai/tae_scanner_refresh.log" 2>&1
+
+# RETIRED_STALE_TAE_PY: paper-mark-to-market (tae.py absent on HEAD; owner was tae_paper_execution.run_paper_mark_to_market off-HEAD)
+# RETIRED_STALE_TAE_PY: self-improve post-close (tae.py absent on HEAD)
+# HISTORICALLY_DISABLED: full-paper-cycle (was dual-owned with retired market-open LaunchAgent; tae.py / tae_full_paper_cycle.py absent on HEAD)

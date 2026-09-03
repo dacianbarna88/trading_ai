@@ -154,10 +154,19 @@ class V1V2ExecutionRestoreTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(live_csv.read_bytes()).hexdigest(), before_live)
 
     def test_v1_take_profit_sell(self):
+        """V1's take-profit exit is now an armed trailing stop (Phase 1 of
+        the profit-improvement sprint), not a hard +5% cap: at +6% V1 must
+        ARM and HOLD (letting a winner run), then only sell once price
+        pulls back 2% off the peak it reaches. This replaced the old fixed
+        +5%/-3% bracket after an audit found it produced negative
+        expectancy at V1's real ~28.6% win rate (a large win capped at
+        exactly +5% can't offset frequent -3% losses) — see
+        tae_strategy_v1_trailing.py.
+        """
         cfg = self._cfg(WATCHLIST=["AAA"])
         pprun.bootstrap(cfg)
         p = ppc.paths()
-        # Seed position below TP then mark above +5%
+        # Seed position then mark above the +5% arm threshold.
         port = pprun.empty_portfolio(30000, arm="V1")
         shares, after = __import__("tae_paper_execution", fromlist=["_buy_shares"])._buy_shares(
             port, "AAA", 1000.0, 100.0
@@ -166,16 +175,39 @@ class V1V2ExecutionRestoreTests(unittest.TestCase):
         after["strategy_version"] = "V1"
         after["avg_price"] = 100.0
         pprun.save_portfolio(p["v1_portfolio"], port)
-        # WAIT: entry must not overwrite manage SELL (merge prefers later BUY).
-        c = pprun.run_cycle(
+
+        # Cycle 1: +6% — must ARM trailing and HOLD, not sell at a fixed cap.
+        c1 = pprun.run_cycle(
             cfg=cfg, mark_provider=_marks({"AAA": 106.0}, signal="WAIT"), tickers=["AAA"]
         )
-        d1 = [d for d in c.get("v1_decisions") or [] if d.get("ticker") == "AAA"][0]
-        self.assertEqual(d1["action"], "SELL")
-        self.assertIn("TAKE_PROFIT", str(d1.get("reason") or "").upper())
+        d1 = [d for d in c1.get("v1_decisions") or [] if d.get("ticker") == "AAA"][0]
+        self.assertEqual(d1["action"], "HOLD")
+        v1_armed = json.loads(p["v1_portfolio"].read_text(encoding="utf-8"))
+        pos_armed = v1_armed["positions"]["AAA"]
+        self.assertTrue(pos_armed["trailing_armed"])
+        self.assertAlmostEqual(pos_armed["highest_price"], 106.0)
+
+        # Cycle 2: price rises further to a new peak (stop ratchets up, still holds).
+        c2 = pprun.run_cycle(
+            cfg=cfg, mark_provider=_marks({"AAA": 112.0}, signal="WAIT"), tickers=["AAA"]
+        )
+        d2 = [d for d in c2.get("v1_decisions") or [] if d.get("ticker") == "AAA"][0]
+        self.assertEqual(d2["action"], "HOLD")
+
+        # Cycle 3: pullback below the trailing stop (112 * 0.98 = 109.76) sells.
+        c3 = pprun.run_cycle(
+            cfg=cfg, mark_provider=_marks({"AAA": 109.0}, signal="WAIT"), tickers=["AAA"]
+        )
+        d3 = [d for d in c3.get("v1_decisions") or [] if d.get("ticker") == "AAA"][0]
+        self.assertEqual(d3["action"], "SELL")
+        self.assertIn("TRAILING", str(d3.get("reason") or "").upper())
         v1 = json.loads(p["v1_portfolio"].read_text(encoding="utf-8"))
         self.assertNotIn("AAA", v1.get("positions") or {})
-        self.assertGreater(float(v1.get("realized_pnl") or 0), 0)
+        self.assertGreater(
+            float(v1.get("realized_pnl") or 0),
+            0,
+            "should lock in a gain well above the old flat +5% cap (~+9%, not +5%)",
+        )
 
     def test_v1_stop_loss_sell(self):
         cfg = self._cfg(WATCHLIST=["AAA"])

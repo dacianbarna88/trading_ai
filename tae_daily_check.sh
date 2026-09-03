@@ -112,6 +112,7 @@ for arm, path in [
     ('V1', 'runtime_outputs/parallel_paper/v1/journals/trades.jsonl'),
     ('V2', 'runtime_outputs/parallel_paper/v2/journals/trades.jsonl'),
     ('V3', 'runtime_outputs/parallel_paper/v3/journals/trades.jsonl'),
+    ('SHORT_MARGIN', 'runtime_outputs/parallel_paper/exp_short_margin/journals/trades.jsonl'),
 ]:
     ts = last_trade_ts(path)
     if ts is None:

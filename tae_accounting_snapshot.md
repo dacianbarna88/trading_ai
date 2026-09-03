@@ -1,53 +1,52 @@
 # TAE Accounting Snapshot
 
-**Generated:** 2026-06-30T13:32:34.164331+00:00  
+**Generated:** 2026-09-03T13:01:29.216903+00:00  
 **Mode:** CANONICAL_ACCOUNTING_READ_ONLY  
 **Data quality:** **HISTORICAL_RECONCILIATION_REQUIRED**
 
 ## Canonical metrics
 
 - Starting capital (config): 30000.0
-- Deposits detected / counted / excluded: 10000.0 / 0.0 / 10000.0
+- Deposits detected / counted / excluded: 0 / 0 / 0
 - **Effective contributed capital:** 30000.0
-- Cash available: 12662.3
-- Open positions value: 17722.8555
-- **Corrected realized PnL:** 475.1919
-- **Corrected unrealized PnL:** -90.0368
-- **Corrected total trading PnL:** 385.1551
-- **Account value (corrected):** 30385.16
-- Account value cash-based: 30385.16
-- Account value capital-based: 30385.16
-- Capital base status: **NEEDS_OPERATOR_CONFIRMATION**
-- Raw PnL (incl. CASH rows): -10720.9584
-- Accounting adjustments excluded: -9913.58
-- Reported realized (stale): -534.3556
-- SELL mismatches: 27
+- Cash available: 229.72
+- Open positions value: 30155.3188
+- **Corrected realized PnL:** 181.2244
+- **Corrected unrealized PnL:** 203.8105
+- **Corrected total trading PnL:** 385.0349
+- **Account value (corrected):** 30385.04
+- Account value cash-based: 30385.04
+- Account value capital-based: 30385.03
+- Capital base status: **OK**
+- Raw PnL (incl. CASH rows): 2947.0078
+- Accounting adjustments excluded: 0.0
+- Reported realized (stale): 983.0115
+- SELL mismatches: 21
 
 Formula: account_value = effective_contributed_capital + corrected_total_trading_pnl = cash_available + open_positions_value
 
 ## Top drag (corrected)
 
-- **AAPL** PnL -189.2578 (STOP LOSS -8.24%)
+- **MC.PA** PnL -188.8714 (STOP LOSS -7.97%)
 
 ## Biggest historical mismatch
 
-- GS: reported -903.8957 vs expected 547.9904
+- SAP.DE: reported 238.6473 vs expected 3.7064
 
 ## Top winners (corrected)
 
-- GS | 547.9904 | PROFIT +5.48%
-- ULVR.L | 120.9427 | TAKE PROFIT SIGNAL
-- AZN.L | 119.526 | TAKE PROFIT SIGNAL
-- PANW | 90.6923 | PROFIT +10.01%
-- SIE.DE | 87.9237 | TAKE PROFIT SIGNAL
+- MRK | 425.1788 | TAKE PROFIT SIGNAL
+- ULVR.L | 223.1466 | TAKE PROFIT SIGNAL
+- HSBA.L | 176.3316 | TAKE PROFIT SIGNAL
+- GE | 167.1302 | PROFIT +5.03%
+- SIE.DE | 154.5533 | PROFIT +6.18%
 
 ## Top losers (corrected)
 
-- AAPL | -189.2578 | STOP LOSS -8.24%
-- ORCL | -105.4381 | STOP LOSS -11.64%
-- SIE.DE | -93.6152 | STOP LOSS -3.02%
-- MSFT | -72.072 | STOP LOSS -7.21%
-- ADBE | -64.2302 | STOP LOSS -6.42%
+- MC.PA | -188.8714 | STOP LOSS -7.97%
+- AAPL | -186.0665 | STOP LOSS -7.44%
+- ORCL | -144.6592 | STOP LOSS -5.79%
+- SAP.DE | -129.922 | STOP LOSS -5.54%
+- AIR.PA | -123.1643 | STOP LOSS -4.59%
 
-- ⚠️ CAPITAL BASE NEEDS CONFIRMATION — see capital_base_explanation
-- ⚠️ 27 historical SELL row(s) have stale reported PnL — corrected values used for all canonical metrics
+- ⚠️ 21 historical SELL row(s) have stale reported PnL — corrected values used for all canonical metrics

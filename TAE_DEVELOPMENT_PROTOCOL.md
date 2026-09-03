@@ -1,13 +1,18 @@
 # TAE Development Protocol v1.1
 
-**Trading AI Ecosystem — Official Project Governance & Constitution**
+**Trading AI Ecosystem — Official Development Process Companion**
+
+> **Constitutional SSOT (project state):** [`TAE_CONSTITUTION.md`](TAE_CONSTITUTION.md) **v2.2** (2026-08-03) — includes **ARCHITECTURE_FREEZE**.  
+> This file remains the **development-process** reference (Think → Design → Verify → Integrate).  
+> It is **SUPERSEDED** as the sole project-state constitution; philosophy in §15–§21 is preserved and restated in `TAE_CONSTITUTION.md`.
 
 | Field | Value |
 |-------|-------|
 | Version | 1.1 |
-| Status | Active |
+| Status | Active (process) · Superseded (sole constitution role) |
 | Safety mode | ANALYSIS_ONLY \| PAPER_ONLY \| NO_BROKER \| NO_EXECUTION |
 | Scope | All future TAE research, integration, and runtime work |
+| Project-state constitution | `TAE_CONSTITUTION.md` v2.2 |
 
 ---
 

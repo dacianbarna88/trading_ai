@@ -26,3 +26,11 @@ bot_pid.txt
 # Python cache
 __pycache__/
 *.pyc
+
+# Generated/reproducible data — not source code
+runtime_outputs/
+research_outputs/
+audit/
+*.parquet
+*.jsonl
+*.lock

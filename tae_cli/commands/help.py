@@ -52,6 +52,7 @@ Available commands:
   paper-mark-to-market
   parallel-paper-start
   parallel-paper-run-once
+  parallel-paper-run-short-margin-once
   parallel-paper-health
   parallel-paper-report
   parallel-paper-report-3way
@@ -135,6 +136,7 @@ Foundation (Stage 5): see TAE_FOUNDATION_STATUS.md · TAE_OPERATOR_RUNBOOK.md ·
   paper-mark-to-market — mark PAPER portfolio to market with live prices (no broker)
   parallel-paper-start — start persistent isolated V1/V2 parallel PAPER daemon (no cycle, no LIVE)
   parallel-paper-run-once — run exactly one parallel cycle (explicit; not a start)
+  parallel-paper-run-short-margin-once — run one cycle for the isolated exp_short_margin arm (short-selling + margin, self-contained, does not touch V1/V2/V3)
   parallel-paper-health — process/state/accounting/data health (RUNNING_* vs STOPPED_HEALTHY_STATE)
   parallel-paper-report — generate daily V1 vs V2 comparative report
   parallel-paper-report-3way — generate daily V1/V2/V3 comparative report (Phase 4)

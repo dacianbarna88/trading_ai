@@ -27,6 +27,9 @@ import tae_strategy_v2_exit_policy as xp
 import tae_strategy_v2_foundation as v2
 import tae_strategy_v2_reentry_policy as reentry
 import tae_strategy_v2_routing as route
+import tae_strategy_v1_trailing as v1trail
+import tae_strategy_v1_vol_stop as v1volstop
+import tae_strategy_v2_kelly_sizing as v2kelly
 try:
     from tae_strategy_v2_trailing import V2_PROFIT_TRAILING_REASON
 except ImportError:  # fail-soft constant for V2 profit-trailing reason
@@ -57,6 +60,14 @@ PHASE_ALL = "all"
 # 80 on a typical day, and once V1 held all of them there was nothing left
 # to evaluate. One named constant now, not three literals to keep in sync.
 V1_V2_ENTRY_MIN_SCORE = 60
+
+# V2 had no position-count cap at all: it opened a new position for every
+# candidate that cleared entry across the 100-ticker watchlist, diluting a
+# real per-trade edge (profit factor 10.49 on closed trades, measured over
+# 41 days) across 50 concurrent ~$520 positions — index-level diversification
+# instead of a concentrated bet on a proven edge. This caps NEW-ticker opens
+# only; adding to an already-held position is never blocked by this.
+V2_MAX_POSITIONS = 18
 
 
 class _PhaseComplete(Exception):
@@ -1958,10 +1969,17 @@ def _run_v1_arm(
             qty = _f(pos.get("shares"))
             value = qty * _f(pos.get("last_valid_mark") or pos.get("current_price") or 0.0)
         else:
-            act, rsn = route.v1_mechanical_exit_action(
+            v1_stop_pct, v1_vol_diag = v1volstop.vol_adjusted_stop_pct(
+                v1volstop.fetch_recent_closes(ticker)
+            )
+            act, rsn = v1trail.v1_trailing_exit_action(
+                pos,
                 avg_price=_f(pos.get("avg_price")),
                 current_price=mark,
+                now_iso=_now(),
+                stop_loss_pct=v1_stop_pct,
             )
+            pos["v1_vol_stop_diag"] = v1_vol_diag
             if act:
                 shares = _f(pos.get("shares"))
                 avg = _f(pos.get("avg_price"))
@@ -2335,7 +2353,9 @@ def _run_v2_arm(
 
     phase_n = _s(phase).lower() or PHASE_ALL
     v2_cfg = load_strategy_v2_config()
-    v2_cfg["tranche_fraction"] = 0.20
+    v2_kelly_fraction, v2_kelly_diag = v2kelly.v2_tranche_fraction_from_edge(p["v2_trades"])
+    v2_cfg["tranche_fraction"] = v2_kelly_fraction
+    v2_cfg["_v2_kelly_diag"] = v2_kelly_diag
     v2_cfg["max_tranches"] = 5
     v2_cfg["add_tranche_drop_pct"] = 0.03
     v2_cfg["minimum_cycle_profit_pct"] = 0.10
@@ -2996,7 +3016,13 @@ def _run_v2_arm(
                     reason = gate.code
                 else:
                     reentry_allowed = True
-            if entry_ok and (
+            if entry_ok and _open_position_count(portfolio) >= V2_MAX_POSITIONS and (
+                (not in_watch and favorable and snap.get("eligible") is not False)
+                or (in_watch and reentry_allowed)
+            ):
+                action = "BLOCKED"
+                reason = "V2_MAX_POSITIONS_REACHED"
+            elif entry_ok and (
                 (not in_watch and favorable and snap.get("eligible") is not False)
                 or (in_watch and reentry_allowed)
             ):

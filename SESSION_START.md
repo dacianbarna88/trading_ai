@@ -1,121 +1,146 @@
 # Session Start — Trading AI / TAE
 
-**Read this at the beginning of every working session.**
+**Read this at the beginning of every working session.**  
+**Constitution SSOT:** [`TAE_CONSTITUTION.md`](TAE_CONSTITUTION.md) **v2.2**  
+**Journal:** [`PROJECT_BOOK.md`](PROJECT_BOOK.md)
+
+On conflict: **Constitution wins.**
 
 ---
 
-## Where we are
+## 1. Project state (2026-08-03)
 
 | Item | Value |
 |------|--------|
-| **Last completed sprint** | **X.9** — Connected Shadow Validation Runtime Ledger |
-| **Canonical live runtime** | `live_bot.py` |
-| **TAE live integration** | X.8 advisory **risk gate** + X.9 **BUY observability ledger** |
-| **Mode** | PAPER_ONLY · NO_BROKER · NO_AUTO_EXECUTION |
+| Infrastructure | **CLOSED** |
+| Canonical FPC | **ACTIVE** |
+| V1 | **ACTIVE** (benchmark PAPER book) |
+| V2 | **ACTIVE** (challenger PAPER book, same FPC) |
+| Dual strategy | **`V1_V2_DUAL_STRATEGY_ACTIVE`** |
+| Decision Brain | **ACTIVE** (PDE `action`) |
+| Binding SKIP gate | **ACTIVE in PAPER** — provisional; forward cohort decides permanence |
+| Forward cohort | **ACTIVE** |
+| Learning | **ACTIVE** (isolated by `strategy_id`) |
+| Hard Risk | **PROTECTED** |
+| SELL | **PROTECTED** |
+| Broker | **OFF** |
+| Live promotion | **Blocked** |
+| Documentation | **CLOSED** (`TAE_CANONICAL_DOCUMENTATION_CLOSED`) |
+| Architecture | **`ARCHITECTURE_FREEZE`** |
+
+**Roadmap phase:** **FAZA II — Economic Validation** (FAZA I done; FAZA III not started; FAZA IV LIVE forbidden until proof + Owner approval).
 
 ---
 
-## Current state (2026-06-29)
+## 2. Mandatory rules
 
-- **X.8 risk gate connected** — `live_bot.py` reads `tae_live_advisory.json`; `RISK_ADVISORY` blocks **new BUY only**
-- **X.9 shadow validation ledger connected** — BUY path logs to `tae_shadow_validation_events.csv` via `shadow_validation_ledger.py`
-- **BUY path observability active** — event types: `BUY_ALLOWED`, `BUY_BLOCKED_BY_TAE`, `BUY_SKIPPED_OTHER_REASON`
-- **SELL logic untouched** — STOP / TAKE PROFIT / SELL branch not modified by X.8 or X.9
-- **Outcome tracking** — `PENDING_NEXT_PHASE` (no forward PnL on blocked BUYs yet)
-
----
-
-## What is already done (do not repeat)
-
-- Full TAE ecosystem pipeline (orchestrator, evidence, evolution, ranking, registry, gates)
-- Phase X: discovery, simulation, historical execution/analysis, meta intelligence
-- Event memory **scaffold** (0 events) — not ingestion
-- Dashboard TAE Intelligence Reports + Advisory Index (X.7A/B)
-- `tae_advisory_index.json` aggregator (X.7B)
-- `tae_live_advisory.json` bridge (X.7C)
-- **Live bot reads advisory** — `RISK_ADVISORY` blocks **new BUY only** (X.8)
-- **Shadow validation ledger** — structured BUY evaluation events (X.9)
-- Connectivity audits X.7 + indirect audit X.7 fix
+1. Constitution is the sole documentary SSOT for project state.  
+2. PAPER only for economic work; broker OFF; no auto LIVE promote.  
+3. Do not restore parallel-paper daemon or retired LaunchAgents.  
+4. V1 and V2 books stay separate — no cross cash/portfolio mutation.  
+5. Hard Risk and SELL semantics are protected unless an explicit Owner sprint says otherwise.  
+6. Binding SKIP gate is **provisional** — do not declare it permanent without mature cohort outcomes.  
+7. Prove before patch; measure forward; do not invent fills.  
+8. Commit only when the Human Owner asks.  
+9. **ARCHITECTURE_FREEZE** — no structural change without economic audit + statistical proof + explicit Owner approval. Without all three: only bug fix, maintenance, compatibility, documentation.
 
 ---
 
-## What we do NOT have (do not assume)
+## 3. What you must NOT do
 
-- TAE forcing BUY or SELL
-- TAE changing sizing, scores, trailing stop, or `config/settings.py`
-- Event memory ingestion / live news models
-- **Outcome attribution** for blocked BUYs (planned X.10 — after ledger accumulates events)
-- Automatic commit/push in checkpoint script
-
----
-
-## What is connected vs report-only
-
-| Connected to LIVE | Report-only |
-|-------------------|-------------|
-| `live_bot.py` → CSV writes | All other `tae_*.json` |
-| `live_bot.py` → `tae_live_advisory.json` (BUY gate) | Meta evolution recommendations |
-| `live_bot.py` → `tae_shadow_validation_events.csv` (BUY log) | Ranking → live watchlist |
-| `tae_shadow_validation_report.py` → summary JSON | Implementation patches |
-| Dashboard → display + start/stop bot | |
-| TAE read-only → `portfolio.csv`, `live_signals.csv` | |
-
-**Legacy / not canonical:** `live_bot_v5_1.py`, `telegram_bot.py`, `signal_to_decision_engine.py`, `daily_intelligence_runner.py`
+- Modify BUY / SELL / Hard Risk / Learning / V1 / V2 **unless the sprint explicitly authorizes it**  
+- Create V3 or a second FPC / accounting engine  
+- Hard-gate PPG PROTECT, 7D NEGATIVE, or score 100 without new global proof  
+- Treat SKIP gate as permanent constitutional dogma  
+- Restore daemon / LaunchAgent / orphan cron for retired arms  
+- Touch LIVE `core/trailing.py` for V2 experiments  
+- Skip audit when changing economic behavior  
+- Force-push; commit secrets; commit without Owner request  
+- Structural architecture changes under freeze without the triad (audit + proof + Owner)  
 
 ---
 
-## Next allowed sprint
+## 4. Audit order (before any change)
 
-**X.10 — Outcome Tracking / Attribution for Blocked BUYs**
-
-Start only after `tae_shadow_validation_events.csv` has accumulated real events from live bot cycles.
+1. Read **this file** + **Constitution** § relevant sections  
+2. Read **PROJECT_BOOK** for architecture pointers  
+3. Grep existing modules — do not rebuild  
+4. Confirm sprint mode: `AUDIT` / `REPORT_ONLY` / `PAPER_PATCH` / `DOCS_ONLY`  
+5. List protected surfaces: SELL, Hard Risk, LIVE, broker, V1/V2 isolation  
+6. Define verification: tests, FPC/health as required, no invented journals  
 
 ---
 
-## Quick state check (run first)
+## 5. Working mode
+
+```
+Think → Design → Check existing → Minimal change → Verify → Measure → (Commit if Owner asks)
+```
+
+| Mode | Allowed |
+|------|---------|
+| DOCS_ONLY | Markdown/JSON reports only |
+| AUDIT / REPORT_ONLY | Read-only analysis + deliverables |
+| BUGFIX / MAINTENANCE / COMPAT | Allowed under ARCHITECTURE_FREEZE |
+| PAPER_PATCH (structural) | **Frozen** unless triad satisfied |
+| LIVE | Forbidden unless Owner + Constitution FAZA IV criteria |
+
+---
+
+## 6. Canonical commands
 
 ```bash
 cd /Users/book/Desktop/trading_ai
 
-# Full checkpoint (recommended)
-bash tae_checkpoint.sh
+# Health
+python3 tae.py health
 
-# Or minimal
-git status
-python3 tae_quick_health_check.py
-python3 tae_live_advisory_demo.py
-python3 tae_shadow_validation_report.py
-cat bot_status.txt 2>/dev/null || echo "bot_status missing"
-python3 -c "import json; d=json.load(open('tae_live_advisory.json')); print(d['advisory']['action'])"
+# Full PAPER cycle (V1 + V2 dual)
+python3 tae.py full-paper-cycle
+
+# Mark-to-market (V1 book)
+python3 tae.py paper-mark-to-market
+
+# Hermetic unit suite
+python3 tae.py test
+
+# Checkpoint (when ending a sprint)
+bash tae_checkpoint.sh
 ```
 
----
-
-## Canonical docs
-
-1. **`PROJECT_BOOK.md`** — full journal (what exists, what not to rebuild)
-2. **`TAE_DEVELOPMENT_PROTOCOL.md`** — rules of engagement
-3. Latest sprint summary: **`TAE_X9_SHADOW_VALIDATION_SUMMARY.md`**
+SKIP gate rollback (PAPER only): `DECISION_BRAIN_SKIP_PAPER_GATE_ENABLED=false`
 
 ---
 
-## Before writing new code
+## 7. SSOT documents
 
-1. Open `PROJECT_BOOK.md` §11 — **What Must NOT Be Rebuilt**
-2. Grep `research_core/` for existing module
-3. Confirm sprint mode: AUDIT / REPORT_ONLY / CONTROLLED_INTEGRATION / CONNECTED_OBSERVABILITY
-4. Do **not** modify `live_bot.py` trading logic unless sprint explicitly says so
+| Priority | Document | Role |
+|----------|----------|------|
+| 1 | `TAE_CONSTITUTION.md` | Project-state constitution |
+| 2 | `SESSION_START.md` | This bootstrap |
+| 3 | `PROJECT_BOOK.md` | Architecture journal |
+| 4 | `TAE_DEVELOPMENT_PROTOCOL.md` | Development process |
+| 5 | `TAE_GIT_GOVERNANCE.md` | Git rules |
+
+Sprint verdicts (`TAE_BINDING_DECISION_BRAIN_SKIP_PAPER_GATE.md`, dual activation, infra closure, …) are history — use them for facts, not as competing constitutions.
 
 ---
 
-## End of session
+## 8. Next default work
+
+`ACCUMULATE_NATURAL_BINDING_SKIP_GATE_OUTCOMES` — mature forward cohort; then decide keep / soft / rollback.  
+Do **not** start FAZA III/IV or V3 without Owner direction.
+
+---
+
+## 9. End of session
 
 ```bash
 bash tae_checkpoint.sh
-# Update PROJECT_BOOK.md §1 / §12 / sprint history
-# git add … && git commit && git push  (manual)
+# If docs changed: ensure Constitution / Book / Session still agree
+# git add … && git commit  — only if Owner requested
 ```
 
 ---
 
-*Last journal update: 2026-06-29 — Sprint X.9 closed*
+*Session Start — synced to Constitution v2.2 · ARCHITECTURE_FREEZE · 2026-08-03*
