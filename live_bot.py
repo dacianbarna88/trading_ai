@@ -657,6 +657,13 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
                         )
                         portfolio = buy_position(row, portfolio, ticker_trade_size)
                         positions = get_open_positions(portfolio)
+                        # A ticker just bought this cycle needs no fallback
+                        # exit check below: its avg_price is the price we
+                        # just paid, so PnL is ~0% and the fallback pass
+                        # would only waste an extra price fetch (or, in a
+                        # razor-thin edge case, risk an immediate re-sell
+                        # off a fresh quote fetched moments later).
+                        exit_checked_tickers.add(ticker)
                     elif len(positions) >= MAX_POSITIONS:
                         skip_reason = f"MAX_POSITIONS ({MAX_POSITIONS})"
                         log(f"BUY blocat pentru {ticker}: {skip_reason}")
