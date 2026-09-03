@@ -37,3 +37,6 @@ jobs:
 
       - name: V5.1 policy shadow regression suite
         run: python3 tae_v51_policy_shadow_regression_test.py
+
+      - name: Portfolio integrity guardian regression suite
+        run: python3 tae_portfolio_integrity_guardian_regression_test.py
