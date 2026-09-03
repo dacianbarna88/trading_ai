@@ -2,16 +2,19 @@ import os
 import time
 import traceback
 from datetime import datetime, time as dtime
-from pathlib import Path
 
 import pandas as pd
-import requests
 import yfinance as yf
 
 from core.allocation import get_allocation_weight
 from core.forecast_risk import get_forecast_multiplier
 from core.historical_risk import get_risk_multiplier
-from core.portfolio import open_buy_row_mask
+from core.indicators import calculate_rsi, get_latest_price
+from core.portfolio import get_cash_available, get_open_positions, open_buy_row_mask
+from core.status import set_status
+from data.storage import load_csv_safe, load_portfolio, load_watchlist, save_portfolio
+from utils.logger import log
+from utils.telegram import send_telegram
 
 
 STARTING_CAPITAL = 30000
@@ -33,48 +36,7 @@ TEST_SELL_MODE = False
 ALLOW_BUY_WHEN_MARKET_CLOSED = False
 GLOBAL_MARKET_GATE_ENABLED = False
 
-WATCHLIST_FILE = "watchlist.txt"
-LIVE_SIGNALS_FILE = "live_signals.csv"
-PORTFOLIO_FILE = "portfolio.csv"
 ALERTS_FILE = "alerts_log.csv"
-LOG_FILE = "bot_output.log"
-STATUS_FILE = "bot_status.txt"
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-
-
-def log(message):
-    text = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}"
-    print(text)
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(text + "\n")
-
-
-def set_status(status):
-    Path(STATUS_FILE).write_text(status, encoding="utf-8")
-
-
-def send_telegram(message):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
-
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": message},
-            timeout=10,
-        )
-
-        if response.status_code != 200:
-            log(f"Telegram error response: {response.text}")
-            return False
-
-        return True
-
-    except Exception as e:
-        log(f"Telegram error: {e}")
-        return False
 
 
 def log_market_session_summary():
@@ -158,111 +120,6 @@ def get_market_regime():
         return "UNKNOWN"
 
 
-def load_watchlist():
-    path = Path(WATCHLIST_FILE)
-
-    if path.exists():
-        tickers = [
-            line.strip().upper()
-            for line in path.read_text().splitlines()
-            if line.strip()
-        ]
-
-        if tickers:
-            return tickers
-
-    return ["SPY", "QQQ", "AAPL", "MSFT", "NVDA"]
-
-
-def calculate_rsi(close, period=14):
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-
-    avg_gain = gain.rolling(window=period).mean()
-    avg_loss = loss.rolling(window=period).mean()
-
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-
-def get_latest_price(ticker):
-    try:
-        data = yf.download(
-            ticker,
-            period="5d",
-            auto_adjust=False,
-            progress=False,
-        )
-
-        if data.empty:
-            return None
-
-        if len(data.columns.names) > 1:
-            data.columns = data.columns.droplevel(1)
-
-        return float(data["Close"].iloc[-1])
-
-    except Exception as e:
-        log(f"Eroare preț live {ticker}: {e}")
-        return None
-
-
-def load_csv_safe(file, columns):
-    path = Path(file)
-
-    if path.exists():
-        try:
-            df = pd.read_csv(path)
-        except Exception:
-            df = pd.DataFrame()
-    else:
-        df = pd.DataFrame()
-
-    for col in columns:
-        if col not in df.columns:
-            df[col] = None
-
-    return df[columns]
-
-
-def load_portfolio():
-    columns = [
-        "Date",
-        "Ticker",
-        "Action",
-        "Price",
-        "Shares",
-        "Score",
-        "Signal",
-        "Reason",
-        "Current_Price",
-        "Invested",
-        "Current_Value",
-        "PnL",
-        "PnL_%",
-        # live_bot.py itself doesn't use these (it has no trailing-stop
-        # logic), but load_csv_safe() projects the loaded frame down to
-        # exactly this column list, and save_portfolio() writes that frame
-        # straight back to the same portfolio.csv shared with other tools
-        # (dashboard_v2.py, core/trailing.py, hard_risk_guardian.py,
-        # overnight_gap_risk_guard.py, live_bot_v5_1.py, ...) that do read
-        # and rely on them. Omitting them here silently erased them from
-        # the CSV on this bot's very first save cycle.
-        "Highest_Price",
-        "Trailing_Active",
-        "Trailing_Stop",
-    ]
-
-    return load_csv_safe(PORTFOLIO_FILE, columns)
-
-
-def save_portfolio(df):
-    tmp_path = f"{PORTFOLIO_FILE}.tmp"
-    df.to_csv(tmp_path, index=False)
-    os.replace(tmp_path, PORTFOLIO_FILE)
-
-
 def update_portfolio_prices():
     portfolio = load_portfolio()
 
@@ -296,7 +153,7 @@ def update_portfolio_prices():
         if action == "BUY" and not open_rows.loc[i]:
             continue
 
-        current_price = get_latest_price(ticker)
+        current_price = get_latest_price(ticker, log)
 
         if current_price is None:
             current_price = row["Price"]
@@ -317,62 +174,6 @@ def update_portfolio_prices():
 
     save_portfolio(portfolio)
     log("portfolio.csv actualizat cu prețuri live (open BUY rows only).")
-
-
-def get_open_positions(portfolio):
-    positions = {}
-
-    if portfolio.empty:
-        return positions
-
-    portfolio["Price"] = pd.to_numeric(portfolio["Price"], errors="coerce")
-    portfolio["Shares"] = pd.to_numeric(portfolio["Shares"], errors="coerce")
-
-    for ticker in portfolio["Ticker"].dropna().unique():
-        rows = portfolio[portfolio["Ticker"] == ticker]
-        actions = rows["Action"].astype(str).str.upper()
-
-        # SELLs in this system always fully liquidate the current holding, so
-        # only BUY rows after the most recent SELL belong to the open position —
-        # otherwise a closed-then-reopened ticker would blend the stale closed
-        # lot's cost basis into the new position's average price.
-        sell_idx = rows.index[actions == "SELL"]
-        if len(sell_idx):
-            rows = rows[rows.index > sell_idx.max()]
-
-        buys = rows[rows["Action"].astype(str).str.upper() == "BUY"]
-        buy_shares = buys["Shares"].sum()
-
-        if buy_shares > 0:
-            buy_value = (buys["Price"] * buys["Shares"]).sum()
-            avg_price = buy_value / buy_shares
-
-            positions[ticker] = {
-                "shares": buy_shares,
-                "avg_price": avg_price,
-            }
-
-    return positions
-
-
-def get_cash_available(portfolio):
-    if portfolio.empty:
-        return STARTING_CAPITAL
-
-    portfolio["Price"] = pd.to_numeric(portfolio["Price"], errors="coerce")
-    portfolio["Shares"] = pd.to_numeric(portfolio["Shares"], errors="coerce")
-
-    actions = portfolio["Action"].astype(str).str.upper()
-
-    buys = portfolio[actions == "BUY"]
-    sells = portfolio[actions == "SELL"]
-    deposits = portfolio[actions == "DEPOSIT"]
-
-    spent = (buys["Price"] * buys["Shares"]).sum()
-    received = (sells["Price"] * sells["Shares"]).sum()
-    deposited = (deposits["Price"] * deposits["Shares"]).sum()
-
-    return STARTING_CAPITAL + deposited - spent + received
 
 
 def save_alert(row):
@@ -739,7 +540,7 @@ def manage_portfolio(signals_df, advisory_state=None, live_bot_cycle_id=None):
         if ticker in exit_checked_tickers:
             continue
 
-        fallback_price = get_latest_price(ticker)
+        fallback_price = get_latest_price(ticker, log)
         if fallback_price is None or fallback_price <= 0:
             log(f"Exit check sărit pentru {ticker}: preț indisponibil în acest ciclu.")
             continue
