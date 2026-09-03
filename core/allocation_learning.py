@@ -22,6 +22,9 @@ def calculate_regional_strength(backtest_results):
 
 
 def normalize_scores(raw_scores):
+    if not raw_scores:
+        return {}
+
     total = sum(raw_scores.values())
 
     if total <= 0:
@@ -35,6 +38,9 @@ def normalize_scores(raw_scores):
 
 
 def apply_allocation_bounds(weights, min_allocations, max_allocations):
+    if not weights:
+        return {}
+
     bounded = {}
 
     for region, value in weights.items():

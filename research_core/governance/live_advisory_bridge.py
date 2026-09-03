@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import re
 import socket
 import statistics
 import subprocess
@@ -440,35 +441,42 @@ class LiveAdvisoryBridge:
                 spent += price * shares
                 if ticker:
                     bucket = positions.setdefault(
-                        ticker, {"buy_shares": 0.0, "sell_shares": 0.0, "buy_value": 0.0}
+                        ticker, {"buy_shares": 0.0, "buy_value": 0.0}
                     )
                     bucket["buy_shares"] += shares
                     bucket["buy_value"] += price * shares
             elif action == "SELL":
                 received += price * shares
                 if ticker:
-                    bucket = positions.setdefault(
-                        ticker, {"buy_shares": 0.0, "sell_shares": 0.0, "buy_value": 0.0}
-                    )
-                    bucket["sell_shares"] += shares
+                    # SELLs in this system always fully liquidate the current
+                    # holding, so reset the lot rather than partially reducing
+                    # it — otherwise a closed-then-reopened ticker would blend
+                    # the stale closed lot's cost basis into the new position.
+                    positions[ticker] = {"buy_shares": 0.0, "buy_value": 0.0}
             elif action == "DEPOSIT":
                 deposited += price * shares
 
         open_count = 0
         losing_open = 0
         for ticker, bucket in positions.items():
-            open_shares = bucket["buy_shares"] - bucket["sell_shares"]
+            open_shares = bucket["buy_shares"]
             if open_shares <= 0:
                 continue
             open_count += 1
-            pnl_pct = None
+            avg_entry_price = (
+                bucket["buy_value"] / bucket["buy_shares"] if bucket["buy_shares"] else None
+            )
+            current_price = None
             for row in reversed(rows):
                 if str(row.get("Ticker", "")).upper() != ticker:
                     continue
                 if str(row.get("Action", "")).upper() != "BUY":
                     continue
-                pnl_pct = _parse_float(row.get("PnL_%"))
+                current_price = _parse_float(row.get("Current_Price"))
                 break
+            pnl_pct = None
+            if avg_entry_price and current_price is not None:
+                pnl_pct = ((current_price - avg_entry_price) / avg_entry_price) * 100
             if pnl_pct is not None and pnl_pct <= -3.0:
                 losing_open += 1
 
@@ -1058,12 +1066,9 @@ class LiveAdvisoryBridge:
         for line in historical.get("research_conclusions") or []:
             text = str(line)
             if "profit_pct" in text and "averages" in text.lower():
-                parts = text.replace(",", "").split()
-                for token in parts:
-                    try:
-                        mean_profit = float(token)
-                    except ValueError:
-                        continue
+                match = re.search(r"profit_pct\s+(-?\d+(?:\.\d+)?)", text)
+                if match:
+                    mean_profit = float(match.group(1))
                 break
 
         if (

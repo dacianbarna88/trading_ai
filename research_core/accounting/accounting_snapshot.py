@@ -67,7 +67,9 @@ def _trade_from_audit(audit: dict[str, Any]) -> dict[str, Any]:
 def _open_unrealized_and_value(
     rows: list[dict[str, str]],
 ) -> tuple[float, float, int, list[dict[str, Any]]]:
-    positions: dict[str, dict[str, Any]] = {}
+    # Track BUY rows per ticker; a SELL in this system always fully liquidates
+    # the current holding, so it resets the lot rather than partially reducing it.
+    positions: dict[str, list[dict[str, str]]] = {}
     for row in rows:
         if _is_cash_flow_row(row):
             continue
@@ -75,50 +77,50 @@ def _open_unrealized_and_value(
         if not ticker or ticker.upper() == "CASH":
             continue
         action = str(row.get("Action", "")).upper()
-        price = _parse_float(row.get("Price")) or 0.0
-        shares = _parse_float(row.get("Shares")) or 0.0
+        buy_rows = positions.setdefault(ticker, [])
         if action == "BUY":
-            bucket = positions.setdefault(
-                ticker, {"buy_shares": 0.0, "sell_shares": 0.0, "last_buy_row": None}
-            )
-            bucket["buy_shares"] += shares
-            bucket["last_buy_row"] = row
+            buy_rows.append(row)
         elif action == "SELL":
-            bucket = positions.setdefault(
-                ticker, {"buy_shares": 0.0, "sell_shares": 0.0, "last_buy_row": None}
-            )
-            bucket["sell_shares"] += shares
+            positions[ticker] = []
 
     unrealized = 0.0
     positions_value = 0.0
     open_positions: list[dict[str, Any]] = []
 
-    for ticker, bucket in positions.items():
-        open_shares = bucket["buy_shares"] - bucket["sell_shares"]
+    for ticker, buy_rows in positions.items():
+        open_shares = sum(_parse_float(r.get("Shares")) or 0.0 for r in buy_rows)
         if open_shares <= 1e-9:
             continue
-        last = bucket["last_buy_row"] or {}
-        invested = _parse_float(last.get("Invested"))
-        current_value = _parse_float(last.get("Current_Value"))
-        pnl = _parse_float(last.get("PnL"))
-        pnl_pct = _parse_float(last.get("PnL_%"))
+        last = buy_rows[-1]
         current_price = _parse_float(last.get("Current_Price"))
 
-        if pnl is not None:
-            unrealized += pnl
-        elif invested is not None and current_value is not None:
-            unrealized += current_value - invested
+        ticker_unrealized = 0.0
+        ticker_value = 0.0
+        ticker_invested = 0.0
+        for buy_row in buy_rows:
+            invested = _parse_float(buy_row.get("Invested"))
+            current_value = _parse_float(buy_row.get("Current_Value"))
+            pnl = _parse_float(buy_row.get("PnL"))
+            if invested is not None:
+                ticker_invested += invested
+            if pnl is not None:
+                ticker_unrealized += pnl
+            elif invested is not None and current_value is not None:
+                ticker_unrealized += current_value - invested
+            if current_value is not None:
+                ticker_value += current_value
+            elif invested is not None:
+                ticker_value += invested
 
-        if current_value is not None:
-            positions_value += current_value
-        elif invested is not None:
-            positions_value += invested
+        unrealized += ticker_unrealized
+        positions_value += ticker_value
+        pnl_pct = (ticker_unrealized / ticker_invested * 100) if ticker_invested else None
 
         open_positions.append(
             {
                 "ticker": ticker,
                 "shares": round(open_shares, 4),
-                "pnl": round(pnl, 4) if pnl is not None else None,
+                "pnl": round(ticker_unrealized, 4),
                 "pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else None,
                 "current_price": current_price,
             }

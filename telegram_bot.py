@@ -4,8 +4,13 @@ import time
 import os
 from datetime import datetime
 
-TOKEN = "8971662894:AAG1nNNaiblQ678wHLthSmbq1YzpMIb2j1c"
-CHAT_ID = "6433927898"
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+if not TOKEN or not CHAT_ID:
+    raise SystemExit(
+        "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in the environment."
+    )
 
 
 print("🚀 Bot Telegram pornit...\n")

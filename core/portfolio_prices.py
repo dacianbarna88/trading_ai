@@ -1,6 +1,7 @@
 import pandas as pd
 
 from core.indicators import get_latest_price
+from core.portfolio import open_buy_row_mask
 from core.trades import is_immutable_portfolio_row
 from data.storage import load_portfolio, save_portfolio
 from utils.logger import log
@@ -15,6 +16,14 @@ def update_portfolio_prices():
     portfolio["Price"] = pd.to_numeric(portfolio["Price"], errors="coerce")
     portfolio["Shares"] = pd.to_numeric(portfolio["Shares"], errors="coerce")
 
+    # SELLs in this system always fully liquidate the current holding, so a
+    # BUY row only belongs to the open position if it comes after that
+    # ticker's most recent SELL. Without this check we would keep rewriting
+    # a closed lot's Current_Value/PnL with today's live price, corrupting
+    # portfolio.csv for any downstream reader that sums Current_Value
+    # across all BUY rows for a closed-then-reopened ticker.
+    open_rows = open_buy_row_mask(portfolio)
+
     for i, row in portfolio.iterrows():
         ticker = row["Ticker"]
         action = str(row.get("Action", ""))
@@ -28,6 +37,9 @@ def update_portfolio_prices():
             continue
 
         if action.upper() != "BUY":
+            continue
+
+        if not open_rows.loc[i]:
             continue
 
         current_price = get_latest_price(ticker, log)

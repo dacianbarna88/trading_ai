@@ -11,16 +11,26 @@ rows_out = []
 
 for ticker in df["Ticker"].dropna().unique():
     rows = df[df["Ticker"] == ticker]
-    buys = rows[rows["Action"] == "BUY"]
-    sells = rows[rows["Action"] == "SELL"]
 
-    open_shares = buys["Shares"].sum() - sells["Shares"].sum()
+    # SELLs in this system always fully liquidate the current holding, so
+    # only rows after the most recent SELL belong to the open position —
+    # otherwise a closed-then-reopened ticker would blend the stale closed
+    # lot's cost basis into the new position's average price.
+    sell_idx = rows.index[rows["Action"] == "SELL"]
+    if len(sell_idx):
+        rows = rows[rows.index > sell_idx.max()]
+
+    buys = rows[rows["Action"] == "BUY"]
+    open_shares = buys["Shares"].sum()
 
     if open_shares <= 0:
         continue
 
     latest = buys.iloc[-1]
-    pnl_pct = float(latest.get("PnL_%", 0))
+    buy_value = (buys["Price"] * buys["Shares"]).sum()
+    avg_entry_price = buy_value / open_shares
+    current_price = float(latest["Current_Price"])
+    pnl_pct = ((current_price - avg_entry_price) / avg_entry_price) * 100 if avg_entry_price else 0.0
 
     if pnl_pct <= -3:
         action = "EXIT_NOW"
@@ -41,8 +51,8 @@ for ticker in df["Ticker"].dropna().unique():
     rows_out.append({
         "Ticker": ticker,
         "Open_Shares": round(open_shares, 4),
-        "Entry_Price": round(float(latest["Price"]), 2),
-        "Current_Price": round(float(latest["Current_Price"]), 2),
+        "Entry_Price": round(avg_entry_price, 2),
+        "Current_Price": round(current_price, 2),
         "PnL_%": round(pnl_pct, 2),
         "Risk_Level": risk,
         "Recommended_Action": action,

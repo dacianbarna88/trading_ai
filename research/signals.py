@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 import pandas as pd
@@ -5,9 +6,10 @@ import yfinance as yf
 
 from config.settings import MIN_SCORE_TO_BUY, LIVE_SIGNALS_FILE, V41_SAFE_MODE
 from core.indicators import calculate_rsi
+from core.portfolio import get_open_positions
 from core.v41_shadow import run_v41_shadow
 from data.alerts import save_alert
-from data.storage import load_watchlist
+from data.storage import load_portfolio, load_watchlist
 from utils.logger import log
 
 
@@ -15,7 +17,15 @@ def generate_signals(manage_portfolio, update_portfolio_prices):
     results = []
     tickers = load_watchlist()
 
-    log(f"Analizez {len(tickers)} tickere din watchlist.txt")
+    portfolio_for_risk = load_portfolio()
+    open_positions_for_risk = get_open_positions(portfolio_for_risk)
+
+    for open_ticker in open_positions_for_risk.keys():
+        if open_ticker not in tickers:
+            tickers.append(open_ticker)
+            log(f"Risk Guard: adăugat {open_ticker} în ciclul curent pentru verificare SELL")
+
+    log(f"Analizez {len(tickers)} tickere din watchlist.txt + poziții deschise")
 
     for ticker in tickers:
         try:
@@ -118,13 +128,24 @@ def generate_signals(manage_portfolio, update_portfolio_prices):
 
     if not df.empty:
         df = df.sort_values(by="Score", ascending=False)
-        df.to_csv(LIVE_SIGNALS_FILE, index=False)
+        tmp_path = f"{LIVE_SIGNALS_FILE}.tmp"
+        df.to_csv(tmp_path, index=False)
+        os.replace(tmp_path, LIVE_SIGNALS_FILE)
 
         log("live_signals.csv actualizat.")
 
         if V41_SAFE_MODE:
             run_v41_shadow(df)
+    else:
+        log(
+            "Niciun semnal generat în acest ciclu (toate descărcările au eșuat) — "
+            "verific poziții deschise pentru STOP_LOSS/TAKE_PROFIT/trailing oricum."
+        )
 
-        manage_portfolio(df)
-        update_portfolio_prices()
+    # These must run every cycle, not only when df is non-empty: if every
+    # ticker's download failed (e.g. a yfinance outage), skipping them would
+    # silently skip STOP_LOSS/TAKE_PROFIT/trailing checks on already-held
+    # positions for the whole cycle.
+    manage_portfolio(df)
+    update_portfolio_prices()
 

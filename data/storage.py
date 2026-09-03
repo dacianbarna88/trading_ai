@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -50,4 +51,6 @@ def load_portfolio():
 
 
 def save_portfolio(df):
-    df.to_csv(PORTFOLIO_FILE, index=False)
+    tmp_path = f"{PORTFOLIO_FILE}.tmp"
+    df.to_csv(tmp_path, index=False)
+    os.replace(tmp_path, PORTFOLIO_FILE)

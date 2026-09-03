@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -419,10 +420,12 @@ def enrich_live_signals_file(
                 }
             )
 
-    with path.open("w", encoding="utf-8", newline="") as handle:
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+    os.replace(tmp_path, path)
 
     strong_buy = sum(1 for r in rows if str(r.get("Signal", "")).upper() == "STRONG BUY")
     return {

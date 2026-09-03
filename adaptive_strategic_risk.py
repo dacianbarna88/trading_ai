@@ -29,15 +29,29 @@ def read_portfolio_open_pnl():
     path = Path("portfolio.csv")
     if not path.exists():
         return 0.0
-    total = 0.0
     with path.open() as f:
         rows = list(csv.DictReader(f))
+
+    open_pnl_by_ticker = {}
     for row in rows:
-        if row.get("Action") == "BUY":
+        ticker = row.get("Ticker")
+        if not ticker:
+            continue
+        action = row.get("Action")
+        if action == "BUY":
             try:
-                total += float(row.get("PnL", 0) or 0)
+                pnl = float(row.get("PnL", 0) or 0)
             except Exception:
-                pass
+                pnl = 0.0
+            open_pnl_by_ticker[ticker] = open_pnl_by_ticker.get(ticker, 0.0) + pnl
+        elif action == "SELL":
+            # SELLs in this system always fully liquidate the current holding,
+            # so reset rather than partially reduce — otherwise a
+            # closed-then-reopened ticker would blend the stale closed lot's
+            # PnL into the new position's total.
+            open_pnl_by_ticker[ticker] = 0.0
+
+    total = sum(open_pnl_by_ticker.values())
     return round(total, 2)
 
 def calculate_suggested_risk():
@@ -80,13 +94,13 @@ if __name__ == "__main__":
     output = []
     output.append("===== ADAPTIVE STRATEGIC RISK =====")
     output.append("")
-    output.append(f"Base Effective Risk: {result["base_effective_risk"]}")
-    output.append(f"Suggested Risk: {result["suggested_risk"]}")
-    output.append(f"Risk Delta: {result["risk_delta"]}")
+    output.append(f"Base Effective Risk: {result['base_effective_risk']}")
+    output.append(f"Suggested Risk: {result['suggested_risk']}")
+    output.append(f"Risk Delta: {result['risk_delta']}")
     output.append("")
-    output.append(f"Market Regime: {result["market_regime"]}")
-    output.append(f"Strong Buy Count: {result["strong_buy_count"]}")
-    output.append(f"Open PnL: {result["open_pnl"]}")
+    output.append(f"Market Regime: {result['market_regime']}")
+    output.append(f"Strong Buy Count: {result['strong_buy_count']}")
+    output.append(f"Open PnL: {result['open_pnl']}")
     output.append("")
     output.append("Reasons:")
     for reason in result["reasons"]:

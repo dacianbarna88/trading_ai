@@ -1,6 +1,7 @@
 import pandas as pd
 from data.storage import load_portfolio
 from core.portfolio import get_open_positions
+from core.market_sessions import get_ticker_region
 
 positions = get_open_positions(load_portfolio())
 ranking = pd.read_csv("global_opportunity_ranking.csv")
@@ -12,7 +13,11 @@ uk_budget = float(plan[plan["Market"] == "UK"]["Capital_$"].iloc[0])
 
 rows = []
 for ticker, pos in positions.items():
-    if not ticker.endswith(".PA") and not ticker.endswith(".DE") and not ticker.endswith(".L"):
+    # A ticker not on the EU/UK exchange suffix list belongs to the US
+    # reduce-candidate bucket only if it's genuinely US - not just "not
+    # .PA/.DE/.L", which used to also catch other EU exchanges (.AS/.MI/
+    # .SW/.MC/.BR) and Asia tickers and misclassify them as US positions.
+    if get_ticker_region(ticker) == "US":
         rows.append({
             "Ticker": ticker,
             "Market": "US",

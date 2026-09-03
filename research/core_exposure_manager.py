@@ -1,6 +1,7 @@
 import pandas as pd
 from data.storage import load_portfolio
 from core.portfolio import get_open_positions
+from core.market_sessions import get_ticker_region
 
 positions = get_open_positions(load_portfolio())
 
@@ -14,14 +15,14 @@ for ticker, pos in positions.items():
 
     value = float(pos["shares"]) * float(pos["avg_price"])
 
-    if ticker.endswith(".PA") or ticker.endswith(".DE"):
-        market_value["EU"] += value
-
-    elif ticker.endswith(".L"):
-        market_value["UK"] += value
-
-    else:
-        market_value["US"] += value
+    # A plain .PA/.DE-only EU check and "everything else is US" fallback
+    # misclassified other EU exchanges (.AS/.MI/.SW/.MC/.BR) and Asia
+    # tickers as US exposure, skewing this exposure breakdown. Regions
+    # outside the US/EU/UK target set here (e.g. ASIA) are excluded
+    # rather than folded into US.
+    region = get_ticker_region(ticker)
+    if region in market_value:
+        market_value[region] += value
 
 total = sum(market_value.values())
 

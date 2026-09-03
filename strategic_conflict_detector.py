@@ -2,39 +2,8 @@ import csv
 import json
 from pathlib import Path
 
-REGION_MAP = {
-    "SPY": "US",
-    "QQQ": "US",
-    "AAPL": "US",
-    "MSFT": "US",
-    "NVDA": "US",
-    "AMD": "US",
-    "UNH": "US",
-    "CRM": "US",
-    "ADBE": "US",
-    "NOW": "US",
-    "DIA": "US",
-    "MRK": "US",
-    "V": "US",
-    "PANW": "US",
-    "CRWD": "US",
-    "CAT": "US",
-    "CSCO": "US",
-    "IBM": "US",
-    "INTC": "US",
+from core.market_sessions import get_ticker_region
 
-    "ALV.DE": "EU",
-    "SIE.DE": "EU",
-    "SAP.DE": "EU",
-    "AIR.PA": "EU",
-    "MC.PA": "EU",
-
-    "HSBA.L": "UK",
-    "ULVR.L": "UK",
-    "SHEL.L": "UK",
-    "BP.L": "UK",
-    "AZN.L": "UK",
-}
 
 def load_signals():
     path = Path("live_signals.csv")
@@ -62,10 +31,7 @@ def detect_conflicts():
         signal = row.get("Signal", "")
         score = float(row.get("Score", 0) or 0)
 
-        region = REGION_MAP.get(ticker, "UNKNOWN")
-
-        if region == "UNKNOWN":
-            continue
+        region = get_ticker_region(ticker)
 
         region_action = gap.get(region, {}).get("action", "HOLD")
         region_gap = gap.get(region, {}).get("gap", 0)
