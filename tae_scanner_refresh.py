@@ -100,6 +100,7 @@ class StepResult:
     errors: str = ""
     stdout_tail: str = ""
     stderr_tail: str = ""
+    critical: bool = False
 
 
 def _utc_now_iso() -> str:
@@ -388,6 +389,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
                 runtime_seconds=round(time.monotonic() - started, 3),
                 artifact=spec.artifact,
                 errors=reason,
+                critical=spec.critical,
             )
 
     env = os.environ.copy()
@@ -414,6 +416,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
             runtime_seconds=round(time.monotonic() - started, 3),
             artifact=spec.artifact,
             errors="Step timed out after 900 seconds",
+            critical=spec.critical,
         )
     except OSError as exc:
         _log_line(f"FAIL {spec.name}: {exc}", root)
@@ -424,6 +427,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
             runtime_seconds=round(time.monotonic() - started, 3),
             artifact=spec.artifact,
             errors=str(exc),
+            critical=spec.critical,
         )
 
     runtime = round(time.monotonic() - started, 3)
@@ -446,6 +450,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
             errors=err or f"Exit code {completed.returncode}",
             stdout_tail=_tail(completed.stdout),
             stderr_tail=_tail(completed.stderr),
+            critical=spec.critical,
         )
 
     if spec.artifact and not artifact_ok:
@@ -471,6 +476,7 @@ def _run_step(root: Path, spec: StepSpec) -> StepResult:
         errors="" if status == "OK" else err,
         stdout_tail=_tail(completed.stdout),
         stderr_tail=_tail(completed.stderr),
+        critical=spec.critical,
     )
 
 
@@ -487,7 +493,13 @@ def _load_json_summary(root: Path, filename: str) -> dict[str, Any]:
 
 def _final_verdict(results: list[StepResult]) -> str:
     statuses = {r.status for r in results}
-    if any(r.status == "FAIL" and r.name in {"global_market_scanner", "multi_market_scanner"} for r in results):
+    # Steps marked critical=True in _build_steps() (global_market_scanner,
+    # us_market_scanner, multi_market_scanner) drive a hard FAIL when they
+    # fail. This used to be a hardcoded name check here that predated
+    # us_market_scanner's critical=True flag and never included it - any
+    # future addition/removal of critical=True on a step now takes effect
+    # here automatically instead of needing a second edit in this function.
+    if any(r.status == "FAIL" and r.critical for r in results):
         return "FAIL"
     if "FAIL" in statuses:
         return "WARNING"
