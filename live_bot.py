@@ -13,6 +13,7 @@ from core.indicators import calculate_rsi, get_latest_price
 from core.portfolio import get_cash_available, get_open_positions, open_buy_row_mask
 from core.status import set_status
 from data.storage import load_csv_safe, load_portfolio, load_watchlist, save_portfolio
+from markets.market_hours import get_ticker_market, is_ticker_market_open
 from utils.logger import log
 from utils.telegram import send_telegram
 
@@ -60,18 +61,6 @@ def is_market_open():
     """Backward-compatible alias — session log only, no global BUY gate."""
     log_market_session_summary()
     return True
-
-
-def get_ticker_market(ticker):
-    from markets.market_hours import get_ticker_market as resolve_market
-
-    return resolve_market(ticker)
-
-
-def is_ticker_market_open(ticker):
-    from markets.market_hours import is_ticker_market_open as ticker_open
-
-    return ticker_open(ticker)
 
 
 def get_market_regime():
