@@ -105,7 +105,16 @@ def market_open_at(market: str, dt_naive: datetime) -> bool:
     cfg = MARKETS.get(market, {})
     if not cfg.get("enabled", False):
         return False
-    now = dt_naive.replace(tzinfo=ZoneInfo(cfg["timezone"]))
+    # dt_naive comes from bot_output.log timestamps (datetime.now() at log
+    # time, in the deployment machine's local time - LOG_TIMESTAMP_TZ). It
+    # must be anchored there and converted to each target market's own
+    # timezone before comparing against that market's hours - relabeling the
+    # same wall-clock value as if it were already in the target timezone
+    # (the previous behavior here) is only correct for a market that happens
+    # to share LOG_TIMESTAMP_TZ, and silently wrong (off by the full UTC
+    # offset difference) for every other one.
+    source = dt_naive.replace(tzinfo=ZoneInfo(LOG_TIMESTAMP_TZ))
+    now = source.astimezone(ZoneInfo(cfg["timezone"]))
     if now.weekday() >= 5:
         return False
     open_time = now.replace(
