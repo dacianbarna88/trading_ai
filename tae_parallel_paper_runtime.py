@@ -30,6 +30,7 @@ import tae_strategy_v2_routing as route
 import tae_strategy_v1_trailing as v1trail
 import tae_strategy_v1_vol_stop as v1volstop
 import tae_strategy_v2_kelly_sizing as v2kelly
+import tae_strategy_v2_concentration as v2conc
 try:
     from tae_strategy_v2_trailing import V2_PROFIT_TRAILING_REASON
 except ImportError:  # fail-soft constant for V2 profit-trailing reason
@@ -67,7 +68,19 @@ V1_V2_ENTRY_MIN_SCORE = 60
 # 41 days) across 50 concurrent ~$520 positions — index-level diversification
 # instead of a concentrated bet on a proven edge. This caps NEW-ticker opens
 # only; adding to an already-held position is never blocked by this.
-V2_MAX_POSITIONS = 18
+#
+# BUG FOUND 2026-09-08: this was originally set to 18 without accounting for
+# V2 already holding 49 positions at the time the cap was introduced. A hard
+# cap below the current count doesn't gradually concentrate the book — it
+# just permanently freezes ALL new entries (confirmed: V2_MAX_POSITIONS_REACHED
+# fired on real qualifying candidates the very next day, while V2 sat at 49
+# positions with zero trades). Raised to just above the current count so
+# growth is capped without retroactively freezing an arm that already
+# exceeded the target before the cap existed. Real concentration (shrinking
+# toward ~15-20 higher-conviction positions) needs an active trim mechanism,
+# not just a new-ticker gate — that's a separate, deliberate follow-up, not
+# rolled into this fix.
+V2_MAX_POSITIONS = 55
 
 
 class _PhaseComplete(Exception):
@@ -2490,6 +2503,19 @@ def _run_v2_arm(
                 if isinstance(pos_ref, dict):
                     pos_ref.update(trail_patch)
                 xin.cycle = cycle
+            if _s(xd.get("action")).upper() not in {"CLOSE_CYCLE", "STOP_ACCUMULATION"}:
+                trim_reason = v2conc.should_concentration_trim(
+                    portfolio=portfolio,
+                    pos=pos,
+                    cycle=cycle,
+                    current_price=mark,
+                    trades_path=p["v2_trades"],
+                )
+                if trim_reason:
+                    xd = dict(xd)
+                    xd["action"] = "CLOSE_CYCLE"
+                    xd["close_reason"] = trim_reason
+                    xd["reason_code"] = trim_reason
             xact = _s(xd.get("action")).upper()
             if xact == "CLOSE_CYCLE":
                 cash_before = _f(portfolio.get("cash"))
@@ -2553,6 +2579,7 @@ def _run_v2_arm(
                                     "ts": _now(),
                                     "ticker": ticker,
                                     "action": "CLOSE",
+                                    "reason": reason,
                                     "shares": qty,
                                     "price": mark,
                                     "decision_id": decision_id,

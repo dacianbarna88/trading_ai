@@ -1,4 +1,6 @@
+import contextlib
 import os
+import signal
 import time
 import traceback
 from datetime import datetime, time as dtime
@@ -46,6 +48,37 @@ V51_POLICY_SHADOW_MODE = True
 
 ALERTS_FILE = "alerts_log.csv"
 
+YFINANCE_CALL_TIMEOUT_SECONDS = 20
+
+
+class _YfinanceCallTimedOut(Exception):
+    pass
+
+
+@contextlib.contextmanager
+def _yfinance_hard_timeout(seconds: int = YFINANCE_CALL_TIMEOUT_SECONDS):
+    """Hard, signal-based timeout around a single yfinance call.
+
+    Found 2026-09-08: a single yf.download() call hung the whole hourly
+    cycle for 2+ hours on a stalled TCP connection to Yahoo Finance —
+    yfinance's own `timeout=` kwarg (default 10s) did not actually bound
+    the call in practice. SIGALRM interrupts the blocking network call at
+    the OS level regardless of what yfinance/curl_cffi is doing internally,
+    so this bounds every call even when the library's own timeout doesn't.
+    Unix-only (SIGALRM) — this process only ever runs on macOS/Linux here.
+    """
+
+    def _handler(signum, frame):
+        raise _YfinanceCallTimedOut(f"yfinance call exceeded {seconds}s")
+
+    previous = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
 
 def log_market_session_summary():
     """Log per-market session status. Does not gate BUY globally."""
@@ -75,12 +108,13 @@ def get_market_regime():
         return "BULL"
 
     try:
-        data = yf.download(
-            MARKET_REGIME_TICKER,
-            period="2y",
-            auto_adjust=False,
-            progress=False,
-        )
+        with _yfinance_hard_timeout():
+            data = yf.download(
+                MARKET_REGIME_TICKER,
+                period="2y",
+                auto_adjust=False,
+                progress=False,
+            )
 
         if data.empty:
             log("Market Regime: nu am date. Permit BUY.")
@@ -599,12 +633,13 @@ def generate_signals():
 
     for ticker in tickers:
         try:
-            data = yf.download(
-                ticker,
-                period="6mo",
-                auto_adjust=False,
-                progress=False,
-            )
+            with _yfinance_hard_timeout():
+                data = yf.download(
+                    ticker,
+                    period="6mo",
+                    auto_adjust=False,
+                    progress=False,
+                )
 
             if data.empty:
                 continue

@@ -130,7 +130,10 @@ class RuntimeWiringSmokeTest(unittest.TestCase):
 
         self.assertTrue(hasattr(ppr, "v2kelly"))
         self.assertTrue(hasattr(ppr.v2kelly, "v2_tranche_fraction_from_edge"))
-        self.assertEqual(ppr.V2_MAX_POSITIONS, 18)
+        # 2026-09-08: raised from 18 to 55 — the original 18 was set without
+        # accounting for V2 already holding 49 positions, which made the cap
+        # a permanent freeze on all new entries instead of a growth limit.
+        self.assertEqual(ppr.V2_MAX_POSITIONS, 55)
 
 
 if __name__ == "__main__":
