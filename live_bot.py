@@ -8,6 +8,7 @@ from datetime import datetime, time as dtime
 import pandas as pd
 import yfinance as yf
 
+from config.settings import LIVE_SIGNALS_FILE
 from core.allocation import get_allocation_weight
 from core.forecast_risk import get_forecast_multiplier
 from core.historical_risk import get_risk_multiplier
