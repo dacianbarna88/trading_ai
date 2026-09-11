@@ -48,7 +48,10 @@ GLOBAL_MARKET_GATE_ENABLED = False
 V51_POLICY_SHADOW_MODE = True
 
 ALERTS_FILE = "alerts_log.csv"
-LIVE_SIGNALS_FILE = "live_signals.csv"
+# LIVE_SIGNALS_FILE is imported from config.settings above (the SSOT
+# already used by live_bot_v5_1.py and research/signals.py) -- a
+# redundant local literal duplicating the same value was removed here
+# after merging two independent fixes for the same missing-import bug.
 
 YFINANCE_CALL_TIMEOUT_SECONDS = 20
 
