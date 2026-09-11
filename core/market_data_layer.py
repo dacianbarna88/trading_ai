@@ -184,12 +184,15 @@ def _fetch_yf_download(ticker: str) -> tuple[float | None, str | None]:
     ticker_key = str(ticker).strip()
     for attempt, backoff in enumerate(_RETRY_BACKOFF_SECONDS, start=1):
         try:
-            data = yf.download(
-                ticker_key,
-                period="5d",
-                auto_adjust=False,
-                progress=False,
-            )
+            from tae_network_hard_timeout import hard_timeout
+
+            with hard_timeout(20):
+                data = yf.download(
+                    ticker_key,
+                    period="5d",
+                    auto_adjust=False,
+                    progress=False,
+                )
             if data is None or data.empty:
                 last_error = "yf.download returned empty"
             else:

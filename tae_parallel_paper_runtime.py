@@ -31,6 +31,8 @@ import tae_strategy_v1_trailing as v1trail
 import tae_strategy_v1_vol_stop as v1volstop
 import tae_strategy_v2_kelly_sizing as v2kelly
 import tae_strategy_v2_concentration as v2conc
+import tae_strategy_v2_relative_weakness as v2relweak
+import tae_shadow_entry_scorer as shadow_scorer
 try:
     from tae_strategy_v2_trailing import V2_PROFIT_TRAILING_REASON
 except ImportError:  # fail-soft constant for V2 profit-trailing reason
@@ -1923,6 +1925,12 @@ def _run_v1_arm(
     value = 0.0
     qty = 0.0
     executed = False
+    shadow_score: dict[str, Any] | None = None
+    if not (pos and _f(pos.get("shares")) > 0) and phase_n in {PHASE_ENTRY, PHASE_ALL}:
+        shadow_score = shadow_scorer.shadow_entry_score(
+            growth_score=score,
+            confidence=(snap or {}).get("confidence") if isinstance(snap, dict) else None,
+        )
     execution_id: str | None = None
     realized_pnl_fill: float | None = None
     has_pos = bool(pos and _f(pos.get("shares")) > 0)
@@ -2318,6 +2326,7 @@ def _run_v1_arm(
         "phase": phase_n,
         "writes_live": False,
         "writes_broker": False,
+        "shadow_entry_score": shadow_score,
     }
     _append_jsonl(p["v1_decisions"], dec)
     _append_jsonl(
@@ -2379,6 +2388,15 @@ def _run_v2_arm(
 
     store = v2.load_cycle_store(p["v2_cycles"])
     cycle = v2.find_open_cycle_for_ticker(store, ticker)
+    if cycle is None:
+        cycle = v2.recover_orphaned_cycle(
+            store,
+            portfolio=portfolio,
+            ticker=ticker,
+            max_tranches=int(v2_cfg.get("max_tranches") or 5),
+            persist_path=p["v2_cycles"],
+            now_iso=_now(),
+        )
     mark_ok, mark_status, mark = _mark_is_usable(snap)
     score = snap.get("score") if isinstance(snap, dict) else None
     signal = _s((snap or {}).get("signal"))
@@ -2511,6 +2529,14 @@ def _run_v2_arm(
                     current_price=mark,
                     trades_path=p["v2_trades"],
                 )
+                if not trim_reason:
+                    trim_reason = v2relweak.should_relative_weakness_trim(
+                        pos=pos,
+                        cycle=cycle,
+                        ticker=ticker,
+                        trades_path=p["v2_trades"],
+                        current_price=mark,
+                    )
                 if trim_reason:
                     xd = dict(xd)
                     xd["action"] = "CLOSE_CYCLE"
@@ -3493,6 +3519,7 @@ def _run_v3_arm(
             has_position=True,
             cash_available=_f(portfolio.get("cash")),
             open_positions=_open_position_count(portfolio),
+            pos=pos,
         )
         if decision.action != "SELL":
             return _record(
@@ -3540,10 +3567,15 @@ def _run_v3_arm(
                 "cash_after": cash_after, **cost_fields,
             },
         )
+        from tae_strategy_v2_concentration import _position_age_hours
+
+        age_hours = _position_age_hours(pos_snapshot, now=datetime.now(timezone.utc))
+        holding_duration_sec = age_hours * 3600.0 if age_hours is not None else None
         record_execution_learning_feedback(
             arm="V3", execution_id=execution_id, decision_id=decision_id,
             action="SELL", ticker=ticker, price=mark, shares=shares, value=net_credit,
             reason=decision.reason, realized_pnl=realized_pnl_fill,
+            holding_duration_sec=holding_duration_sec,
             strategy_variant="V3", p=p,
         )
         return _record(

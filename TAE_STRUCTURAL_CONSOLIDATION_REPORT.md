@@ -1,7 +1,7 @@
 # TAE Structural Consolidation Report
 
-**Generated:** 2026-09-03T13:15:21+00:00
-**Final verdict:** **READY_FOR_PAPER_DAY**
+**Generated:** 2026-09-11T13:14:46+00:00
+**Final verdict:** **BLOCKED_WITH_REASONS**
 
 ## Modules consolidated
 
@@ -25,14 +25,14 @@
 
 ## PAPER result
 
-- Portfolio value: **$30,705.22**
-- Cash: **$94.58**
-- Realized PnL: **$102.10**
-- Unrealized PnL: **$262.20**
-- Total PnL: **$364.30**
+- Portfolio value: **$29,754.83**
+- Cash: **$129.33**
+- Realized PnL: **$-427.00**
+- Unrealized PnL: **$-159.09**
+- Total PnL: **$-586.09**
 - Reconciliation: **PASS**
 - Hard risk: **PASS** (0 breaches)
-- Canonical vs PAPER delta: **$323.15**
+- Canonical vs PAPER delta: **$-109.71**
 
 ## Files changed (this consolidation)
 

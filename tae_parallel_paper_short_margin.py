@@ -36,6 +36,7 @@ from typing import Any
 
 import tae_paper_execution_short as pes
 import tae_parallel_paper_runtime as ppr
+import tae_strategy_v1_vol_stop as v1volstop
 
 ARM_ID = "exp_short_margin"
 ARM_DIR = Path("runtime_outputs/parallel_paper") / ARM_ID
@@ -152,11 +153,29 @@ def _decide_and_execute_ticker(
                 "trailing_armed": pos.get("trailing_armed"),
                 "trailing_stop": pos.get("trailing_stop"),
             }
+            # Volatility-adjusted stop (2026-09-10): the flat 3% stop below
+            # was a direct copy of V1's original mechanical bracket, which
+            # real trade history already proved gets tripped by ordinary
+            # noise rather than genuine reversal (7 of 8 covers to date are
+            # SHORT_STOP_LOSS vs 1 real trailing win, yet the currently-open
+            # book is net +$291.81 unrealized -- entries look directionally
+            # fine, the flat stop is what's cutting them short). Reuses the
+            # same fix already proven on V1 (tae_strategy_v1_vol_stop.py):
+            # k std-devs of the ticker's own realized volatility, clamped to
+            # [2%, 6%]. vol_adjusted_stop_pct() returns a long-style negative
+            # value; evaluate_short_exit's stop_loss_pct is a positive
+            # magnitude ("price rising this much AGAINST the short"), hence
+            # the abs().
+            raw_stop_pct, vol_diag = v1volstop.vol_adjusted_stop_pct(
+                v1volstop.fetch_recent_closes(ticker)
+            )
+            stop_loss_pct = abs(raw_stop_pct)
+            pos["short_vol_stop_diag"] = vol_diag
             act, pnl_pct, new_state = pes.evaluate_short_exit(
                 avg_price,
                 mark,
                 state,
-                stop_loss_pct=STOP_LOSS_PCT,
+                stop_loss_pct=stop_loss_pct,
                 activate_pct=TRAILING_ACTIVATE_PCT,
                 trail_distance_pct=TRAILING_DISTANCE_PCT,
             )

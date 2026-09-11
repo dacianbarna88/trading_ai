@@ -31,9 +31,9 @@ _DEFAULTS: dict[str, Any] = {
     "max_tranches": 5,
     "add_tranche_drop_pct": 0.03,
     "minimum_company_budget": 500.0,
-    "maximum_company_budget": 2500.0,
+    "maximum_company_budget": 3500.0,
     "min_order_value_usd": 250.0,
-    "max_order_value_usd": 2500.0,
+    "max_order_value_usd": 3500.0,
     "thesis_unknown_blocks_entry": True,
     "minimum_cycle_profit_pct": 0.10,
     "profit_reference": "aggregate_average_cost",
@@ -77,9 +77,9 @@ def load_strategy_v2_config(path: Path | None = None) -> dict[str, Any]:
     payload["max_tranches"] = int(payload.get("max_tranches") or payload["DEFAULT_MAX_TRANCHES"])
     payload["add_tranche_drop_pct"] = float(payload.get("add_tranche_drop_pct") or 0.03)
     payload["minimum_company_budget"] = float(payload.get("minimum_company_budget") or 500.0)
-    payload["maximum_company_budget"] = float(payload.get("maximum_company_budget") or 2500.0)
+    payload["maximum_company_budget"] = float(payload.get("maximum_company_budget") or 3500.0)
     payload["min_order_value_usd"] = float(payload.get("min_order_value_usd") or 250.0)
-    payload["max_order_value_usd"] = float(payload.get("max_order_value_usd") or 2500.0)
+    payload["max_order_value_usd"] = float(payload.get("max_order_value_usd") or 3500.0)
     unk = payload.get("thesis_unknown_blocks_entry", True)
     payload["thesis_unknown_blocks_entry"] = bool(unk is True or unk == 1 or str(unk).lower() in {"true", "1", "yes"})
     payload["exit_policy_version"] = str(payload.get("exit_policy_version") or "exit_policy.v1")

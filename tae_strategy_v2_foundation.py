@@ -400,6 +400,77 @@ def find_open_cycle_for_ticker(store: dict[str, Any], ticker: str) -> dict[str, 
     return None
 
 
+def recover_orphaned_cycle(
+    store: dict[str, Any],
+    *,
+    portfolio: dict[str, Any],
+    ticker: str,
+    max_tranches: int = 5,
+    persist_path: Path | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any] | None:
+    """Synthesizes and persists a fresh OPEN cycle for a position that
+    exists in the portfolio (real shares > 0) but has no live cycle
+    record.
+
+    Found 2026-09-09: 17 of V2's 50 positions (34%) were "orphaned" this
+    way — most likely from a prior close attempt whose cycle-store status
+    update (-> CLOSED) was not rolled back symmetrically with a later
+    portfolio-level restore/rollback that put the shares back. An
+    orphaned position receives NO exit management at all: trailing stop,
+    stop-loss, ATR profit target, the concentration trim, and the
+    relative-weakness trim (tae_strategy_v2_concentration.py,
+    tae_strategy_v2_relative_weakness.py) all gate on `cycle` being
+    truthy in tae_parallel_paper_runtime._run_v2_arm. This was the single
+    largest concrete finding behind V2's flat/negative return: several of
+    its worst-lagging names (CDNS, INTU, BLK, LMT, HD, SNPS, ...) were
+    sitting completely unmanaged, for days.
+
+    Deliberately conservative: budget_remaining=0.0 (no further ADDs
+    authorized on a recovered position — its real tranche history is
+    unknown, so this doesn't guess at how much more room it should have),
+    tranche_count=1 (treated as a single filled tranche at its real
+    average cost). This only restores EXIT eligibility, never invents
+    entry/add capacity that wasn't independently authorized.
+    """
+    ticker_u = _s(ticker).upper()
+    pos = (portfolio.get("positions") or {}).get(ticker_u)
+    shares = _f((pos or {}).get("shares"))
+    if not pos or shares <= 0:
+        return None
+    existing = find_open_cycle_for_ticker(store, ticker_u)
+    if existing is not None:
+        return existing
+    avg_price = _f(pos.get("avg_price"))
+    # company_budget must be strictly positive (validate_cycle_invariants) and
+    # satisfy budget_used + budget_remaining == company_budget. Framing this
+    # recovered cycle as "fully deployed, no room left" (budget_remaining=0)
+    # means budget_used == company_budget == the position's real cost basis.
+    cost_basis = round(max(avg_price * shares, 0.01), 6)
+    cycle = build_cycle(
+        ticker=ticker_u,
+        currency="USD",
+        company_budget=cost_basis,
+        max_tranches=max_tranches,
+        thesis_state="WATCH",
+        status="OPEN",
+    )
+    cycle["tranche_count"] = 1
+    cycle["total_quantity"] = shares
+    cycle["average_cost"] = avg_price
+    cycle["budget_used"] = cost_basis
+    cycle["budget_remaining"] = 0.0
+    cycle["last_tranche_price"] = avg_price
+    cycle["recovered"] = True
+    cycle["recovery_reason"] = "ORPHANED_CYCLE_PORTFOLIO_DESYNC"
+    if now_iso:
+        cycle["updated_at"] = now_iso
+    store.setdefault("cycles", {})[cycle["cycle_id"]] = cycle
+    if persist_path is not None:
+        save_cycle_store(store, persist_path)
+    return cycle
+
+
 def validate_price_fx(price: float, fx_rate: float, currency: str) -> str | None:
     if not is_finite_positive(price):
         return BLOCK_INVALID_MARK

@@ -1,6 +1,6 @@
 # TAE Adaptive Profit Policy Engine v1
 
-**Generated:** 2026-09-03T16:01:33
+**Generated:** 2026-09-11T17:00:53
 **Mode:** SHADOW_ONLY — NONE
 **Final verdict:** APPE_SHADOW_READY_FOR_OBSERVATION
 
@@ -22,17 +22,17 @@
 - PPG status: **PPG_SHADOW_READY_FOR_OBSERVATION**
 - Positions: **22** (profitable 0, losing 0)
 - Missed USD: **0.0**
-- Quality / at-risk / concentration: **31.0 / 15.7 / 30.2**
+- Quality / at-risk / concentration: **31.0 / 15.7 / 41.5**
 
 ## Policy memory summary
 
-- Observations stored: **49**
-- New observation this run: **False**
-- Validated warnings: **14**
+- Observations stored: **59**
+- New observation this run: **True**
+- Validated warnings: **15**
 - False positives: **1**
-- Unknown: **33**
+- Unknown: **42**
 - Pending: **1**
-- Policy accuracy: **0.933**
+- Policy accuracy: **0.938**
 
 ## Suggested shadow policy
 
@@ -51,7 +51,8 @@
 
 ## Evaluation of prior observation
 
-- No prior observation evaluated this run (duplicate snapshot or first run).
+- Prior key `PORTFOLIO_WATCH|22|0.0|31.0|15.7|37.5` (WATCH) → **UNKNOWN**
+- Detail: prior=WATCH; missed 0.00→0.00; quality 31.0→31.0; at_risk 15.7→15.7
 
 ## Observation history
 
@@ -105,7 +106,17 @@
 | 46 | 2026-08-29T23:41:16 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.8 | UNKNOWN |
 | 47 | 2026-09-01T20:00:48 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.3 | UNKNOWN |
 | 48 | 2026-09-01T23:05:58 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.1 | UNKNOWN |
-| 49 | 2026-09-02T12:00:58 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.0 | PENDING |
+| 49 | 2026-09-02T12:00:58 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.0 | UNKNOWN |
+| 50 | 2026-09-08T22:00:55 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.2 | UNKNOWN |
+| 51 | 2026-09-08T23:05:49 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.3 | UNKNOWN |
+| 52 | 2026-09-09T12:02:17 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.1 | UNKNOWN |
+| 53 | 2026-09-09T15:00:50 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.1 | UNKNOWN |
+| 54 | 2026-09-09T17:01:22 | PORTFOLIO_WATCH | WATCH | 0.0 | 30.9 | UNKNOWN |
+| 55 | 2026-09-09T18:01:11 | PORTFOLIO_WATCH | WATCH | 0.0 | 30.7 | UNKNOWN |
+| 56 | 2026-09-09T19:00:49 | PORTFOLIO_WATCH | WATCH | 0.0 | 30.8 | VALIDATED |
+| 57 | 2026-09-09T21:53:22 | PORTFOLIO_WATCH | WATCH | 0.0 | 30.1 | UNKNOWN |
+| 58 | 2026-09-10T18:16:08 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.0 | UNKNOWN |
+| 59 | 2026-09-11T17:00:53 | PORTFOLIO_WATCH | WATCH | 0.0 | 31.0 | PENDING |
 
 ## Sources loaded
 

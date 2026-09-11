@@ -1,8 +1,8 @@
 # TAE Structural Governance Report
 
-**Generated:** 2026-09-03T13:15:21+00:00
+**Generated:** 2026-09-11T13:14:46+00:00
 **Mode:** PAPER_ONLY — NO_BROKER — NO_LIVE_PROMOTION
-**Final verdict:** **READY_FOR_PAPER_DAY**
+**Final verdict:** **BLOCKED_WITH_REASONS**
 
 ## Execution hierarchy (mandatory order)
 
@@ -44,7 +44,7 @@
 | 17 | SELF-IMPROVE | LEARNING | **PASS** | - |
 | 18 | CANONICAL VS PAPER | REPORT_ONLY | **PASS** | - |
 | 18 | PROMOTION LOCK | HARD | **PASS** | - |
-| 19 | FINAL VERDICT | HARD | **READY_FOR_PAPER_DAY** | - |
+| 19 | FINAL VERDICT | HARD | **BLOCKED_WITH_REASONS** | forbidden content diff: core/market_data_layer.py |
 
 ## Hard rules enforced
 
@@ -63,4 +63,4 @@
 
 ## Block reasons
 
-- none
+- forbidden content diff: core/market_data_layer.py

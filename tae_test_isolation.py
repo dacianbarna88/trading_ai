@@ -36,4 +36,21 @@ def isolate_adaptive_deployment(
     test_case.addCleanup(env_patch.stop)
     st = adep.load_state(root=root, create_default=True)
     assert st.get("deployment_state") == adep.ST_DRAFT
+
+    # Bug found 2026-09-09: tae_paper_execution.execute_decision() tracks
+    # same-run SELL->BUY churn in a process-global dict (_RECENT_SELL_AT),
+    # never cleared. In production that's fine (one hourly cycle = one
+    # fresh subprocess), but `tae.py test` runs every test class in the
+    # same process, so any earlier test's SELL_PAPER for ticker X silently
+    # makes a later, unrelated test's BUY_PAPER for ticker X get deferred
+    # as DEFERRED_RECENT_SELL_SAME_RUN -- surfacing as an unrelated-looking
+    # assertion failure ("flaky" cluster: CanonicalOpeningNoiseDeferTest,
+    # CanonicalE3ProfitDecayGateTest, PaperProfitProtectionWiringTest).
+    # Every affected test class already calls this helper in setUp, so
+    # resetting here gives them isolation for free.
+    import tae_paper_execution as _pe
+
+    _pe._RECENT_SELL_AT.clear()
+    test_case.addCleanup(_pe._RECENT_SELL_AT.clear)
+
     return root

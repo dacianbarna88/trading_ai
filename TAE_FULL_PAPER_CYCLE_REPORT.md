@@ -1,81 +1,82 @@
 # TAE Full PAPER Cycle Report
 
-**Generated:** 2026-09-03T13:15:23+00:00
+**Generated:** 2026-09-11T13:14:47+00:00
 **Mode:** PAPER_ONLY — READ_ONLY — NO_BROKER — NO_LIVE_CHANGE
-**Final verdict:** **READY_FOR_PAPER_DAY**
+**Final verdict:** **BLOCKED_WITH_REASONS**
 
 ## Portfolio snapshot (read-only accounting)
 
-- Portfolio value: **$30,382.07**
-- Cash: **$229.72**
-- Open positions: **12**
+- Portfolio value: **$29,864.54**
+- Cash: **$4,504.30**
+- Open positions: **11**
 - Total PnL: **$0.00**
 
 ## PAPER decision highlights
 
-- PROMISING: **34**
-- CONTINUE: **7**
+- PROMISING: **14**
+- CONTINUE: **12**
 - REJECT: **0**
-- NEEDS_MORE_DATA: **57**
-- Horizon conflicts: **1**
+- NEEDS_MORE_DATA: **72**
+- Horizon conflicts: **0**
 - Historical runtime all fresh: **True**
 - Historical confidence penalty: **0.0**
 
 ## DPE & adaptive
 
-- DPE winner: **COMPETITIVE**
+- DPE winner: **TIE**
 - Adaptive philosophy: **COMPETITIVE**
-- Confidence: **72.1**
+- Confidence: **67.2**
 
 ## Promotion gate (live_promotion_allowed=false)
 
-- Counts: `{"PROMOTE_TO_LIVE_CANDIDATE": 34, "CONTINUE_PAPER": 7, "REJECT": 0, "NEEDS_MORE_DATA": 57}`
+- Counts: `{"PROMOTE_TO_LIVE_CANDIDATE": 14, "CONTINUE_PAPER": 12, "REJECT": 0, "NEEDS_MORE_DATA": 72}`
 
 ## Infrastructure & safety
 
 - Infrastructure: **UNKNOWN**
-- Safety status: **PASS**
-- Forbidden content diff clean: **True**
-- Forbidden mtime drift detected: **True**
-- Forbidden files unchanged (content): **True**
+- Safety status: **BLOCKED**
+- Forbidden content diff clean: **False**
+- Forbidden mtime drift detected: **False**
+- Forbidden files unchanged (content): **False**
 
 ## PAPER execution intelligence
 
-- PAPER portfolio value: **$30,705.22**
-- PAPER cash: **$94.58**
-- PAPER unrealized PnL: **$262.20**
-- PAPER realized PnL: **$102.10**
-- PAPER total PnL: **$364.30**
+- PAPER portfolio value: **$29,754.83**
+- PAPER cash: **$129.33**
+- PAPER unrealized PnL: **$-159.09**
+- PAPER realized PnL: **$-427.00**
+- PAPER total PnL: **$-586.09**
 - PAPER reconciliation: **PASS**
-- Canonical vs PAPER value delta: **$323.15**
+- Canonical vs PAPER value delta: **$-109.71**
 - Mark-to-market status: **LIVE**
-- Mark-to-market live prices: **14**
+- Mark-to-market live prices: **28**
 - Mark-to-market stale prices: **0**
-- Executed trades today: **0**
-- Rules strengthened: `['LTB-DPE-PHIL-001', 'LTB-STALE-001', 'LTB-PATTERN-001', 'TAE_SHADOW_SIZING_COMPARISON_V1', 'DO_NOT_PROMOTE_TO_LIVE']`
-- Rules weakened: `['LTB-LIFE-LLY-05', 'LTB-LIFE-LLY-04', 'LTB-LIFE-PM-05']`
-- Top profitable rules: `[{'rule_id': 'LTB-LIFE-PG-02', 'avg_actual_pnl': 107.142}, {'rule_id': 'LTB-PROT-ALV.DE', 'avg_actual_pnl': 37.4773}, {'rule_id': 'LTB-PROT-ULVR.L', 'avg_actual_pnl': 34.5888}]`
-- Top damaging rules: `[{'rule_id': 'LTB-LIFE-PM-05', 'avg_actual_pnl': -98.3474}, {'rule_id': 'LTB-LIFE-LLY-05', 'avg_actual_pnl': -27.104}, {'rule_id': 'LTB-LIFE-LLY-04', 'avg_actual_pnl': -27.104}]`
-- Top disabled rules: `['LTB-LIFE-LLY-04', 'LTB-LIFE-PM-05']`
-- Top deprecated rules: `[]`
-- Top trusted rules: `['LTB-LIFE-PG-02']`
-- Decisions blocked (no PAPER position): **84**
+- Executed trades today: **33**
+- Rules strengthened: `['LTB-OPP-HSBA.L-01', 'LTB-PROT-ALV.DE', 'LTB-LIFE-PM-05', 'LTB-PROT-PPG-HSBA.L']`
+- Rules weakened: `['LTB-DPE-PHIL-001', 'LTB-STALE-001', 'LTB-LOSS-LOSS-CRYSTALLIZATION-ABF990', 'LTB-PATTERN-001', 'DO_NOT_PROMOTE_TO_LIVE']`
+- Top profitable rules: `[{'rule_id': 'LTB-PROT-ALV.DE', 'avg_actual_pnl': 17.8996}, {'rule_id': 'LTB-LIFE-PM-05', 'avg_actual_pnl': 9.7912}, {'rule_id': 'LTB-OPP-HSBA.L-01', 'avg_actual_pnl': 4.3587}]`
+- Top damaging rules: `[{'rule_id': 'LTB-LIFE-PG-02', 'avg_actual_pnl': -79.6404}, {'rule_id': 'LTB-LIFE-MRK-01', 'avg_actual_pnl': -64.3947}, {'rule_id': 'LTB-PROT-ULVR.L', 'avg_actual_pnl': -12.8217}]`
+- Top disabled rules: `['LTB-LIFE-MRK-01', 'LTB-LIFE-PG-02']`
+- Top deprecated rules: `['DO_NOT_PROMOTE_TO_LIVE', 'KNOW-BUY_PAPER', 'KNOW-HOLD_PAPER', 'KNOW-SELL_PAPER', 'LTB-DPE-PHIL-001']`
+- Top trusted rules: `['LTB-LIFE-PM-05']`
+- Decisions blocked (no PAPER position): **70**
 - Losing positions evaluated: `[]`
 
 ## Decision state (anti-churn)
 
-- PDE switch authorized: **52**
+- PDE switch authorized: **74**
 - PDE switch blocked: **0**
-- Execution skipped (unauthorized switch): **33**
+- Execution skipped (unauthorized switch): **80**
 
 ## Top PAPER actions (by confidence)
 
-- BUY_PAPER: `[{'ticker': 'PM', 'confidence': 0.946, 'horizon_reason': '7D=POSITIVE(2.7%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'LLY', 'confidence': 0.727, 'horizon_reason': '7D=POSITIVE(2.7%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'ADBE', 'confidence': 0.717, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'HPQ', 'confidence': 0.717, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'ICE', 'confidence': 0.717, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}]`
-- SELL_PAPER: `[]`
-- PROTECT_PAPER: `[{'ticker': 'QQQ', 'confidence': 0.652, 'horizon_reason': '7D=NEGATIVE(-1.0%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=POSITIVE(49.7%); 5Y=POSITIVE(88.7%); 10Y=POSITIVE(493.9%); 20Y=POSITIVE(1785.9%); short-vs-long CONFLICT'}]`
+- BUY_PAPER: `[{'ticker': 'MRK', 'confidence': 0.83, 'horizon_reason': '7D=POSITIVE(1.4%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'CRWD', 'confidence': 0.67, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'AAPL', 'confidence': 0.54, 'horizon_reason': '7D=NEUTRAL(-0.1%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'ABBV', 'confidence': 0.54, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'NVDA', 'confidence': 0.426, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}]`
+- SELL_PAPER: `[{'ticker': 'HSBA.L', 'confidence': 0.95, 'horizon_reason': '7D=NEUTRAL(-0.2%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'BP.L', 'confidence': 0.807, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'AMD', 'confidence': 0.67, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'ANET', 'confidence': 0.67, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'CME', 'confidence': 0.67, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}]`
+- PROTECT_PAPER: `[{'ticker': 'QQQ', 'confidence': 0.484, 'horizon_reason': '7D=NEGATIVE(-1.0%); 1M=NEGATIVE(-1.4%); 1Y=POSITIVE(21.9%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}]`
 - ROTATE_PAPER: `[]`
-- HOLD_PAPER: `[{'ticker': 'SPY', 'confidence': 0.939, 'horizon_reason': '7D=POSITIVE(1.4%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=POSITIVE(37.5%); 5Y=POSITIVE(70.7%); 10Y=POSITIVE(244.3%); 20Y=POSITIVE(487.1%); horizons aligned'}, {'ticker': 'MRK', 'confidence': 0.817, 'horizon_reason': '7D=POSITIVE(1.4%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'PG', 'confidence': 0.817, 'horizon_reason': '7D=POSITIVE(2.0%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'DIA', 'confidence': 0.678, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'ALV.DE', 'confidence': 0.662, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEUTRAL(0.0%); 1Y=NEUTRAL(0.0%); 2Y=POSITIVE(65.8%); 5Y=POSITIVE(123.3%); 10Y=POSITIVE(237.6%); 20Y=POSITIVE(251.7%); horizons aligned'}]`
-- Note: mtime drift ignored, content diff clean
+- HOLD_PAPER: `[{'ticker': 'PG', 'confidence': 0.95, 'horizon_reason': '7D=POSITIVE(2.0%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'PM', 'confidence': 0.95, 'horizon_reason': '7D=POSITIVE(2.7%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'LLY', 'confidence': 0.918, 'horizon_reason': '7D=POSITIVE(2.7%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'SPY', 'confidence': 0.845, 'horizon_reason': '7D=POSITIVE(1.4%); 1M=NEGATIVE(-1.6%); 1Y=POSITIVE(16.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}, {'ticker': 'DIA', 'confidence': 0.653, 'horizon_reason': '7D=NEUTRAL(0.0%); 1M=NEGATIVE(-3.0%); 1Y=POSITIVE(14.5%); 2Y=UNKNOWN(n/a); 5Y=UNKNOWN(n/a); 10Y=UNKNOWN(n/a); 20Y=UNKNOWN(n/a); horizons aligned'}]`
+- Safety block reason: **forbidden content diff: core/market_data_layer.py**
+- Changed files: `['core/market_data_layer.py']`
 - Stale sources: none flagged
 - Failed steps: none
 

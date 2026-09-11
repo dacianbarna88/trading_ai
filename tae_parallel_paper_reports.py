@@ -341,7 +341,35 @@ def compute_daily_verdict(
     )
 
 
-def _arm_day_metrics(arm: str, portfolio: dict[str, Any], cfg: dict[str, Any], marks: dict[str, float]) -> dict[str, Any]:
+def _prior_day_av(arm: str, day: str, cum_path: Path) -> float | None:
+    """Most recent recorded ending AV for `arm` strictly before `day`, read
+    from the same tae_parallel_cumulative_report.json that
+    update_cumulative_report() maintains -- one row per calendar day, keyed
+    by date, already the SSOT tae_today_activity_report.py's own
+    _prior_close_av() reads for the same purpose. Returns None if no prior
+    day is on record (e.g. the arm's very first day)."""
+    if not cum_path.is_file():
+        return None
+    try:
+        cum = json.loads(cum_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    days = [d for d in (cum.get("days") or []) if _s(d.get("date")) < day]
+    if not days:
+        return None
+    days.sort(key=lambda d: _s(d.get("date")))
+    return _f(days[-1].get(f"{arm}_av"))
+
+
+def _arm_day_metrics(
+    arm: str,
+    portfolio: dict[str, Any],
+    cfg: dict[str, Any],
+    marks: dict[str, float],
+    *,
+    day: str | None = None,
+    cum_path: Path | None = None,
+) -> dict[str, Any]:
     if arm == "V1" and str(portfolio.get("v1_mode") or cfg.get("V1_MODE") or "").upper() == "CANONICAL_PAPER_MIRROR":
         start_cap = _f(portfolio.get("starting_value") or portfolio.get("starting_capital"))
         av = _f(portfolio.get("account_value") or portfolio.get("total_value"))
@@ -381,8 +409,22 @@ def _arm_day_metrics(arm: str, portfolio: dict[str, Any], cfg: dict[str, Any], m
     realized = _f(portfolio.get("realized_pnl"))
     unreal = _f(portfolio.get("unrealized_pnl"))
     total = realized + unreal
-    # daily approx: vs starting capital baseline for isolated arms
-    daily_total = av - start_cap
+    # Bug found 2026-09-11: this used to be `av - start_cap` unconditionally,
+    # every day, since inception -- meaning every "TAE_PARALLEL_DAILY_REPORT"
+    # and its verdict was actually comparing CUMULATIVE PnL since each arm's
+    # own inception (mislabeled "daily"), not a real day-over-day figure.
+    # Confirmed against real data: V1's reported "Daily total PnL" on
+    # 2026-09-11 (-1785.45) was byte-identical to (ending_av - 30000
+    # starting_capital), while the correct same-day figure (from
+    # tae_daily_check.sh's own capital table, which already gets this
+    # right) was -245.45. Now reads yesterday's recorded AV from the same
+    # cumulative_json this module already maintains (the same SSOT
+    # tae_today_activity_report.py's _prior_close_av() reads) and falls
+    # back to the start_cap baseline only when there's no prior day on
+    # record yet (the arm's very first day).
+    prior_av = _prior_day_av(arm, day, cum_path) if day and cum_path else None
+    daily_baseline = prior_av if prior_av is not None else start_cap
+    daily_total = av - daily_baseline
     return {
         "arm": arm,
         "source": "ISOLATED_PARALLEL_PAPER" if arm == "V2" else "ISOLATED",
@@ -434,8 +476,8 @@ def generate_daily_report(
         t: _f(pos.get("current_price") or pos.get("avg_price"))
         for t, pos in {** (v1.get("positions") or {}), **(v2.get("positions") or {})}.items()
     }
-    m1 = _arm_day_metrics("V1", v1, cfg, marks)
-    m2 = _arm_day_metrics("V2", v2, cfg, marks)
+    m1 = _arm_day_metrics("V1", v1, cfg, marks, day=day, cum_path=p["cumulative_json"])
+    m2 = _arm_day_metrics("V2", v2, cfg, marks, day=day, cum_path=p["cumulative_json"])
 
     # V2 extras from journals
     v2_decs = [r for r in _read_jsonl(p["v2_decisions"]) if str(r.get("ts", "")).startswith(day) or True]
@@ -974,11 +1016,11 @@ def generate_three_way_report(
         }.items()
     }
 
-    m1 = _arm_day_metrics("V1", v1, cfg, marks)
-    m2 = _arm_day_metrics("V2", v2, cfg, marks)
+    m1 = _arm_day_metrics("V1", v1, cfg, marks, day=day, cum_path=p["cumulative_json"])
+    m2 = _arm_day_metrics("V2", v2, cfg, marks, day=day, cum_path=p["cumulative_json"])
     arms_metrics = {"V1": m1, "V2": m2}
     if v3 is not None:
-        arms_metrics["V3"] = _arm_day_metrics("V3", v3, cfg, marks)
+        arms_metrics["V3"] = _arm_day_metrics("V3", v3, cfg, marks, day=day, cum_path=p["cumulative_json"])
 
     verdict = compute_three_way_verdict(arms_metrics)
     divergences = compute_three_way_divergence(p, day)

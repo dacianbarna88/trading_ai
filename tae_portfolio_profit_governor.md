@@ -1,6 +1,6 @@
 # TAE Portfolio Profit Governor v1
 
-**Generated:** 2026-09-03T16:01:33
+**Generated:** 2026-09-11T17:00:53
 **Mode:** SHADOW_ONLY — NONE
 **Portfolio verdict:** PORTFOLIO_WATCH
 **Final status:** PPG_SHADOW_READY_FOR_OBSERVATION
@@ -27,15 +27,15 @@ Portfolio-level profit VIEW — no live orders; execution remains live_bot.py
 - Watch shadow: **8**
 - Observe shadow: **14**
 - Aggregate missed USD: **0**
-- Profit quality score: **31.5**
+- Profit quality score: **31.0**
 - Profit at risk score: **15.7**
-- Concentration risk score: **30.2**
+- Concentration risk score: **41.5**
 
 ## Regional risk summary
 
 | region | positions |
 | --- | --- |
-| US | 15 |
+| US | 18 |
 | EU | 5 |
 | UK | 4 |
 | OTHER | 0 |
@@ -52,7 +52,7 @@ Portfolio-level profit VIEW — no live orders; execution remains live_bot.py
 | ticker | governor score | posture | final rec | protect score |
 | --- | --- | --- | --- | --- |
 | MU | 48.6 | WATCH_SHADOW | WATCH | 67.0 |
-| QQQ | 49.9 | WATCH_SHADOW | WATCH | 47.0 |
+| ULVR.L | 49.9 | WATCH_SHADOW | WATCH | 47.0 |
 | HSBA.L | 52.1 | WATCH_SHADOW | WATCH | 67.0 |
 | AMAT | 52.2 | OBSERVE_SHADOW | OBSERVE | 52.0 |
 | AIR.PA | 52.2 | WATCH_SHADOW | WATCH | 47.0 |
@@ -76,5 +76,5 @@ Portfolio-level profit VIEW — no live orders; execution remains live_bot.py
 
 ## Explanation
 
-SHADOW_ONLY portfolio governor: 22 positions, verdict=PORTFOLIO_WATCH. Postures — keep=0, protect=0, trail=0, watch=8. Scores — quality=31.5, at_risk=15.7, concentration=30.2. Aggregate missed USD=0.00. Regional mix: US=15, EU=5, UK=4, OTHER=0. Sector context: LEADER_TECHNOLOGY. NO BUY / NO SELL — observation VIEW only.
+SHADOW_ONLY portfolio governor: 22 positions, verdict=PORTFOLIO_WATCH. Postures — keep=0, protect=0, trail=0, watch=8. Scores — quality=31.0, at_risk=15.7, concentration=41.5. Aggregate missed USD=0.00. Regional mix: US=18, EU=5, UK=4, OTHER=0. Sector context: LEADER_TECHNOLOGY. NO BUY / NO SELL — observation VIEW only.
 

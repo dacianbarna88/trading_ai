@@ -1,6 +1,6 @@
 # TAE DPE-3 — Competitive Paper Executor Sprint Report
 
-**Date:** 2026-09-03T13:15:11+00:00
+**Date:** 2026-09-11T13:14:38+00:00
 **Mode:** PAPER_ONLY · SHADOW_ONLY · NO_BROKER · NO_REAL_EXECUTION
 **Metrics schema:** dpe.paper_metrics.v2
 **Status:** PASS
@@ -23,18 +23,18 @@
 
 ## Jobs consumed
 
-- Jobs read: **1386**
-- Historical processed: **1386**
+- Jobs read: **1562**
+- Historical processed: **1562**
 - New jobs this run: **0**
-- Skipped duplicate: **1386**
+- Skipped duplicate: **1562**
 
 ## Actions performed (historical totals)
 
-- HOLD: **1022**
-- PAPER_TRIM: **273**
+- HOLD: **1166**
+- PAPER_TRIM: **297**
 - PAPER_PROTECT: **0**
 - PAPER_SKIP: **0**
-- Total: **1295**
+- Total: **1463**
 
 ## Current run actions
 
@@ -47,7 +47,7 @@
 - `live_bot.py` not modified: **confirmed**
 - `core/` not modified: **confirmed**
 - Positions tracked: **21**
-- Total paper value: **54240.9127**
+- Total paper value: **55711.6548**
 
 ## Validation result
 

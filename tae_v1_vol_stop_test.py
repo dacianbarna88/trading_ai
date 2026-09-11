@@ -127,5 +127,19 @@ class RuntimeWiringSmokeTest(unittest.TestCase):
         self.assertTrue(hasattr(ppr.v1volstop, "vol_adjusted_stop_pct"))
 
 
+class FetchClosesHardTimeoutWiringTest(unittest.TestCase):
+    """Regression for 2026-09-09: fetch_recent_closes() runs once per open
+    V1 position every hourly cycle (28 positions at time of writing) with
+    no bound on the underlying yf.download() call -- same unbounded-hang
+    bug class fixed in live_bot.py the day before. Confirms the fix without
+    hitting the network."""
+
+    def test_fetch_recent_closes_source_uses_hard_timeout(self) -> None:
+        import inspect
+
+        source = inspect.getsource(v1vol.fetch_recent_closes)
+        self.assertIn("hard_timeout", source)
+
+
 if __name__ == "__main__":
     unittest.main()

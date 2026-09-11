@@ -1,8 +1,8 @@
 # TAE Philosophy Performance Report
 
-**Generated:** 2026-09-03T13:02:33+00:00
+**Generated:** 2026-09-11T14:01:50+00:00
 
 | philosophy | decisions | success % |
 | --- | --- | --- |
 | COLLABORATIVE | 50 | 56.0 |
-| COMPETITIVE | 6223 | 40.6 |
+| COMPETITIVE | 9199 | 40.9 |

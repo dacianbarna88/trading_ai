@@ -1,6 +1,6 @@
 # TAE Profit Decision Committee v2 (Adaptive Weighted)
 
-**Generated:** 2026-09-03T16:01:32
+**Generated:** 2026-09-11T17:00:52
 **Mode:** SHADOW_ONLY — NONE
 **Final verdict:** PDC_SHADOW_READY_FOR_OBSERVATION
 

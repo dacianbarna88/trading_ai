@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-V2_CONCENTRATION_TARGET = 20
+V2_CONCENTRATION_TARGET = 15
 V2_TRIM_MAX_PNL_PCT = 1.0
 V2_TRIM_MIN_GAP_MINUTES = 50.0
 V2_TRIM_MIN_AGE_HOURS = 4.0
@@ -82,7 +82,9 @@ def _position_age_hours(pos: dict[str, Any], *, now: datetime) -> float | None:
     return (now - opened_at).total_seconds() / 3600.0
 
 
-def _last_trim_timestamp(trades_path: Path | str) -> datetime | None:
+def _last_trim_timestamp(
+    trades_path: Path | str, *, reason: str = V2_CONCENTRATION_TRIM_REASON
+) -> datetime | None:
     path = Path(trades_path)
     if not path.exists():
         return None
@@ -96,7 +98,7 @@ def _last_trim_timestamp(trades_path: Path | str) -> datetime | None:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if rec.get("reason") != V2_CONCENTRATION_TRIM_REASON:
+            if rec.get("reason") != reason:
                 continue
             ts = rec.get("ts")
             if not ts:

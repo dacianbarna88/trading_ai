@@ -2722,8 +2722,10 @@ def _fetch_atr_pct_for_sizing(ticker: str) -> float | None:
         import yfinance as yf
 
         from research.momentum.context_intelligence_research_v18 import compute_atr
+        from tae_network_hard_timeout import hard_timeout
 
-        hist = yf.Ticker(str(ticker).strip()).history(period="3mo")
+        with hard_timeout(20):
+            hist = yf.Ticker(str(ticker).strip()).history(period="3mo")
         if hist is None or hist.empty or len(hist) < 14:
             return None
         atr_series = compute_atr(hist["High"], hist["Low"], hist["Close"])

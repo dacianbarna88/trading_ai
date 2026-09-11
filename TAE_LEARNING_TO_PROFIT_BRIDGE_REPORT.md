@@ -1,6 +1,6 @@
 # TAE Learning-to-Profit Bridge Report
 
-**Generated:** 2026-09-03T13:15:17+00:00
+**Generated:** 2026-09-11T14:00:56+00:00
 **Mode:** PAPER_ONLY — READ_ONLY — NO_BROKER — NO_LIVE_EXECUTION
 **Live promotion allowed:** false
 
@@ -9,7 +9,7 @@
 ## Executive summary
 
 - Hypotheses generated: **17**
-- Sources loaded: **14**
+- Sources loaded: **16**
 - Paper queue entries: **17**
 
 ## Hypothesis types
@@ -26,9 +26,9 @@
 ### 1. `LTB-DPE-PHIL-001` — DPE_PHILOSOPHY
 
 - **Tickers:** (portfolio-level)
-- **Confidence:** 0.721 | **Risk:** LOW
+- **Confidence:** 0.672 | **Risk:** LOW
 - **Target metric:** profit_capture_rate
-- **Mechanism:** PAPER dual-arm weighting experiment shifts toward COMPETITIVE philosophy (63.8% competitive / 36.2% collaborative).
+- **Mechanism:** PAPER dual-arm weighting experiment shifts toward TIE philosophy (52.9% competitive / 47.1% collaborative).
 - **PAPER action:** `PAPER_DPE_PHILOSOPHY_WEIGHT`
 - **Validation:** PAPER weighted arm beats control on profit_capture_rate and capital_efficiency over 30-day window with confidence >=55%.
 - **Rejection:** Reject if weighted philosophy underperforms both pure arms on total_pnl and max_drawdown.
@@ -80,7 +80,7 @@
 
 ### 6. `LTB-LOSS-LOSS-CRYSTALLIZATION-ABF990` — LOSS_PATTERN_STOP_V1
 
-- **Tickers:** ABBV, ADSK, AIR.PA, AMD, ANET, BLK, BP.L, CDNS, CRWD, DELL, FTNT, GE, GS, HD, LLY, MRK, PG, PM, SAP.DE, SIE.DE
+- **Tickers:** AAPL, ABBV, ADBE, ADSK, AIG, AIR.PA, ALL, ALV.DE, AMD, ANET, AZN.L, BLK, BP.L, CB, CDNS, COF, CRWD, DELL, FTNT, GE, GS, HD, INTU, JPM, LLY, MCO, MRK, PG, PM, SAP.DE, SIE.DE, ULVR.L
 - **Confidence:** 0.83 | **Risk:** HIGH
 - **Target metric:** realized_exit_pnl
 - **Mechanism:** A one-dimensional PAPER exit-policy challenger tests whether timing changes reduce repeated realized losses without weakening hard-risk controls.

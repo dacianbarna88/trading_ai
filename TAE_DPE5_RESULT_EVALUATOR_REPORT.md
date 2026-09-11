@@ -1,6 +1,6 @@
 # TAE DPE-5 — Result Evaluator Sprint Report
 
-**Date:** 2026-09-03T13:15:15+00:00
+**Date:** 2026-09-11T13:14:41+00:00
 **Mode:** READ_ONLY · PAPER_ONLY · SHADOW_ONLY · NO_BROKER
 **Status:** PASS
 
@@ -28,7 +28,7 @@ Portfolio value, cash, open positions, realized/unrealized/total PnL, win rate, 
 - win_rate: **COLLABORATIVE**
 - average_winner: **COMPETITIVE**
 - average_loser: **COMPETITIVE**
-- profit_factor: **COMPETITIVE**
+- profit_factor: **COLLABORATIVE**
 - max_drawdown: **COLLABORATIVE**
 - profit_capture_rate: **COMPETITIVE**
 - opportunity_cost: **TIE**
@@ -41,9 +41,9 @@ Portfolio value, cash, open positions, realized/unrealized/total PnL, win rate, 
 
 ## Overall winner
 
-- **COMPETITIVE**
-- Confidence: **58.9%**
-- Reason: Higher unrealized growth (1413.2962) with competitive hold bias; realized PnL -111.6023 vs 85.0105.
+- **TIE**
+- Confidence: **50.0%**
+- Reason: Both arms are tied on weighted performance metrics.
 
 ## Architecture confirmation
 

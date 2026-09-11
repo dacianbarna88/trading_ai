@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -62,10 +63,52 @@ NEGATIVE_VERDICTS = {"REJECT"}
 # See LearningScorer.predict_proba for the shrinkage formula.
 SHRINKAGE_K = 40
 
+# Literature-informed priors for thin-data exit actions (2026-09-09): when
+# an action has too few resolved samples to fit a real logistic model,
+# predict_proba() previously fell back to the raw pooled base_rate alone —
+# itself noisy on n<15 samples (e.g. PROTECT_PAPER's base_rate wobbles hard
+# with each single new resolved outcome at that sample size). This blends
+# that noisy empirical rate toward an established-literature prior, using
+# the same n/(n+K) shrinkage pattern already used everywhere else in this
+# module — not a new mechanism, an additional layer of the existing one.
+#
+# Priors are deliberately generic (trend-following / stop-loss literature,
+# not tuned to this system's own data, so they can't just be overfit noise
+# dressed up as "research"):
+#  - SELL_PAPER ~ 0.40: documented trend-following exit win rates commonly
+#    run 35-45% with a payoff ratio well above 1 (small, frequent losses;
+#    larger, rarer wins) — e.g. Covel, "Trend Following"; Faith, "Way of
+#    the Turtle".
+#  - PROTECT_PAPER ~ 0.65: a protect action only fires on a position
+#    already showing profit, so by construction its "successful" outcome
+#    rate skews well above a coin flip — consistent with disposition-
+#    effect research on how realized-gain positions behave once a
+#    protective stop tightens (Shefrin & Statman, 1985).
+LITERATURE_PRIOR_BY_ACTION: dict[str, float] = {
+    "SELL_PAPER": 0.40,
+    "PROTECT_PAPER": 0.65,
+}
+LITERATURE_PRIOR_SHRINKAGE_K = 10.0
+
 # Minimum shrinkage_weight (n/(n+SHRINKAGE_K)) required before an exit
 # signal is trusted enough to fire a SELL — see decide_v3. At SHRINKAGE_K=40,
 # 0.3 requires roughly n>=17 resolved SELL_PAPER outcomes.
 MIN_EXIT_SHRINKAGE = 0.3
+
+# Minimum position age before the "rebuy check" exit (sell_via_rebuy_check
+# in decide_v3) is allowed to fire. Found 2026-09-09: real trades.jsonl
+# history shows CRM/DE/ENTG bought and sold within 16-31 minutes at the
+# EXACT same price -- pure transaction-cost bleed, no real price movement.
+# Root cause: BUY uses a pool-calibrated threshold (top
+# 1-calibration_quantile of *today's* candidates), while the rebuy check
+# uses a flat p_rebuy<0.5 cutoff -- a borderline candidate can clear the
+# relative BUY bar one hour and fail the flat rebuy bar the very next
+# evaluation from ordinary model-refit noise alone, with the price
+# unchanged. sell_via_exit_model (a genuine learned SELL signal, not a
+# "would I still buy this" review) is deliberately NOT gated by this --
+# only the softer portfolio-review heuristic is. Same design precedent as
+# tae_strategy_v2_concentration.V2_TRIM_MIN_AGE_HOURS.
+V3_MIN_REBUY_EXIT_AGE_HOURS = 4.0
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +194,7 @@ FEATURE_NAMES = [
     "vol_low",
     "vol_med",
     "vol_high",
+    "holding_duration_hours",
 ]
 
 ACTION_TYPES = ["BUY_PAPER", "SELL_PAPER", "HOLD_PAPER", "PROTECT_PAPER", "SKIP_PAPER"]
@@ -169,6 +213,17 @@ ACTION_TYPES = ["BUY_PAPER", "SELL_PAPER", "HOLD_PAPER", "PROTECT_PAPER", "SKIP_
 # real fix; this is the safety net for tickers that enrichment still misses).
 HORIZON_ALIGNMENT_NEUTRAL_DEFAULT = 50.0
 
+# Neutral fallback for holding_duration_hours (2026-09-09): most training
+# records have no holding-duration signal at all -- V1/V2's own journals
+# never captured it, and V3's own SELL executions only started recording a
+# real value once record_execution_learning_feedback() was wired to compute
+# it from position_cycle_id (found via tae_v3_cross_arm_training_bridge
+# work: the field existed in V3's learning_events.jsonl schema but was
+# always None -- every caller omitted it). Grounded empirically rather than
+# picked arbitrarily: the median age of every currently-open V1/V2/V3
+# position (n=43) on 2026-09-09 was 29.1h; rounded to 30.0.
+HOLDING_DURATION_NEUTRAL_DEFAULT_HOURS = 30.0
+
 
 def _extract_features(record: dict[str, Any]) -> np.ndarray:
     regime = _s(record.get("market_regime")).upper()
@@ -185,6 +240,7 @@ def _extract_features(record: dict[str, Any]) -> np.ndarray:
             1.0 if vol == "LOW" else 0.0,
             1.0 if vol == "MED" else 0.0,
             1.0 if vol == "HIGH" else 0.0,
+            _f(record.get("holding_duration_hours"), HOLDING_DURATION_NEUTRAL_DEFAULT_HOURS),
         ],
         dtype=float,
     )
@@ -260,8 +316,43 @@ def _label_from_verdict(rec: dict[str, Any]) -> int | None:
     return None
 
 
+def _ingest_record(rec: dict[str, Any], rows_by_action: dict[str, list[tuple[np.ndarray, int, str]]]) -> None:
+    action = _s(rec.get("action")).upper()
+    if action not in rows_by_action:
+        return
+    features = _extract_features(rec)
+
+    best_offset = -1.0
+    best_label: int | None = None
+    for cp in rec.get("checkpoints") or []:
+        lbl = _label_from_checkpoint(cp)
+        if lbl is None:
+            continue
+        offset = _f(cp.get("offset_days"), -1.0)
+        if offset >= best_offset:
+            best_offset = offset
+            best_label = lbl
+    if best_label is not None:
+        rows_by_action[action].append((features, best_label, LABEL_SOURCE_CHECKPOINT))
+        return
+
+    lbl = _label_from_expected_delta(rec)
+    if lbl is not None:
+        rows_by_action[action].append((features, lbl, LABEL_SOURCE_EXPECTED_DELTA))
+        return
+
+    lbl = _label_from_verdict(rec)
+    if lbl is not None:
+        rows_by_action[action].append((features, lbl, LABEL_SOURCE_VERDICT))
+        return
+    # No usable label from any source (e.g. NEEDS_MORE_DATA, no
+    # checkpoints resolved, expected_profit_delta unset) — skip.
+
+
 def load_training_data(
     path: Path = LONGITUDINAL_MEMORY_PATH,
+    *,
+    include_cross_arm_bridge: bool = True,
 ) -> dict[str, TrainingSet]:
     """
     One TrainingSet per action type — action identity is by far the
@@ -284,49 +375,39 @@ def load_training_data(
     so training rows are independent across decisions (decisions on the same
     ticker over time are still not perfectly independent of each other, but
     that's a smaller, harder-to-fix effect than 8x-replicating one outcome).
+
+    include_cross_arm_bridge (2026-09-09): the canonical pipeline that feeds
+    `path` has only 11 resolved SELL_PAPER outcomes system-wide — below the
+    15-sample fit threshold, so the exit side of this model never actually
+    learns. V1 (52 closed SELLs) and V2 (68 closed CLOSEs) sit unused with
+    real, already-realized PnL. tae_v3_cross_arm_training_bridge pools them
+    in as real SELL_PAPER ground truth (see that module's docstring for the
+    feature-fidelity caveat). Default on; set False for a bridge-free read
+    (e.g. to compare with/without, or if the bridge itself is under test).
     """
     rows_by_action: dict[str, list[tuple[np.ndarray, int, str]]] = {a: [] for a in ACTION_TYPES}
-    if not path.is_file():
-        return {}
-    with path.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            action = _s(rec.get("action")).upper()
-            if action not in rows_by_action:
-                continue
-            features = _extract_features(rec)
-
-            best_offset = -1.0
-            best_label: int | None = None
-            for cp in rec.get("checkpoints") or []:
-                lbl = _label_from_checkpoint(cp)
-                if lbl is None:
+    if path.is_file():
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
                     continue
-                offset = _f(cp.get("offset_days"), -1.0)
-                if offset >= best_offset:
-                    best_offset = offset
-                    best_label = lbl
-            if best_label is not None:
-                rows_by_action[action].append((features, best_label, LABEL_SOURCE_CHECKPOINT))
-                continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                _ingest_record(rec, rows_by_action)
 
-            lbl = _label_from_expected_delta(rec)
-            if lbl is not None:
-                rows_by_action[action].append((features, lbl, LABEL_SOURCE_EXPECTED_DELTA))
-                continue
+    if include_cross_arm_bridge:
+        try:
+            from tae_v3_cross_arm_training_bridge import all_bridged_training_records
 
-            lbl = _label_from_verdict(rec)
-            if lbl is not None:
-                rows_by_action[action].append((features, lbl, LABEL_SOURCE_VERDICT))
-                continue
-            # No usable label from any source (e.g. NEEDS_MORE_DATA, no
-            # checkpoints resolved, expected_profit_delta unset) — skip.
+            for rec in all_bridged_training_records():
+                _ingest_record(rec, rows_by_action)
+        except Exception:
+            # Bridge is best-effort enrichment, never a hard dependency of
+            # V3's own learning path — a failure here must not disable it.
+            pass
 
     out: dict[str, TrainingSet] = {}
     for action, rows in rows_by_action.items():
@@ -432,6 +513,17 @@ class LearningScorer:
         shrink_w = n / (n + SHRINKAGE_K)  # 0 at n=0, ->1 as n grows
 
         if model.weights is None:
+            lit_prior = LITERATURE_PRIOR_BY_ACTION.get(action)
+            if lit_prior is not None and n > 0:
+                w2 = n / (n + LITERATURE_PRIOR_SHRINKAGE_K)
+                blended_rate = w2 * model.base_rate + (1 - w2) * lit_prior
+                return blended_rate, {
+                    "n_train": n, "shrinkage_weight": 0.0,
+                    "base_rate": round(model.base_rate, 4),
+                    "literature_prior": lit_prior,
+                    "literature_shrinkage_weight": round(w2, 3),
+                    "source": "BASE_RATE_BLENDED_WITH_LITERATURE_PRIOR",
+                }
             return model.base_rate, {
                 "n_train": n, "shrinkage_weight": 0.0, "source": "BASE_RATE_ONLY_INSUFFICIENT_DATA",
             }
@@ -553,6 +645,8 @@ def decide_v3(
     open_positions: int,
     calibration_quantile: float = 0.7,
     candidate_pool_p_profit: list[float] | None = None,
+    pos: dict[str, Any] | None = None,
+    now: datetime | None = None,
 ) -> V3Decision:
     """
     calibration_quantile / candidate_pool_p_profit: this is where the "no
@@ -599,7 +693,13 @@ def decide_v3(
         p_rebuy, rebuy_diag = scorer.predict_proba("BUY_PAPER", pseudo_record)
         rebuy_has_signal = rebuy_diag.get("shrinkage_weight", 0.0) >= MIN_EXIT_SHRINKAGE
         sell_via_exit_model = has_real_exit_signal and p_exit > 0.5
-        sell_via_rebuy_check = rebuy_has_signal and p_rebuy < 0.5
+
+        from tae_strategy_v2_concentration import _position_age_hours
+
+        moment = now or datetime.now(timezone.utc)
+        age_hours = _position_age_hours(pos, now=moment) if pos else None
+        rebuy_check_old_enough = age_hours is not None and age_hours >= V3_MIN_REBUY_EXIT_AGE_HOURS
+        sell_via_rebuy_check = rebuy_has_signal and p_rebuy < 0.5 and rebuy_check_old_enough
 
         if sell_via_exit_model or sell_via_rebuy_check:
             reason = "V3_LEARNED_EXIT_SIGNAL" if sell_via_exit_model else "V3_NO_LONGER_BUY_WORTHY"

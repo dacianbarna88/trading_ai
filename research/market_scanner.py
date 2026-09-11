@@ -22,11 +22,14 @@ def get_sp500_tickers():
         import io
         import urllib.request
 
+        from tae_network_hard_timeout import hard_timeout
+
         req = urllib.request.Request(
             "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
             headers={"User-Agent": "Mozilla/5.0"},
         )
-        html = urllib.request.urlopen(req).read()
+        with hard_timeout(20):
+            html = urllib.request.urlopen(req, timeout=20).read()
         tables = pd.read_html(io.StringIO(html.decode("utf-8")))
         tickers = tables[0]["Symbol"].astype(str).str.replace(".", "-", regex=False).tolist()
         return tickers

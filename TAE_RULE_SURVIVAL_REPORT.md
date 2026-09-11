@@ -1,14 +1,14 @@
 # TAE Rule Survival Report
 
-**Generated:** 2026-09-03T13:02:33+00:00
+**Generated:** 2026-09-11T14:01:50+00:00
 **Mode:** PAPER_ONLY — NO_BROKER — NO_LIVE_PROMOTION
 **Source:** `runtime_outputs/paper_execution/rule_outcome_attribution.json`
 
 ## State counts
 
 - **NEW**: 0
-- **TESTING**: 20
-- **ACTIVE**: 3
+- **TESTING**: 13
+- **ACTIVE**: 11
 - **TRUSTED**: 1
 - **WATCHLIST**: 1
 - **DEPRECATED**: 0
@@ -20,48 +20,54 @@
 
 | rule | win_rate | net_pnl | avg_pnl | reason |
 | --- | --- | --- | --- | --- |
-| DO_NOT_PROMOTE_TO_LIVE | 41.7% | $484.92 | $2.89 | mixed evidence win_rate=41.7% net_pnl=$484.92 |
-| KNOW-HOLD_PAPER | 41.7% | $484.92 | $2.89 | mixed evidence win_rate=41.7% net_pnl=$484.92 |
-| KNOW-SELL_PAPER | 38.1% | $-174.33 | $-1.80 | mixed evidence win_rate=38.1% net_pnl=$-174.33 |
-| LTB-CONF-MISSED_PROFIT_PROTECTION | 40.0% | $44.94 | $4.49 | mixed evidence win_rate=40.0% net_pnl=$44.94 |
-| LTB-CONF-SCORE_PERSISTENCE_AFTER_ | 40.0% | $44.94 | $4.49 | mixed evidence win_rate=40.0% net_pnl=$44.94 |
-| LTB-CONF-STOP_REENTRY_CHURN | 40.0% | $44.94 | $4.49 | mixed evidence win_rate=40.0% net_pnl=$44.94 |
-| LTB-DPE-PHIL-001 | 41.6% | $529.86 | $2.98 | mixed evidence win_rate=41.6% net_pnl=$529.86 |
-| LTB-LIFE-LLY-05 | 0.0% | $-27.10 | $-27.10 | insufficient evidence (1<5) |
-| LTB-LIFE-MRK-01 | 100.0% | $6.20 | $3.10 | insufficient evidence (2<5) |
-| LTB-LOSS-LOSS-CRYSTALLIZATION-ABF990 | 36.6% | $-1,078.02 | $-13.15 | mixed evidence win_rate=36.6% net_pnl=$-1078.02 |
-| LTB-OPP-HSBA.L-01 | 25.0% | $2.19 | $0.55 | insufficient evidence (4<5) |
-| LTB-PATTERN-001 | 41.7% | $484.92 | $2.89 | mixed evidence win_rate=41.7% net_pnl=$484.92 |
-| LTB-PROT-ALV.DE | 100.0% | $37.30 | $37.30 | insufficient evidence (1<5) |
-| LTB-PROT-PPG-HSBA.L | 0.0% | $0.00 | $0.00 | insufficient evidence (3<5) |
+| LTB-CONF-MISSED_PROFIT_PROTECTION | 30.0% | $4.11 | $0.41 | mixed evidence win_rate=30.0% net_pnl=$4.11 |
+| LTB-CONF-SCORE_PERSISTENCE_AFTER_ | 30.0% | $4.11 | $0.41 | mixed evidence win_rate=30.0% net_pnl=$4.11 |
+| LTB-CONF-STOP_REENTRY_CHURN | 30.0% | $4.11 | $0.41 | mixed evidence win_rate=30.0% net_pnl=$4.11 |
+| LTB-LIFE-LLY-05 | 0.0% | $-3.52 | $-3.52 | insufficient evidence (1<5) |
+| LTB-PROT-ALV.DE | 100.0% | $14.61 | $14.61 | insufficient evidence (1<5) |
+| LTB-PROT-PPG-HSBA.L | 100.0% | $17.17 | $4.29 | insufficient evidence (4<5) |
 | LTB-PROT-PPG-MC.PA | 0.0% | $0.00 | $0.00 | insufficient evidence (3<5) |
+| LTB-PROT-PPG-QQQ | 0.0% | $-0.53 | $-0.53 | insufficient evidence (1<5) |
+| LTB-PROT-PPG-ULVR.L | 0.0% | $-14.38 | $-14.38 | insufficient evidence (1<5) |
+| LTB-PROT-ULVR.L | 0.0% | $-14.38 | $-14.38 | insufficient evidence (1<5) |
+| LTB-REPLAY-04 | 30.0% | $4.11 | $0.41 | mixed evidence win_rate=30.0% net_pnl=$4.11 |
+| MISSED_PROFIT_PROTECTION | 30.0% | $4.11 | $0.41 | mixed evidence win_rate=30.0% net_pnl=$4.11 |
+| SCORE_DECAY_SHADOW | 16.7% | $3.11 | $0.52 | mixed evidence win_rate=16.7% net_pnl=$3.11 |
 
 ### ACTIVE
 
 | rule | win_rate | net_pnl | avg_pnl | reason |
 | --- | --- | --- | --- | --- |
-| KNOW-BUY_PAPER | 46.6% | $1,521.20 | $12.89 | win_rate=46.6% net_pnl=$1521.20 |
-| KNOW-PROTECT_PAPER | 49.3% | $927.11 | $13.06 | win_rate=49.3% net_pnl=$927.11 |
-| TAE_SHADOW_SIZING_COMPARISON_V1 | 47.6% | $1,499.77 | $18.29 | win_rate=47.6% net_pnl=$1499.77 |
+| DO_NOT_PROMOTE_TO_LIVE | 55.8% | $1,066.65 | $3.00 | win_rate=55.8% net_pnl=$1066.65 |
+| KNOW-BUY_PAPER | 59.0% | $2,205.40 | $7.61 | win_rate=59.0% net_pnl=$2205.40 |
+| KNOW-HOLD_PAPER | 55.8% | $1,066.65 | $3.00 | win_rate=55.8% net_pnl=$1066.65 |
+| KNOW-PROTECT_PAPER | 56.3% | $160.62 | $2.26 | win_rate=56.3% net_pnl=$160.62 |
+| KNOW-SELL_PAPER | 55.6% | $904.26 | $3.18 | win_rate=55.6% net_pnl=$904.26 |
+| LTB-DPE-PHIL-001 | 55.1% | $1,070.76 | $2.93 | win_rate=55.1% net_pnl=$1070.76 |
+| LTB-LOSS-LOSS-CRYSTALLIZATION-ABF990 | 55.7% | $278.73 | $1.87 | win_rate=55.7% net_pnl=$278.73 |
+| LTB-OPP-HSBA.L-01 | 100.0% | $21.47 | $4.29 | win_rate=100.0% net_pnl=$21.47 |
+| LTB-PATTERN-001 | 55.8% | $1,066.65 | $3.00 | win_rate=55.8% net_pnl=$1066.65 |
+| LTB-STALE-001 | 55.1% | $1,070.76 | $2.93 | win_rate=55.1% net_pnl=$1070.76 |
+| TAE_SHADOW_SIZING_COMPARISON_V1 | 56.4% | $796.70 | $3.94 | win_rate=56.4% net_pnl=$796.70 |
 
 ### TRUSTED
 
 | rule | win_rate | net_pnl | avg_pnl | reason |
 | --- | --- | --- | --- | --- |
-| LTB-LIFE-PG-02 | 100.0% | $1,178.56 | $107.14 | win_rate=100.0% avg_pnl=$107.14 n=11 |
+| LTB-LIFE-PM-05 | 100.0% | $261.74 | $11.38 | win_rate=100.0% avg_pnl=$11.38 n=23 |
 
 ### WATCHLIST
 
 | rule | win_rate | net_pnl | avg_pnl | reason |
 | --- | --- | --- | --- | --- |
-| SCORE_DECAY_SHADOW | 16.7% | $-1.76 | $-0.29 | win_rate=16.7% net_pnl=$-1.76 |
+| LTB-LIFE-LLY-04 | 0.0% | $-45.81 | $-3.52 | win_rate=0.0% net_pnl=$-45.81 |
 
 ### DISABLED
 
 | rule | win_rate | net_pnl | avg_pnl | reason |
 | --- | --- | --- | --- | --- |
-| LTB-LIFE-LLY-04 | 0.0% | $-325.25 | $-27.10 | win_rate=0.0% net_pnl=$-325.25 n=12 |
-| LTB-LIFE-PM-05 | 0.0% | $-2,163.64 | $-98.35 | win_rate=0.0% net_pnl=$-2163.64 n=22 |
+| LTB-LIFE-MRK-01 | 0.0% | $-858.67 | $-71.56 | win_rate=0.0% net_pnl=$-858.67 n=12 |
+| LTB-LIFE-PG-02 | 0.0% | $-510.88 | $-46.44 | win_rate=0.0% net_pnl=$-510.88 n=11 |
 
 ## Lifecycle influence multipliers
 

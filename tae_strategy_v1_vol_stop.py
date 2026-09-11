@@ -34,7 +34,10 @@ def fetch_recent_closes(ticker: str, *, period: str = "2mo") -> list[float] | No
     """Trailing daily closes for one ticker, NaN-filtered (mirrors live_bot.py's
     own generate_signals() NaN-Close handling for the same yfinance quirk)."""
     try:
-        data = yf.download(ticker, period=period, auto_adjust=False, progress=False)
+        from tae_network_hard_timeout import hard_timeout
+
+        with hard_timeout(20):
+            data = yf.download(ticker, period=period, auto_adjust=False, progress=False)
     except Exception:
         return None
     if data is None or data.empty:

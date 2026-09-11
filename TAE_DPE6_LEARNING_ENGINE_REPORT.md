@@ -1,6 +1,6 @@
 # TAE DPE-6 — Learning Engine Sprint Report
 
-**Date:** 2026-09-03T13:15:15+00:00
+**Date:** 2026-09-11T13:14:41+00:00
 **Mode:** READ_ONLY · PAPER_ONLY · SHADOW_ONLY · NO_BROKER
 **Status:** PASS
 
@@ -8,7 +8,7 @@
 
 - Evaluation processed this run: **yes**
 - New record appended: **yes**
-- Total historical records: **293**
+- Total historical records: **342**
 
 ## Historical records
 
@@ -18,13 +18,13 @@
 ## Dominant philosophy
 
 - **COMPETITIVE**
-- Winning frequency: {'COLLABORATIVE': 131, 'COMPETITIVE': 161, 'TIE': 1}
+- Winning frequency: {'COLLABORATIVE': 131, 'COMPETITIVE': 186, 'TIE': 25}
 
 ## Confidence trend
 
-- Latest confidence: **58.9%**
-- Average confidence: **67.66%**
-- Latest winner: **COMPETITIVE**
+- Latest confidence: **50.0%**
+- Average confidence: **65.78%**
+- Latest winner: **TIE**
 
 ## Safety confirmation
 
