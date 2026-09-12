@@ -1,6 +1,6 @@
 # TAE Adaptive Weights Report
 
-**Generated:** 2026-09-11T14:01:51+00:00
+**Generated:** 2026-09-12T15:02:02+00:00
 **Mode:** PAPER_ONLY — NO_BROKER — NO_LIVE_PROMOTION
 
 - Actions weighted: **7**
@@ -11,13 +11,13 @@
 
 | action | previous | new | delta | cap | reason |
 | --- | --- | --- | --- | --- | --- |
-| BUY_PAPER | 0.85 | 0.87 | 0.02 | True | PROMISING×3 → +0.0007 [discounted: real evidence present]; CONTINUE_TESTING×1 →  |
-| SELL_PAPER | 1.15 | 1.15 | 0.0 | True | PROMISING×6 → +0.0015 [discounted: real evidence present]; CONTINUE_TESTING×8 →  |
-| HOLD_PAPER | 1.15 | 1.15 | 0.0 | True | PROMISING×6 → +0.0024 [discounted: real evidence present]; CONTINUE_TESTING×3 →  |
+| BUY_PAPER | 1.065 | 1.085 | 0.02 | True | PROMISING×4 → +0.0008 [discounted: real evidence present]; NEEDS_MORE_DATA×14 →  |
+| SELL_PAPER | 1.15 | 1.15 | 0.0 | False | PROMISING×4 → +0.0036 [discounted: real evidence present]; longitudinal hint bia |
+| HOLD_PAPER | 1.15 | 1.15 | 0.0 | False | PROMISING×7 → +0.0014 [discounted: real evidence present]; CONTINUE_TESTING×9 →  |
 | REDUCE_PAPER | 1.15 | 1.15 | 0.0 | False | experiment CONTINUE_TESTING×1 [LTB-LIFE-LLY-04] → +0.0030 |
-| PROTECT_PAPER | 0.85 | 0.87 | 0.02 | True | NEEDS_MORE_DATA×1 → -0.0006 [discounted: real evidence present]; experiment PROM |
+| PROTECT_PAPER | 1.13 | 1.15 | 0.02 | True | NEEDS_MORE_DATA×1 → -0.0006 [discounted: real evidence present]; experiment PROM |
 | ROTATE_PAPER | 1.15 | 1.15 | 0.0 | False | experiment PROMISING×3 [LTB-OPP-HSBA.L-01,LTB-OPP-MU-02,LTB-OPP-AMAT-03] → +0.00 |
-| SKIP_PAPER | 0.85 | 0.85 | 0.0 | False | NEEDS_MORE_DATA×58 → -0.0020; longitudinal hint bias -0.479; longitudinal knowle |
+| SKIP_PAPER | 0.85 | 0.85 | 0.0 | False | NEEDS_MORE_DATA×57 → -0.0020; longitudinal hint bias -0.485; longitudinal knowle |
 
 ## Evidence sources
 

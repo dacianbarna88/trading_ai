@@ -1,18 +1,18 @@
 # TAE Strategy Survival Report
 
-**Generated:** 2026-09-11T14:01:50+00:00
+**Generated:** 2026-09-12T15:02:01+00:00
 
 Tracks PAPER decision survival via longitudinal checkpoints (+1d … +250td).
 
-- Records with checkpoints: **9249**
-- Checkpoints recorded this run: **98**
+- Records with checkpoints: **9485**
+- Checkpoints recorded this run: **33**
 
 ## Survival by action
 
 | action | decisions | validation success % |
 | --- | --- | --- |
-| SELL_PAPER | 30 | 90.0 |
-| HOLD_PAPER | 57 | 93.0 |
-| SKIP_PAPER | 195 | 2.1 |
+| SELL_PAPER | 16 | 87.5 |
+| HOLD_PAPER | 76 | 92.1 |
+| SKIP_PAPER | 201 | 1.5 |
 | PROTECT_PAPER | 16 | 18.8 |
-| BUY_PAPER | 8951 | 41.3 |
+| BUY_PAPER | 9176 | 40.6 |

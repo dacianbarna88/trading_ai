@@ -1,6 +1,6 @@
 # TAE Accounting Snapshot
 
-**Generated:** 2026-09-11T14:00:49.357743+00:00  
+**Generated:** 2026-09-12T15:00:44.568147+00:00  
 **Mode:** CANONICAL_ACCOUNTING_READ_ONLY  
 **Data quality:** **HISTORICAL_RECONCILIATION_REQUIRED**
 
@@ -9,18 +9,18 @@
 - Starting capital (config): 30000.0
 - Deposits detected / counted / excluded: 0 / 0 / 0
 - **Effective contributed capital:** 30000.0
-- Cash available: 3560.08
-- Open positions value: 26476.3395
-- **Corrected realized PnL:** 26.6463
-- **Corrected unrealized PnL:** 9.778
-- **Corrected total trading PnL:** 36.4243
-- **Account value (corrected):** 30036.42
-- Account value cash-based: 30036.42
-- Account value capital-based: 30036.42
+- Cash available: 3671.04
+- Open positions value: 26199.9772
+- **Corrected realized PnL:** -67.3336
+- **Corrected unrealized PnL:** -61.646
+- **Corrected total trading PnL:** -128.9796
+- **Account value (corrected):** 29871.02
+- Account value cash-based: 29871.02
+- Account value capital-based: 29871.02
 - Capital base status: **OK**
-- Raw PnL (incl. CASH rows): 2405.9746
+- Raw PnL (incl. CASH rows): 2166.5347
 - Accounting adjustments excluded: 0.0
-- Reported realized (stale): 810.9719
+- Reported realized (stale): 716.992
 - SELL mismatches: 23
 
 Formula: account_value = effective_contributed_capital + corrected_total_trading_pnl = cash_available + open_positions_value

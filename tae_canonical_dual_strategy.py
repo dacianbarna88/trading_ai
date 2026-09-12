@@ -27,6 +27,10 @@ MODE = "PAPER_ONLY"
 SCHEMA = "tae.canonical_dual_strategy.v1"
 REPORT_MD = Path("TAE_V1_V2_CANONICAL_DUAL_STRATEGY_REPORT.md")
 REPORT_JSON = Path("tae_v1_v2_canonical_dual_strategy_report.json")
+
+# Per-ticker slow-call threshold for the V2 loop in run_v2_challenger_cycle
+# (2026-09-12) -- see that function's own comment for why this exists.
+SLOW_TICKER_THRESHOLD_SEC = 2.0
 V1_EQUITY_JSONL = pe.OUTPUT_DIR / "paper_daily_equity.jsonl"
 V2_EQUITY_JSONL = ppc.V2_DIR / "journals" / "daily_equity.jsonl"
 
@@ -160,10 +164,20 @@ def run_v2_challenger_cycle(*, mark_provider=None) -> dict[str, Any]:
     cash_before = _f(portfolio.get("cash"))
 
     # Protective manage phase then entry phase (same order as parallel runtime).
+    # Per-ticker timing (2026-09-12): a real hourly cycle stalled here for
+    # ~1h45m (confirmed via `py-spy dump` mid-hang -- the child process was
+    # genuinely CPU-bound inside this loop, not blocked on network I/O) with
+    # no way to tell afterward which ticker/phase actually ate the time,
+    # since the loop prints nothing per-ticker. Logging any call slower than
+    # SLOW_TICKER_THRESHOLD_SEC turns a future recurrence into a log-read
+    # instead of a live process-forensics session.
+    import time as _time
+
     for phase in ("manage", "entry"):
         for ticker in tickers:
             snap = marks.get(ticker) or {}
             decision_id = f"V2-{phase}-{ticker}-{snap_id[:10]}"
+            _t0 = _time.perf_counter()
             try:
                 out = pprun._run_v2_arm(
                     portfolio=portfolio,
@@ -177,6 +191,14 @@ def run_v2_challenger_cycle(*, mark_provider=None) -> dict[str, Any]:
             except Exception as exc:  # isolate V2 failures from V1
                 errors.append(f"{ticker}/{phase}:{exc}")
                 continue
+            finally:
+                _elapsed = _time.perf_counter() - _t0
+                if _elapsed >= SLOW_TICKER_THRESHOLD_SEC:
+                    print(
+                        f">>> [dual_strategy] SLOW _run_v2_arm ticker={ticker} phase={phase} "
+                        f"elapsed={_elapsed:.1f}s",
+                        flush=True,
+                    )
             if not isinstance(out, dict):
                 continue
             # _run_v2_arm returns a flat decision row (mutates portfolio in-place).

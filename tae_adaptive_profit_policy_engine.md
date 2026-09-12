@@ -1,6 +1,6 @@
 # TAE Adaptive Profit Policy Engine v1
 
-**Generated:** 2026-09-11T17:00:53
+**Generated:** 2026-09-12T18:00:50
 **Mode:** SHADOW_ONLY — NONE
 **Final verdict:** APPE_SHADOW_READY_FOR_OBSERVATION
 
@@ -27,7 +27,7 @@
 ## Policy memory summary
 
 - Observations stored: **59**
-- New observation this run: **True**
+- New observation this run: **False**
 - Validated warnings: **15**
 - False positives: **1**
 - Unknown: **42**
@@ -51,8 +51,7 @@
 
 ## Evaluation of prior observation
 
-- Prior key `PORTFOLIO_WATCH|22|0.0|31.0|15.7|37.5` (WATCH) → **UNKNOWN**
-- Detail: prior=WATCH; missed 0.00→0.00; quality 31.0→31.0; at_risk 15.7→15.7
+- No prior observation evaluated this run (duplicate snapshot or first run).
 
 ## Observation history
 

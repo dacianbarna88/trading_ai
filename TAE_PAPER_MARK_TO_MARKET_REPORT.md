@@ -1,63 +1,62 @@
 # TAE PAPER Mark-to-Market Report
 
-**Generated:** 2026-09-11T14:02:19+00:00
+**Generated:** 2026-09-12T15:02:23+00:00
 **Mode:** PAPER_ONLY — NO_BROKER
 
-- Positions marked: **28**
-- Live prices: **28**
+- Positions marked: **27**
+- Live prices: **27**
 - Stale/fallback prices: **0**
-- Total value: **$30,070.37**
-- Cash: **$129.33**
-- Open positions value: **$29,941.04**
+- Total value: **$30,040.47**
+- Cash: **$196.27**
+- Open positions value: **$29,844.20**
 
 ## PnL accounting
 
-- Realized PnL: **$-427.00**
-- Unrealized PnL: **$156.45**
-- Total PnL: **$-270.55**
-- Drawdown: **2.5144%**
-- Capital efficiency: **0.0052**
+- Realized PnL: **$-403.34**
+- Unrealized PnL: **$102.89**
+- Total PnL: **$-300.45**
+- Drawdown: **2.6114%**
+- Capital efficiency: **0.0034**
 
 ## Reconciliation
 
 - Status: **PASS**
 - Formula: `total_value = cash + open_positions_value`
 - Formula: `total_pnl = realized_pnl + unrealized_pnl`
-- total_value: **PASS** expected=30070.3725 actual=30070.3725
-- open_positions_value: **PASS** expected=29941.0404 actual=29941.0401
-- unrealized_pnl: **PASS** expected=156.4509 actual=156.4507
-- total_pnl: **PASS** expected=-270.5479 actual=-270.5479
-- value_delta: **PASS** expected=-270.5479 actual=-270.5475
+- total_value: **PASS** expected=30040.4687 actual=30040.4687
+- open_positions_value: **PASS** expected=29844.1959 actual=29844.1957
+- unrealized_pnl: **PASS** expected=102.8894 actual=102.8893
+- total_pnl: **PASS** expected=-300.4517 actual=-300.4517
+- value_delta: **PASS** expected=-300.4517 actual=-300.4513
 
 ## Positions
 
 | ticker | price | source | unrealized | run-up |
 | --- | --- | --- | --- | --- |
-| AAPL | 332.3500061035156 | yfinance_download_5d | $11.00 | 1.7191% |
-| ABBV | 259.6099853515625 | yfinance_download_5d | $42.06 | 2.2426% |
-| ALV.DE | 442.70001220703125 | yfinance_download_5d | $13.79 | 1.3772% |
-| AMD | 516.2100219726562 | yfinance_download_5d | $6.14 | 3.1236% |
-| ANET | 197.92999267578125 | yfinance_download_5d | $31.30 | 2.4252% |
-| BP.L | 566.7999877929688 | yfinance_download_5d | $10.70 | 2.994% |
-| CME | 276.0 | yfinance_download_5d | $1.64 | 0.6539% |
-| CRWD | 212.24000549316406 | yfinance_download_5d | $32.53 | 1.985% |
-| DELL | 557.60498046875 | yfinance_download_5d | $25.03 | 10.0089% |
-| DIA | 526.4500122070312 | yfinance_download_5d | $1.58 | 3.4969% |
-| HPQ | 35.29999923706055 | yfinance_download_5d | $19.51 | 7.7982% |
-| HSBA.L | 1554.4000244140625 | yfinance_download_5d | $4.20 | 1.7688% |
-| ICE | 157.18499755859375 | yfinance_download_5d | $2.08 | 0.832% |
-| JPM | 358.3800048828125 | yfinance_download_5d | $19.59 | 1.5144% |
-| LLY | 1119.4100341796875 | yfinance_download_5d | $-3.71 | 0.2063% |
-| MRK | 144.1750030517578 | yfinance_download_5d | $-78.58 | 3.5321% |
-| MSFT | 497.4200134277344 | yfinance_download_5d | $2.40 | 0.9963% |
-| NOW | 133.60499572753906 | yfinance_download_5d | $4.52 | 1.8931% |
-| NVDA | 221.53500366210938 | yfinance_download_5d | $3.51 | 1.4559% |
-| PG | 143.72500610351562 | yfinance_download_5d | $-49.44 | 4.5107% |
-| PM | 191.16000366210938 | yfinance_download_5d | $11.70 | 4.7249% |
-| QQQ | 715.9000244140625 | yfinance_download_5d | $-0.87 | 1.9197% |
-| SHEL.L | 3550.10595703125 | yfinance_download_5d | $6.67 | 1.6102% |
-| SNOW | 332.8800048828125 | yfinance_download_5d | $2.27 | 0.9079% |
-| SPY | 765.6649780273438 | yfinance_download_5d | $49.81 | 3.37% |
-| TEAM | 179.58999633789062 | yfinance_download_5d | $-0.10 | 0.0391% |
-| TRV | 370.6199951171875 | yfinance_download_5d | $1.96 | 0.7821% |
-| ULVR.L | 4571.5 | yfinance_download_5d | $-14.80 | 4.146% |
+| AAPL | 332.2699890136719 | yfinance_download_5d | $10.84 | 2.599% |
+| ABBV | 257.1199951171875 | yfinance_download_5d | $13.22 | 2.2426% |
+| ALV.DE | 442.29998779296875 | yfinance_download_5d | $12.52 | 1.3139% |
+| AMD | 516.1300048828125 | yfinance_download_5d | $6.10 | 3.1236% |
+| ANET | 199.58999633789062 | yfinance_download_5d | $46.24 | 2.6412% |
+| BP.L | 564.5999755859375 | yfinance_download_5d | $8.69 | 2.994% |
+| CME | 275.5400085449219 | yfinance_download_5d | $1.22 | 0.6539% |
+| CRWD | 206.74000549316406 | yfinance_download_5d | $-20.54 | 2.2989% |
+| DELL | 567.2899780273438 | yfinance_download_5d | $29.81 | 11.9196% |
+| DIA | 525.7899780273438 | yfinance_download_5d | $1.05 | 3.4969% |
+| HPQ | 35.47999954223633 | yfinance_download_5d | $20.88 | 8.3479% |
+| HSBA.L | 1552.5999755859375 | yfinance_download_5d | $3.90 | 1.7688% |
+| ICE | 157.39999389648438 | yfinance_download_5d | $2.43 | 1.1977% |
+| JPM | 356.2300109863281 | yfinance_download_5d | $-0.60 | 0.009% |
+| LLY | 1115.699951171875 | yfinance_download_5d | $-4.84 | 0.2063% |
+| MRK | 143.92999267578125 | yfinance_download_5d | $-85.08 | 3.5321% |
+| MSFT | 495.6300048828125 | yfinance_download_5d | $1.49 | 0.9963% |
+| NOW | 132.52999877929688 | yfinance_download_5d | $2.47 | 1.8931% |
+| NVDA | 218.2899932861328 | yfinance_download_5d | $-0.21 | 1.4559% |
+| PG | 145.27000427246094 | yfinance_download_5d | $12.35 | 4.5107% |
+| PM | 191.05999755859375 | yfinance_download_5d | $11.56 | 5.7215% |
+| QQQ | 714.8800048828125 | yfinance_download_5d | $-1.50 | 1.9197% |
+| SHEL.L | 3551.0 | yfinance_download_5d | $6.86 | 1.6102% |
+| SNOW | 328.989990234375 | yfinance_download_5d | $-0.68 | 0.9079% |
+| SPY | 764.2899780273438 | yfinance_download_5d | $45.13 | 3.37% |
+| TEAM | 179.6999969482422 | yfinance_download_5d | $0.06 | 0.0391% |
+| ULVR.L | 4551.5 | yfinance_download_5d | $-20.46 | 4.146% |

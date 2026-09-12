@@ -1,6 +1,6 @@
 # TAE Paper Decision Engine Report
 
-**Generated:** 2026-09-11T14:01:56+00:00
+**Generated:** 2026-09-12T15:02:08+00:00
 **Mode:** PAPER_ONLY — READ_ONLY — NO_BROKER — NO_LIVE_CHANGE — NO_EXECUTION
 **Live promotion allowed:** false
 
@@ -9,46 +9,46 @@
 ## Executive summary
 
 - Decisions generated: **98**
-- **BUY_PAPER**: 19
-- **HOLD_PAPER**: 20
+- **BUY_PAPER**: 18
+- **HOLD_PAPER**: 18
 - **PROTECT_PAPER**: 1
-- **SELL_PAPER**: 6
-- **SKIP_PAPER**: 52
+- **SELL_PAPER**: 4
+- **SKIP_PAPER**: 57
 
 ## Decision table
 
 | ticker | action | confidence | risk | profit Δ | cap eff Δ | switch | evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| FTNT | BUY_PAPER | 0.593 | 0.0 | 17.31 | -0.57 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
-| ALV.DE | BUY_PAPER | 0.374 | 0.0 | 17.31 | -0.57 | switch=yes | monitor strategy=HOLD_AND_MONITOR_SHADOW; signal=STRONG BUY  |
-| IBM | BUY_PAPER | 0.344 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
-| MET | BUY_PAPER | 0.344 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
-| ORCL | BUY_PAPER | 0.344 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
-| TER | BUY_PAPER | 0.344 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
+| CRWD | BUY_PAPER | 0.773 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY score=100.0 ag |
+| JPM | BUY_PAPER | 0.773 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY score=100.0 ag |
+| ALV.DE | BUY_PAPER | 0.472 | 0.0 | 17.31 | -0.57 | switch=yes | monitor strategy=HOLD_AND_MONITOR_SHADOW; signal=STRONG BUY  |
+| NVDA | BUY_PAPER | 0.465 | 0.0 | 15.0 | 5.0 | switch=yes | monitor strategy=HOLD_AND_MONITOR_SHADOW; signal=STRONG BUY  |
+| ADI | BUY_PAPER | 0.355 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
+| BAC | BUY_PAPER | 0.355 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
+| IBM | BUY_PAPER | 0.355 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
+| MET | BUY_PAPER | 0.355 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
+| ORCL | BUY_PAPER | 0.355 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
+| TER | BUY_PAPER | 0.355 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY score=100.0; limited capital hint from acc |
 | AIG | BUY_PAPER | 0.25 | 0.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
+| AIR.PA | BUY_PAPER | 0.25 | 10.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
 | ALL | BUY_PAPER | 0.25 | 0.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
-| AZN.L | BUY_PAPER | 0.25 | 0.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
-| BAC | BUY_PAPER | 0.25 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY; limited capital hint from accounting snap |
 | CB | BUY_PAPER | 0.25 | 0.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
-| ENTG | BUY_PAPER | 0.25 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY; limited capital hint from accounting snap |
+| FTNT | BUY_PAPER | 0.25 | 0.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
 | GS | BUY_PAPER | 0.25 | 0.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
-| MRVL | BUY_PAPER | 0.25 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY; limited capital hint from accounting snap |
-| PLTR | BUY_PAPER | 0.25 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY; limited capital hint from accounting snap |
+| INTU | BUY_PAPER | 0.25 | 0.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
 | SAP.DE | BUY_PAPER | 0.25 | 0.0 | 17.31 | -0.57 | switch=yes | limited capital hint from accounting snapshot; live promotio |
-| STT | BUY_PAPER | 0.25 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY; limited capital hint from accounting snap |
-| V | BUY_PAPER | 0.25 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY; limited capital hint from accounting snap |
-| WDAY | BUY_PAPER | 0.25 | 0.0 | 15.0 | 5.0 | switch=yes | signal=STRONG BUY; limited capital hint from accounting snap |
-| HSBA.L | SELL_PAPER | 0.95 | 100.0 | 37.38 | 3.6 | switch=no | PROFIT_TRAILING_EXIT_DRAWDOWN_2_PERCENT: mark=1555.0 peak=16 |
-| ANET | SELL_PAPER | 0.906 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY score=100.0 ag |
-| CRWD | SELL_PAPER | 0.896 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY score=100.0 ag |
-| JPM | SELL_PAPER | 0.853 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY score=100.0 ag |
-| BP.L | SELL_PAPER | 0.817 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY score=100.0 ag |
-| AMD | SELL_PAPER | 0.805 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY age=0.0h (held |
+| ANET | SELL_PAPER | 0.95 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY score=100.0 ag |
+| HSBA.L | SELL_PAPER | 0.95 | 100.0 | 37.38 | 3.6 | switch=no | PROFIT_TRAILING_EXIT_DRAWDOWN_2_PERCENT: mark=1552.599976 pe |
+| BP.L | SELL_PAPER | 0.794 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY score=100.0 ag |
+| AMD | SELL_PAPER | 0.656 | 0.0 | 17.31 | -0.57 | switch=yes | low capital_efficiency=0.0; signal=STRONG BUY age=0.0h (held |
+| QQQ | PROTECT_PAPER | 0.568 | 70.05 | 1.97 | -1.0 | switch=yes | weak lifecycle=WEAKENING; GII strategy=PROTECT_PROFIT_SHADOW |
+| DELL | HOLD_PAPER | 0.95 | 0.0 | 17.31 | -0.57 | switch=yes | profit trailing: PROFIT_TRAILING_HOLD; low capital_efficienc |
+| HPQ | HOLD_PAPER | 0.95 | 0.0 | 0.0 | 0.0 | switch=yes | profit trailing: PROFIT_TRAILING_HOLD; low capital_efficienc |
 
 ## Decision state / switch summary
 
-- Switch authorized: **90**
-- Switch blocked (PDE gate): **7**
+- Switch authorized: **91**
+- Switch blocked (PDE gate): **6**
 - Active decisions loaded: **True**
 
 ## Closed intelligence loop

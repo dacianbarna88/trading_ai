@@ -1,6 +1,6 @@
 # TAE Portfolio Profit Governor v1
 
-**Generated:** 2026-09-11T17:00:53
+**Generated:** 2026-09-12T18:00:50
 **Mode:** SHADOW_ONLY — NONE
 **Portfolio verdict:** PORTFOLIO_WATCH
 **Final status:** PPG_SHADOW_READY_FOR_OBSERVATION
@@ -29,13 +29,13 @@ Portfolio-level profit VIEW — no live orders; execution remains live_bot.py
 - Aggregate missed USD: **0**
 - Profit quality score: **31.0**
 - Profit at risk score: **15.7**
-- Concentration risk score: **41.5**
+- Concentration risk score: **37.5**
 
 ## Regional risk summary
 
 | region | positions |
 | --- | --- |
-| US | 18 |
+| US | 17 |
 | EU | 5 |
 | UK | 4 |
 | OTHER | 0 |
@@ -76,5 +76,5 @@ Portfolio-level profit VIEW — no live orders; execution remains live_bot.py
 
 ## Explanation
 
-SHADOW_ONLY portfolio governor: 22 positions, verdict=PORTFOLIO_WATCH. Postures — keep=0, protect=0, trail=0, watch=8. Scores — quality=31.0, at_risk=15.7, concentration=41.5. Aggregate missed USD=0.00. Regional mix: US=18, EU=5, UK=4, OTHER=0. Sector context: LEADER_TECHNOLOGY. NO BUY / NO SELL — observation VIEW only.
+SHADOW_ONLY portfolio governor: 22 positions, verdict=PORTFOLIO_WATCH. Postures — keep=0, protect=0, trail=0, watch=8. Scores — quality=31.0, at_risk=15.7, concentration=37.5. Aggregate missed USD=0.00. Regional mix: US=17, EU=5, UK=4, OTHER=0. Sector context: LEADER_TECHNOLOGY. NO BUY / NO SELL — observation VIEW only.
 

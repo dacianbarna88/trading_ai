@@ -1,6 +1,6 @@
 # TAE Decision Event Bus (DPE-1)
 
-**Generated:** 2026-09-11T13:14:35+00:00
+**Generated:** 2026-09-12T15:22:59+00:00
 **Mode:** SHADOW_ONLY — READ_ONLY
 **Schema version:** dpe.decision_event.v1
 
@@ -44,8 +44,8 @@
 
 ## Portfolio event summary
 
-- Event ID: `20260911_PORTFOLIO_PORTFOLIO_SNAPSHOT_370d2090b3901eca`
-- Account value: **29864.54**
+- Event ID: `20260912_PORTFOLIO_PORTFOLIO_SNAPSHOT_ce523ee6203ec876`
+- Account value: **29871.02**
 - Winning philosophy: **COLLABORATIVE_MODEL**
 - Portfolio verdict: **PORTFOLIO_HIGH_RISK**
 

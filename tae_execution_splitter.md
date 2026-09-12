@@ -1,21 +1,21 @@
 # TAE Execution Splitter (DPE-2)
 
-**Generated:** 2026-09-11T13:14:37+00:00
+**Generated:** 2026-09-12T15:23:03+00:00
 **Mode:** SHADOW_ONLY — READ_ONLY
 **Schema version:** dpe.execution_job.v1
-**Experiment ID:** EXP201410
+**Experiment ID:** EXP469551
 
 > **Routing only — no execution, no portfolio change, no live behavior change**
 
 ## Executive summary
 
-- Decision events processed: **1661**
-- Jobs built this run: **3322**
-- Jobs appended: **0** (skipped duplicates in run: **3322**)
-- Competitive jobs: **1661**
-- Collaborative jobs: **1661**
-- Blocked jobs: **198**
-- Ready jobs: **3124**
+- Decision events processed: **1684**
+- Jobs built this run: **3368**
+- Jobs appended: **0** (skipped duplicates in run: **3368**)
+- Competitive jobs: **1684**
+- Collaborative jobs: **1684**
+- Blocked jobs: **200**
+- Ready jobs: **3168**
 - Jobs log: `runtime_outputs/dpe/execution_jobs.jsonl`
 
 ## Architecture summary
@@ -52,11 +52,11 @@ flowchart LR
 
 | metric | value |
 | --- | --- |
-| total_events | 1661 |
-| competitive_jobs | 1661 |
-| collaborative_jobs | 1661 |
-| blocked_jobs | 198 |
-| ready_jobs | 3124 |
+| total_events | 1684 |
+| competitive_jobs | 1684 |
+| collaborative_jobs | 1684 |
+| blocked_jobs | 200 |
+| ready_jobs | 3168 |
 | queued_jobs | 0 |
 | invalid_jobs | 0 |
 | duplicate_uuids | 0 |

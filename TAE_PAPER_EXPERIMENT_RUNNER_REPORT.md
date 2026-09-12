@@ -1,6 +1,6 @@
 # TAE Paper Experiment Runner Report
 
-**Generated:** 2026-09-11T14:01:44+00:00
+**Generated:** 2026-09-12T15:23:12+00:00
 **Mode:** PAPER_ONLY — READ_ONLY — NO_BROKER — NO_LIVE_CHANGE
 **Live promotion allowed:** false
 
@@ -44,27 +44,10 @@
 
 ## Paper decision validation
 
-- Consumes: `runtime_outputs/paper_decisions/paper_decisions.jsonl` (deduplicated with `paper_decisions.json`)
+- Also consumes: `runtime_outputs/paper_decisions/paper_decisions.jsonl` (deduplicated with `paper_decisions.json`)
 - Output: `runtime_outputs/paper_decisions/decision_validation_results.json`
 - Detail report: `TAE_PAPER_DECISION_VALIDATION_REPORT.md`
-
-- Unique decisions validated: **98** (raw rows read: 196)
-- PROMISING: **15** | CONTINUE: **12** | NEEDS_MORE_DATA: **71** | REJECT: **0**
-
-### Top ranked validated decisions
-
-| rank | ticker | action | verdict | profit Δ | horizon | reason |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | HSBA.L | SELL_PAPER | PROMISING | 37.38 | 50.0 | 7D=NEUTRAL(-0.2%); 1M=NEGATIVE(-1.6%); 1 |
-| 2 | AMD | SELL_PAPER | PROMISING | 17.31 | 50.0 | 7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y |
-| 3 | ANET | SELL_PAPER | PROMISING | 17.31 | 50.0 | 7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y |
-| 4 | BP.L | SELL_PAPER | PROMISING | 17.31 | 50.0 | 7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y |
-| 5 | DELL | SELL_PAPER | PROMISING | 17.31 | 50.0 | 7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y |
-| 6 | JPM | SELL_PAPER | PROMISING | 17.31 | 50.0 | 7D=NEUTRAL(0.0%); 1M=NEGATIVE(-1.6%); 1Y |
-| 7 | AAPL | HOLD_PAPER | PROMISING | 17.31 | 50.0 | 7D=NEUTRAL(-0.1%); 1M=NEGATIVE(-1.6%); 1 |
-| 8 | LLY | HOLD_PAPER | PROMISING | 17.31 | 57.1 | 7D=POSITIVE(2.7%); 1M=NEGATIVE(-1.6%); 1 |
-| 9 | MRK | HOLD_PAPER | PROMISING | 17.31 | 57.1 | 7D=POSITIVE(1.4%); 1M=NEGATIVE(-1.6%); 1 |
-| 10 | PG | HOLD_PAPER | PROMISING | 17.31 | 57.1 | 7D=POSITIVE(2.0%); 1M=NEGATIVE(-1.6%); 1 |
+- Each validated decision includes ranked verdict, profit/risk/cap-eff deltas, reason, and evidence summary.
 
 ## Safety confirmation
 

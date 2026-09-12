@@ -1,52 +1,49 @@
 # TAE Investment Council Report
 
-**Generated:** 2026-09-11T13:14:47+00:00
+**Generated:** 2026-09-12T15:23:20+00:00
 **Mode:** PAPER_ONLY — SYNTHESIS ONLY — NO_BROKER — NO_LIVE_PROMOTION
-**Governance verdict:** **BLOCKED_WITH_REASONS**
+**Governance verdict:** **READY_FOR_PAPER_DAY**
 
 ## 1. Executive recommendation
 
-PAPER BLOCKED by structural governance (forbidden content diff: core/market_data_layer.py). Do not execute PAPER actions until blockers clear. Observe only.
+PAPER cycle READY_FOR_PAPER_DAY. PDE SELL: ANET, HSBA.L, BP.L, AMD. PDE PROTECT: QQQ. PDE BUY: CRWD, JPM, ALV.DE, NVDA, ADI. Policy WATCH / PPG PORTFOLIO_WATCH. DPE philosophy COMPETITIVE. live_promotion_allowed=false.
 
 ## 2. Today's top BUY candidates
 
-- **MRK** | confidence=0.83 | growth_score=92.8 | pde_buy=True | gii_top_growth=True
-- **CRWD** | confidence=0.67 | pde_buy=True | gii_top_growth=False
-- **AAPL** | confidence=0.54 | pde_buy=True | gii_top_growth=False
-- **ABBV** | confidence=0.54 | pde_buy=True | gii_top_growth=False
-- **NVDA** | confidence=0.426 | pde_buy=True | gii_top_growth=False
-- **ALV.DE** | confidence=0.367 | pde_buy=True | gii_top_growth=False
-- **BAC** | confidence=0.34 | pde_buy=True | gii_top_growth=False
-- **ORCL** | confidence=0.34 | pde_buy=True | gii_top_growth=False
-- **V** | confidence=0.34 | pde_buy=True | gii_top_growth=False
-- **FTNT** | confidence=0.25 | pde_buy=True | gii_top_growth=False
+- **CRWD** | confidence=0.773 | pde_buy=True | gii_top_growth=False
+- **JPM** | confidence=0.773 | pde_buy=True | gii_top_growth=False
+- **ALV.DE** | confidence=0.472 | pde_buy=True | gii_top_growth=False
+- **NVDA** | confidence=0.465 | pde_buy=True | gii_top_growth=False
+- **ADI** | confidence=0.355 | pde_buy=True | gii_top_growth=False
+- **BAC** | confidence=0.355 | pde_buy=True | gii_top_growth=False
+- **IBM** | confidence=0.355 | pde_buy=True | gii_top_growth=False
+- **MET** | confidence=0.355 | pde_buy=True | gii_top_growth=False
+- **ORCL** | confidence=0.355 | pde_buy=True | gii_top_growth=False
+- **TER** | confidence=0.355 | pde_buy=True | gii_top_growth=False
 
 ## 3. Today's top SELL candidates
 
+- **ANET** | confidence=0.95 | hard_risk_override=False
 - **HSBA.L** | confidence=0.95 | hard_risk_override=False
-- **BP.L** | confidence=0.807 | hard_risk_override=False
-- **AMD** | confidence=0.67 | hard_risk_override=False
-- **ANET** | confidence=0.67 | hard_risk_override=False
-- **CME** | confidence=0.67 | hard_risk_override=False
-- **DELL** | confidence=0.67 | hard_risk_override=False
-- **HPQ** | confidence=0.67 | hard_risk_override=False
-- **ICE** | confidence=0.67 | hard_risk_override=False
-- **JPM** | confidence=0.67 | hard_risk_override=False
-- **MSFT** | confidence=0.67 | hard_risk_override=False
+- **BP.L** | confidence=0.794 | hard_risk_override=False
+- **AMD** | confidence=0.656 | hard_risk_override=False
 
 ## 4. Today's top PROTECT candidates
 
-- **QQQ** | confidence=0.484 | expected_profit_delta=0.94
+- **QQQ** | confidence=0.568 | expected_profit_delta=1.97
 
 ## 5. Today's HOLD candidates
 
+- **DELL** | confidence=0.95
+- **HPQ** | confidence=0.95
 - **PG** | confidence=0.95
 - **PM** | confidence=0.95
 - **LLY** | confidence=0.918
-- **SPY** | confidence=0.845
-- **DIA** | confidence=0.653
-- **ULVR.L** | confidence=0.653
-- **SHEL.L** | confidence=0.573
+- **CME** | confidence=0.908
+- **ICE** | confidence=0.908
+- **MSFT** | confidence=0.908
+- **NOW** | confidence=0.908
+- **SNOW** | confidence=0.908
 
 ## 6. Hard risk alerts
 
@@ -54,18 +51,18 @@ PAPER BLOCKED by structural governance (forbidden content diff: core/market_data
 
 ## 6b. Conflict resolution (EV evidence)
 
-- Loaded: **True** | tickers: **98** | policy: **WATCH** | cash hint: **$129.33**
+- Loaded: **True** | tickers: **98** | policy: **WATCH** | cash hint: **$196.27**
 
 ### Top conflicts
 
-- **AAPL** | winning_scenario=BUY_PAPER | final_authority=EV_OPTIMIZER
-- **ABBV** | winning_scenario=BUY_PAPER | final_authority=EV_OPTIMIZER
+- **AAPL** | winning_scenario=HOLD_PAPER | final_authority=POLICY_CAUTION
+- **ABBV** | winning_scenario=SELL_PAPER | final_authority=EV_OPTIMIZER
 - **ADBE** | winning_scenario=SKIP_PAPER | final_authority=POLICY_CAUTION
-- **ADI** | winning_scenario=SKIP_PAPER | final_authority=POLICY_CAUTION
+- **ADI** | winning_scenario=BUY_PAPER | final_authority=EV_OPTIMIZER
 - **ADSK** | winning_scenario=SKIP_PAPER | final_authority=POLICY_CAUTION
 - **AFL** | winning_scenario=SKIP_PAPER | final_authority=POLICY_CAUTION
-- **AIG** | winning_scenario=SKIP_PAPER | final_authority=POLICY_CAUTION
-- **AIR.PA** | winning_scenario=SKIP_PAPER | final_authority=POLICY_CAUTION
+- **AIG** | winning_scenario=BUY_PAPER | final_authority=EV_OPTIMIZER
+- **AIR.PA** | winning_scenario=BUY_PAPER | final_authority=EV_OPTIMIZER
 
 ### BUY blocked despite idle cash (positive BUY EV)
 
@@ -77,59 +74,59 @@ PAPER BLOCKED by structural governance (forbidden content diff: core/market_data
 
 ## 6c. Decision state (anti-churn)
 
-- Switch authorized (PDE): **74**
-- Switch blocked (PDE): **0**
-- Conflict switch authorized: **64**
+- Switch authorized (PDE): **68**
+- Switch blocked (PDE): **6**
+- Conflict switch authorized: **62**
 - Conflict switch blocked: **0**
 - Cooldown active tickers: **0**
 - High churn risk tickers: **87**
 
 ### Proposed action changes
 
-- **BP.L** BUY_PAPER→SELL_PAPER authorized=yes reason=loss_breach_or_risk_deterioration EV=0.936/0.15
-- **AMD** BUY_PAPER→SELL_PAPER authorized=yes reason=loss_breach_or_risk_deterioration EV=-1.0295/0.15
-- **ANET** BUY_PAPER→SELL_PAPER authorized=yes reason=loss_breach_or_risk_deterioration EV=-11.7337/0.15
-- **CME** BUY_PAPER→SELL_PAPER authorized=yes reason=loss_breach_or_risk_deterioration EV=-1.0298/0.15
-- **DELL** BUY_PAPER→SELL_PAPER authorized=yes reason=loss_breach_or_risk_deterioration EV=-1.0295/0.15
-- **HPQ** BUY_PAPER→SELL_PAPER authorized=yes reason=loss_breach_or_risk_deterioration EV=-1.0331/0.15
-- **ICE** BUY_PAPER→SELL_PAPER authorized=yes reason=loss_breach_or_risk_deterioration EV=-1.0332/0.15
-- **JPM** BUY_PAPER→SELL_PAPER authorized=yes reason=loss_breach_or_risk_deterioration EV=-0.5792/0.15
+- **ANET** BUY_PAPER→SELL_PAPER authorized=yes reason=ev_margin_met EV=8.5367/0.15
+- **BP.L** BUY_PAPER→SELL_PAPER authorized=yes reason=ev_margin_met EV=0.7687/0.15
+- **AMD** BUY_PAPER→SELL_PAPER authorized=yes reason=ev_margin_met EV=0.3518/0.15
+- **QQQ** BUY_PAPER→PROTECT_PAPER authorized=yes reason=non_trade_or_allowed EV=-5.8194/0.15
+- **DELL** BUY_PAPER→HOLD_PAPER authorized=yes reason=ev_margin_met EV=7.8301/0.15
+- **HPQ** BUY_PAPER→HOLD_PAPER authorized=yes reason=ev_margin_met EV=6.5073/0.15
+- **PG** BUY_PAPER→HOLD_PAPER authorized=yes reason=non_trade_or_allowed EV=-2.3538/0.15
+- **PM** BUY_PAPER→HOLD_PAPER authorized=yes reason=non_trade_or_allowed EV=-1.7294/0.15
 
 ## 7. Portfolio rebuild view
 
 - GII portfolio strategy: **HOLD_AND_MONITOR_SHADOW**
-- Would BUY: `['MRK', 'CRWD', 'AAPL', 'ABBV', 'NVDA', 'ALV.DE', 'BAC', 'ORCL', 'V', 'FTNT', 'GS', 'INTC', 'MA', 'MET', 'PLTR', 'SCHW', 'TER', 'WDAY']`
-- Would SELL: `['HSBA.L', 'BP.L', 'AMD', 'ANET', 'CME', 'DELL', 'HPQ', 'ICE', 'JPM', 'MSFT', 'NOW', 'SNOW', 'TEAM', 'TRV']`
+- Would BUY: `['CRWD', 'JPM', 'ALV.DE', 'NVDA', 'ADI', 'BAC', 'IBM', 'MET', 'ORCL', 'TER', 'AIG', 'AIR.PA', 'ALL', 'CB', 'FTNT', 'GS', 'INTU', 'SAP.DE']`
+- Would SELL: `['ANET', 'HSBA.L', 'BP.L', 'AMD']`
 - Would ROTATE: `[]`
 - Would REDUCE: `[]`
 - Note: Synthesis only — reflects existing PDE/GII outputs, not new decisions.
 
 ## 8. Strongest rules
 
-- **LTB-LIFE-PM-05** | state=TRUSTED | net_pnl_impact=225.1976 | win_rate=1.0
-- **LTB-OPP-HSBA.L-01** | state=ACTIVE | net_pnl_impact=22.1205 | win_rate=1.0
-- **LTB-PROT-ALV.DE** | state=TESTING | net_pnl_impact=17.8996 | win_rate=1.0
-- **LTB-PROT-PPG-HSBA.L** | state=TESTING | net_pnl_impact=17.6964 | win_rate=1.0
-- **LTB-CONF-MISSED_PROFIT_PROTECTION** | state=TESTING | net_pnl_impact=1.5675 | win_rate=0.2
-- **LTB-CONF-SCORE_PERSISTENCE_AFTER_** | state=TESTING | net_pnl_impact=1.5675 | win_rate=0.2
-- **LTB-CONF-STOP_REENTRY_CHURN** | state=TESTING | net_pnl_impact=1.5675 | win_rate=0.2
-- **LTB-REPLAY-04** | state=TESTING | net_pnl_impact=1.5675 | win_rate=0.2
+- **KNOW-BUY_PAPER** | state=ACTIVE | net_pnl_impact=1328.0469 | win_rate=0.4539
+- **TAE_SHADOW_SIZING_COMPARISON_V1** | state=TESTING | net_pnl_impact=673.9334 | win_rate=0.4337
+- **DO_NOT_PROMOTE_TO_LIVE** | state=ACTIVE | net_pnl_impact=657.1486 | win_rate=0.4777
+- **KNOW-HOLD_PAPER** | state=ACTIVE | net_pnl_impact=657.1486 | win_rate=0.4777
+- **LTB-PATTERN-001** | state=ACTIVE | net_pnl_impact=657.1486 | win_rate=0.4777
+- **LTB-DPE-PHIL-001** | state=ACTIVE | net_pnl_impact=646.5567 | win_rate=0.4701
+- **LTB-STALE-001** | state=ACTIVE | net_pnl_impact=646.5567 | win_rate=0.4701
+- **KNOW-SELL_PAPER** | state=ACTIVE | net_pnl_impact=479.1027 | win_rate=0.4599
 
 ## 9. Weakest / disabled rules
 
-- **DO_NOT_PROMOTE_TO_LIVE** | state=DEPRECATED | net_pnl_impact=-1957.4006 | reason=win_rate=22.1% net_pnl=$-1957.40
-- **KNOW-BUY_PAPER** | state=DEPRECATED | net_pnl_impact=-509.4811 | reason=win_rate=17.8% net_pnl=$-509.48
-- **KNOW-HOLD_PAPER** | state=DEPRECATED | net_pnl_impact=-1957.4006 | reason=win_rate=22.1% net_pnl=$-1957.40
-- **KNOW-PROTECT_PAPER** | state=WATCHLIST | net_pnl_impact=-289.4529 | reason=win_rate=32.4% net_pnl=$-289.45
-- **KNOW-SELL_PAPER** | state=DEPRECATED | net_pnl_impact=-1670.7947 | reason=win_rate=19.6% net_pnl=$-1670.79
-- **LTB-DPE-PHIL-001** | state=DEPRECATED | net_pnl_impact=-1955.8331 | reason=win_rate=22.1% net_pnl=$-1955.83
-- **LTB-LIFE-LLY-04** | state=WATCHLIST | net_pnl_impact=-33.8377 | reason=win_rate=0.0% net_pnl=$-33.84
-- **LTB-LIFE-MRK-01** | state=DISABLED | net_pnl_impact=-772.7364 | reason=win_rate=0.0% net_pnl=$-772.74 n=12
+- **LTB-CONF-MISSED_PROFIT_PROTECTION** | state=WATCHLIST | net_pnl_impact=-10.5919 | reason=win_rate=20.0% net_pnl=$-10.59
+- **LTB-CONF-SCORE_PERSISTENCE_AFTER_** | state=WATCHLIST | net_pnl_impact=-10.5919 | reason=win_rate=20.0% net_pnl=$-10.59
+- **LTB-CONF-STOP_REENTRY_CHURN** | state=WATCHLIST | net_pnl_impact=-10.5919 | reason=win_rate=20.0% net_pnl=$-10.59
+- **LTB-LIFE-LLY-04** | state=DEPRECATED | net_pnl_impact=-62.9824 | reason=win_rate=0.0% net_pnl=$-62.98
+- **LTB-LIFE-MRK-01** | state=DISABLED | net_pnl_impact=-1020.9888 | reason=win_rate=0.0% net_pnl=$-1020.99 n=12
+- **LTB-REPLAY-04** | state=WATCHLIST | net_pnl_impact=-10.5919 | reason=win_rate=20.0% net_pnl=$-10.59
+- **MISSED_PROFIT_PROTECTION** | state=WATCHLIST | net_pnl_impact=-10.5919 | reason=win_rate=20.0% net_pnl=$-10.59
+- **SCORE_DECAY_SHADOW** | state=WATCHLIST | net_pnl_impact=-1.7084 | reason=win_rate=0.0% net_pnl=$-1.71
 
 ## 10. DPE philosophy view
 
 - Preferred philosophy: **COMPETITIVE**
-- Adaptive confidence: **67.2**
+- Adaptive confidence: **66.9**
 - Competitive / Collaborative: **52.9% / 47.1%**
 - Context: **HIGH RISK + HIGH VOLATILITY**
 - Evaluator winner: **N/A**
@@ -138,30 +135,70 @@ PAPER BLOCKED by structural governance (forbidden content diff: core/market_data
 
 ## 11. Canonical vs PAPER result
 
-- Canonical value: **$29,864.54**
-- PAPER value: **$29,754.83**
-- Delta: **$-109.71**
+- Canonical value: **$29,871.02**
+- PAPER value: **$30,040.47**
+- Delta: **$169.45**
 - PAPER reconciliation: **PASS**
-- Explanation: PAPER portfolio diverges by $-109.71 total value (+17 positions, $-4,374.97 cash delta, $-427.00 realized delta, $-159.09 unrealized delta) after isolated PAPER execution and mark-to-market.
+- Explanation: PAPER portfolio diverges by $169.45 total value (+16 positions, $-3,474.77 cash delta, $-403.34 realized delta, $102.89 unrealized delta) after isolated PAPER execution and mark-to-market.
 
 ## 12. Capital / cash status
 
-- PAPER cash: **$129.33**
-- PAPER total value: **$29,754.83**
-- PAPER realized / unrealized PnL: **$-427.00** / **$-159.09**
-- Open PAPER positions: **28**
+- PAPER cash: **$196.27**
+- PAPER total value: **$30,040.47**
+- PAPER realized / unrealized PnL: **$-403.34** / **$102.89**
+- Open PAPER positions: **27**
 - PPG verdict: **PORTFOLIO_WATCH**
 - APPE policy: **WATCH**
 
 ## 13. What changed since last cycle
 
-- PAPER portfolio value: 29750.0091 → 29754.8283
+- Executive recommendation: 'PAPER cycle READY_FOR_PAPER_DAY. PDE SELL: ANET, HSBA.L, BP.L, AMD. PDE PROTECT: QQQ. PDE BUY: CRWD, JPM, NVDA, ALV.DE, ADI. Policy WATCH / PPG PORTFOLIO_WATCH. DPE philosophy COMPETITIVE. live_promotion_allowed=false.' → 'PAPER cycle READY_FOR_PAPER_DAY. PDE SELL: ANET, HSBA.L, BP.L, AMD. PDE PROTECT: QQQ. PDE BUY: CRWD, JPM, ALV.DE, NVDA, ADI. Policy WATCH / PPG PORTFOLIO_WATCH. DPE philosophy COMPETITIVE. live_promotion_allowed=false.'
 
 ## 14. Final PAPER action plan
 
 Synthesized from existing PDE decisions — council does not override hard rules.
 
-- **_PORTFOLIO** → `NO_PAPER_ACTION` (conf=None, hard_override=None) — 
+- **ANET** → `SELL_PAPER` (conf=0.95, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); live promotion lock noted
+- **HSBA.L** → `SELL_PAPER` (conf=0.95, hard_override=False) — PROFIT_TRAILING_EXIT_DRAWDOWN_2_PERCENT: mark=1552.599976 peak=1669.711606468 drawdown=-0.0701388372 cycle=PPC-HSBA.L-20
+- **BP.L** → `SELL_PAPER` (conf=0.794, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); live promotion lock noted
+- **AMD** → `SELL_PAPER` (conf=0.656, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY age=0.0h (held — scale-in eligible); live promotion lock noted (DO_NOT_PRO
+- **QQQ** → `PROTECT_PAPER` (conf=0.568, hard_override=False) — weak lifecycle=WEAKENING; GII strategy=PROTECT_PROFIT_SHADOW; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in el
+- **CRWD** → `BUY_PAPER` (conf=0.773, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); live promotion lock noted
+- **JPM** → `BUY_PAPER` (conf=0.773, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); live promotion lock noted
+- **ALV.DE** → `BUY_PAPER` (conf=0.472, hard_override=False) — monitor strategy=HOLD_AND_MONITOR_SHADOW; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); live promot
+- **NVDA** → `BUY_PAPER` (conf=0.465, hard_override=False) — monitor strategy=HOLD_AND_MONITOR_SHADOW; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); horizon BUY
+- **ADI** → `BUY_PAPER` (conf=0.355, hard_override=False) — signal=STRONG BUY score=100.0; limited capital hint from accounting snapshot; horizon BUY gate: short/medium not aligned
+- **BAC** → `BUY_PAPER` (conf=0.355, hard_override=False) — signal=STRONG BUY score=100.0; limited capital hint from accounting snapshot; horizon BUY gate: short/medium not aligned
+- **IBM** → `BUY_PAPER` (conf=0.355, hard_override=False) — signal=STRONG BUY score=100.0; limited capital hint from accounting snapshot; horizon BUY gate: short/medium not aligned
+- **MET** → `BUY_PAPER` (conf=0.355, hard_override=False) — signal=STRONG BUY score=100.0; limited capital hint from accounting snapshot; horizon BUY gate: short/medium not aligned
+- **ORCL** → `BUY_PAPER` (conf=0.355, hard_override=False) — signal=STRONG BUY score=100.0; limited capital hint from accounting snapshot; horizon BUY gate: short/medium not aligned
+- **TER** → `BUY_PAPER` (conf=0.355, hard_override=False) — signal=STRONG BUY score=100.0; limited capital hint from accounting snapshot; horizon BUY gate: short/medium not aligned
+- **AIG** → `BUY_PAPER` (conf=0.25, hard_override=False) — limited capital hint from accounting snapshot; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchang
+- **AIR.PA** → `BUY_PAPER` (conf=0.25, hard_override=False) — limited capital hint from accounting snapshot; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchang
+- **ALL** → `BUY_PAPER` (conf=0.25, hard_override=False) — limited capital hint from accounting snapshot; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchang
+- **CB** → `BUY_PAPER` (conf=0.25, hard_override=False) — limited capital hint from accounting snapshot; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchang
+- **FTNT** → `BUY_PAPER` (conf=0.25, hard_override=False) — limited capital hint from accounting snapshot; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchang
+- **GS** → `BUY_PAPER` (conf=0.25, hard_override=False) — limited capital hint from accounting snapshot; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchang
+- **INTU** → `BUY_PAPER` (conf=0.25, hard_override=False) — limited capital hint from accounting snapshot; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchang
+- **SAP.DE** → `BUY_PAPER` (conf=0.25, hard_override=False) — limited capital hint from accounting snapshot; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchang
+- **DELL** → `HOLD_PAPER` (conf=0.95, hard_override=False) — profit trailing: PROFIT_TRAILING_HOLD; low capital_efficiency=0.0; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — 
+- **HPQ** → `HOLD_PAPER` (conf=0.95, hard_override=False) — profit trailing: PROFIT_TRAILING_HOLD; low capital_efficiency=0.0; horizon BUY gate: short/medium not aligned — 7D=NEUTR
+- **PG** → `HOLD_PAPER` (conf=0.95, hard_override=False) — healthy winner lifecycle=SURVIVED; top_growth_candidate growth_score=92.4 age=0.0h (held — scale-in eligible); horizon: 
+- **PM** → `HOLD_PAPER` (conf=0.95, hard_override=False) — profit trailing: PROFIT_TRAILING_HOLD; healthy winner lifecycle=EARLY_WINNER; signal=STRONG BUY score=100.0 age=0.0h (he
+- **LLY** → `HOLD_PAPER` (conf=0.918, hard_override=False) — healthy winner lifecycle=EARLY_WINNER; top_growth_candidate growth_score=75.2 age=0.0h (held — scale-in eligible); horiz
+- **CME** → `HOLD_PAPER` (conf=0.908, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); horizon BUY gate: short/m
+- **ICE** → `HOLD_PAPER` (conf=0.908, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY age=0.0h (held — scale-in eligible); horizon BUY gate: short/medium not al
+- **MSFT** → `HOLD_PAPER` (conf=0.908, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); horizon BUY gate: short/m
+- **NOW** → `HOLD_PAPER` (conf=0.908, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); horizon BUY gate: short/m
+- **SNOW** → `HOLD_PAPER` (conf=0.908, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY age=0.0h (held — scale-in eligible); horizon BUY gate: short/medium not al
+- **TEAM** → `HOLD_PAPER` (conf=0.908, hard_override=False) — low capital_efficiency=0.0; signal=STRONG BUY score=100.0 age=0.0h (held — scale-in eligible); horizon BUY gate: short/m
+- **SPY** → `HOLD_PAPER` (conf=0.845, hard_override=False) — healthy winner lifecycle=EARLY_WINNER; signal=STRONG BUY age=0.0h (held — scale-in eligible); top_growth_candidate growt
+- **MRK** → `HOLD_PAPER` (conf=0.792, hard_override=False) — healthy winner lifecycle=SURVIVED; top_growth_candidate growth_score=92.8 age=0.0h (held — scale-in eligible); horizon: 
+- **AAPL** → `HOLD_PAPER` (conf=0.664, hard_override=False) — monitor strategy=HOLD_AND_MONITOR_SHADOW; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchanged; l
+- **DIA** → `HOLD_PAPER` (conf=0.653, hard_override=False) — monitor strategy=HOLD_AND_MONITOR_SHADOW; horizon BUY gate: short/medium not aligned — 7D=NEUTRAL(0.0%); 1M=NEGATIVE(-2.
+- **ULVR.L** → `HOLD_PAPER` (conf=0.653, hard_override=False) — monitor strategy=HOLD_AND_MONITOR_SHADOW; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchanged; l
+- **ABBV** → `HOLD_PAPER` (conf=0.384, hard_override=False) — monitor strategy=HOLD_AND_MONITOR_SHADOW; signal=STRONG BUY age=0.0h (held — scale-in eligible); live promotion lock not
+- **SHEL.L** → `HOLD_PAPER` (conf=0.384, hard_override=False) — monitor strategy=HOLD_AND_MONITOR_SHADOW; live promotion lock noted (DO_NOT_PROMOTE_TO_LIVE) — PAPER scores unchanged; l
 
 ## Operator command
 

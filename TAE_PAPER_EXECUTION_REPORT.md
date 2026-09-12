@@ -1,6 +1,6 @@
 # TAE PAPER Execution Report
 
-**Generated:** 2026-09-11T14:01:30+00:00
+**Generated:** 2026-09-12T15:01:41+00:00
 **Mode:** PAPER_ONLY — NO_BROKER — NO_LIVE_PROMOTION
 
 ## Run summary
@@ -11,25 +11,25 @@
 - Orders skipped (this run): **0**
 - Skipped same action: **80**
 - Skipped unauthorized switch: **0**
-- Accepted action switches: **2**
-- Re-executed on action change: **2**
+- Accepted action switches: **0**
+- Re-executed on action change: **0**
 - Trades written (this run): **0**
-- Trades file total lines: **536**
+- Trades file total lines: **544**
 
 ## Portfolio delta (this run)
 
-- Positions before: **28**
-- Positions after: **28**
-- Cash before: **$129.33**
-- Cash after: **$129.33**
-- Total value: **$29,754.83**
+- Positions before: **27**
+- Positions after: **27**
+- Cash before: **$196.27**
+- Cash after: **$196.27**
+- Total value: **$30,040.47**
 
 ## PnL accounting
 
-- Realized PnL: **$-427.00**
-- Unrealized PnL: **$-159.09**
-- Total PnL: **$-586.09**
-- Value delta vs starting: **$-586.09**
+- Realized PnL: **$-403.34**
+- Unrealized PnL: **$102.89**
+- Total PnL: **$-300.45**
+- Value delta vs starting: **$-300.45**
 
 ## Reconciliation
 
@@ -37,11 +37,11 @@
 - Formula: `total_value = cash + open_positions_value`
 - Formula: `total_pnl = realized_pnl + unrealized_pnl`
 - Formula: `value_delta = total_value - starting_value`
-- total_value: **PASS** expected=29754.8283 actual=29754.8283
-- open_positions_value: **PASS** expected=29625.496 actual=29625.4959
-- unrealized_pnl: **PASS** expected=-159.0936 actual=-159.0935
-- total_pnl: **PASS** expected=-586.0921 actual=-586.0921
-- value_delta: **PASS** expected=-586.0921 actual=-586.0917
+- total_value: **PASS** expected=30040.4687 actual=30040.4687
+- open_positions_value: **PASS** expected=29844.1959 actual=29844.1957
+- unrealized_pnl: **PASS** expected=102.8894 actual=102.8893
+- total_pnl: **PASS** expected=-300.4517 actual=-300.4517
+- value_delta: **PASS** expected=-300.4517 actual=-300.4513
 
 ## Validation
 
@@ -50,9 +50,7 @@
 
 ## Action summary (this run)
 
-- BUY_PAPER: **16**
-- HOLD_PAPER: **1**
-- SKIP_PAPER: **1**
+- BUY_PAPER: **18**
 
 ## Safety
 

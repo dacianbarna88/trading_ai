@@ -1,16 +1,16 @@
 # TAE PAPER Profit Integrity Guard Report
 
-**Generated:** 2026-09-11T14:01:30+00:00
+**Generated:** 2026-09-12T15:23:19+00:00
 **Verdict:** **PAPER_PROFIT_INTEGRITY_CLOSED**
 **Validation safe to resume:** **True**
 
 ## Metrics
 
 - Validation capital base: **$30,000.00**
-- Account value: **$29,754.83**
-- Profit vs $30k base: **$-245.17**
-- Realized PnL: **$-427.00**
-- Unrealized PnL: **$-159.09**
+- Account value: **$30,040.47**
+- Profit vs $30k base: **$40.47**
+- Realized PnL: **$-403.34**
+- Unrealized PnL: **$102.89**
 
 ## Checks
 

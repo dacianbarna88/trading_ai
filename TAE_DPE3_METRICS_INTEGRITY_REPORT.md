@@ -1,6 +1,6 @@
 # TAE DPE-3.1 — Metrics Integrity Audit Report
 
-**Date:** 2026-09-11T13:14:38+00:00
+**Date:** 2026-09-12T15:23:06+00:00
 **Sprint:** DPE-3.1 Metrics Integrity Audit & Synchronization
 **Metrics schema:** dpe.paper_metrics.v2
 **Status:** PASS
@@ -9,16 +9,16 @@
 
 | Layer | Field | Value |
 | --- | --- | --- |
-| execution_jobs.jsonl | jobs_read | 1562 |
-| portfolio.json | processed_job_ids | 1562 |
-| orders.jsonl | orders_written | 1463 |
-| trades.jsonl | trades_written | 1463 |
-| metrics.json | historical_actions.total | 1463 |
+| execution_jobs.jsonl | jobs_read | 1584 |
+| portfolio.json | processed_job_ids | 1584 |
+| orders.jsonl | orders_written | 1484 |
+| trades.jsonl | trades_written | 1484 |
+| metrics.json | historical_actions.total | 1484 |
 | metrics.json | new_actions.total | 0 |
-| portfolio.json | total_value | 55711.6548 |
-| portfolio.json | realized_pnl | -105.4911 |
-| portfolio.json | unrealized_pnl | 489.5129 |
-| portfolio.json | cash | 9916.964 |
+| portfolio.json | total_value | 55712.0914 |
+| portfolio.json | realized_pnl | -104.8961 |
+| portfolio.json | unrealized_pnl | 489.3545 |
+| portfolio.json | cash | 10165.6901 |
 | portfolio.json | position_count | 21 |
 
 ## Detected mismatches (before fix)

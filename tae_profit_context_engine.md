@@ -1,6 +1,6 @@
 # TAE Profit Context Engine v2 (Adaptive Weighted)
 
-**Generated:** 2026-09-11T17:00:52
+**Generated:** 2026-09-12T18:00:49
 **Mode:** SHADOW_ONLY — NONE
 **Final verdict:** PCE_SHADOW_READY_FOR_OBSERVATION
 

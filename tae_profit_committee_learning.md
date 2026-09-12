@@ -1,6 +1,6 @@
 # TAE Profit Committee Learning v2
 
-**Generated:** 2026-09-11T17:00:52
+**Generated:** 2026-09-12T18:00:49
 **Mode:** SHADOW_ONLY — NONE
 **Final verdict:** PDC_V2_SHADOW_READY_FOR_OBSERVATION
 

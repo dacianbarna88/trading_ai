@@ -1,6 +1,6 @@
 # TAE Learning-to-Profit Bridge Report
 
-**Generated:** 2026-09-11T14:00:56+00:00
+**Generated:** 2026-09-12T15:23:12+00:00
 **Mode:** PAPER_ONLY — READ_ONLY — NO_BROKER — NO_LIVE_EXECUTION
 **Live promotion allowed:** false
 
@@ -26,7 +26,7 @@
 ### 1. `LTB-DPE-PHIL-001` — DPE_PHILOSOPHY
 
 - **Tickers:** (portfolio-level)
-- **Confidence:** 0.672 | **Risk:** LOW
+- **Confidence:** 0.669 | **Risk:** LOW
 - **Target metric:** profit_capture_rate
 - **Mechanism:** PAPER dual-arm weighting experiment shifts toward TIE philosophy (52.9% competitive / 47.1% collaborative).
 - **PAPER action:** `PAPER_DPE_PHILOSOPHY_WEIGHT`

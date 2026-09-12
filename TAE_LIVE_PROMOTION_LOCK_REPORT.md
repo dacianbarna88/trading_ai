@@ -1,6 +1,6 @@
 # TAE Live Promotion Lock Report
 
-**Generated:** 2026-09-11T13:14:46+00:00
+**Generated:** 2026-09-12T15:23:17+00:00
 
 ## Policy
 

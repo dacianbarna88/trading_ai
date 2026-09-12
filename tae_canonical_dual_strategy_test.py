@@ -225,5 +225,47 @@ class CanonicalDualStrategyTests(unittest.TestCase):
         self.assertTrue(hasattr(live_trail, "update_trailing_state"))
 
 
+class SlowTickerDiagnosticsTest(unittest.TestCase):
+    """Regression for 2026-09-12: a real hourly cycle stalled ~1h45m inside
+    run_v2_challenger_cycle's per-ticker loop with no way to tell afterward
+    which ticker/phase ate the time (confirmed via a live py-spy dump that
+    the child process was genuinely CPU-bound in here, not network-blocked).
+    A per-ticker slow-call warning turns a future recurrence into a
+    log-read instead of live process forensics."""
+
+    def test_slow_call_is_logged_with_ticker_and_phase(self) -> None:
+        """Note: run_v2_challenger_cycle's ticker universe is built from
+        the real V1/V2 positions + WATCHLIST + get_sp500_tickers() --
+        independent of whatever mark_provider is passed in -- so a fake
+        ticker never actually appears in the loop. Assert against a real
+        S&P 500 constituent (AAPL) instead."""
+        import io
+        import time
+        from contextlib import redirect_stdout
+
+        def _slow_run_v2_arm(**kwargs):
+            time.sleep(0.05)
+            return {"action": "HOLD", "reason": "TEST"}
+
+        buf = io.StringIO()
+        with mock.patch.object(dual, "SLOW_TICKER_THRESHOLD_SEC", 0.01), \
+             mock.patch.object(pprun, "_run_v2_arm", side_effect=_slow_run_v2_arm), \
+             redirect_stdout(buf):
+            dual.run_v2_challenger_cycle(mark_provider=_marks({"AAPL": 100.0}))
+        output = buf.getvalue()
+        self.assertIn("SLOW _run_v2_arm", output)
+        self.assertIn("ticker=AAPL", output)
+        self.assertIn("phase=", output)
+
+    def test_fast_calls_produce_no_warning(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            dual.run_v2_challenger_cycle(mark_provider=_marks({"ZZZ": 100.0}))
+        self.assertNotIn("SLOW _run_v2_arm", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
