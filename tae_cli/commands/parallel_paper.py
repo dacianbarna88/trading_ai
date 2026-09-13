@@ -75,6 +75,21 @@ def run_short_margin_once(_args: list[str] | None = None) -> int:
     return 0 if c.get("reconciliation_pass") else 1
 
 
+def run_mean_reversion_once(_args: list[str] | None = None) -> int:
+    """Explicit single cycle for the new isolated mean-reversion arm
+    (exp_mean_reversion). Self-contained — does not touch V1/V2/V3/
+    exp_short_margin."""
+    from tae_parallel_paper_mean_reversion import run_mean_reversion_cycle
+
+    print("===== TAE PARALLEL-PAPER-RUN-MEAN-REVERSION-ONCE =====")
+    c = run_mean_reversion_cycle()
+    print("arm", c.get("arm"))
+    print("account_value", c.get("account_value"), "cash", c.get("cash"))
+    print("open_positions", c.get("open_positions"))
+    print("reconciliation_pass", c.get("reconciliation_pass"))
+    return 0 if c.get("reconciliation_pass") else 1
+
+
 def run_health(_args: list[str] | None = None) -> int:
     from tae_parallel_paper_autostart import status_autostart
     from tae_parallel_paper_runtime import health_snapshot

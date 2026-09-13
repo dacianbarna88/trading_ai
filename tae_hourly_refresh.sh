@@ -61,4 +61,17 @@ else
     echo "WARNING: parallel-paper-run-short-margin-once exited $SHORT_MARGIN_EXIT"
 fi
 
+echo "----- exp_short_margin done, starting exp_mean_reversion run-once -----"
+# Self-contained isolated arm (tae_parallel_paper_mean_reversion.py, added
+# 2026-09-13) — does not touch V1/V2/V3/exp_short_margin. Non-fatal, same
+# reasoning as exp_short_margin above.
+"$PYTHON_BIN" tae.py parallel-paper-run-mean-reversion-once
+MEAN_REVERSION_EXIT=$?
+if [ "$MEAN_REVERSION_EXIT" -eq 0 ]; then
+    mkdir -p "$SCRIPT_DIR/runtime_outputs/parallel_paper/exp_mean_reversion"
+    date -u '+%Y-%m-%dT%H:%M:%SZ' > "$SCRIPT_DIR/runtime_outputs/parallel_paper/exp_mean_reversion/hourly_trigger_last_success.txt"
+else
+    echo "WARNING: parallel-paper-run-mean-reversion-once exited $MEAN_REVERSION_EXIT"
+fi
+
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') hourly refresh end ====="
