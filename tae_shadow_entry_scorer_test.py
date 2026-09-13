@@ -35,6 +35,21 @@ class ShadowScoreTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("error", result)
 
+    def test_horizon_alignment_score_actually_moves_the_prediction(self) -> None:
+        """Regression for the feature-starvation bug (2026-09-12): passing
+        only growth_score/confidence left 9/11 features at fixed neutral
+        defaults, which is why the shadow score clustered narrowly
+        (0.91-0.94) regardless of the ticker. horizon_alignment_score has
+        the largest learned weight of any feature, so a real value must
+        move p_profit versus the neutral-default (50.0) case."""
+        default_result = shadow.shadow_entry_score(growth_score=80.0, confidence=0.5)
+        enriched_result = shadow.shadow_entry_score(
+            growth_score=80.0, confidence=0.5, horizon_alignment_score=90.0
+        )
+        self.assertIsNotNone(default_result)
+        self.assertIsNotNone(enriched_result)
+        self.assertNotEqual(default_result["p_profit"], enriched_result["p_profit"])
+
     def test_scorer_is_cached_not_refit_per_call(self) -> None:
         calls = []
         real_fit = shadow._get_scorer
@@ -64,12 +79,33 @@ class RuntimeWiringSmokeTest(unittest.TestCase):
         source = inspect.getsource(ppr._run_v1_arm)
         self.assertIn("shadow_scorer.shadow_entry_score", source)
         self.assertIn('"shadow_entry_score": shadow_score', source)
-        # The line that actually authorizes a BUY must still be gated on
-        # `favorable` (the existing heuristic), not on shadow_score.
-        buy_gate_line = next(
-            line for line in source.splitlines() if "phase_n in {PHASE_ENTRY, PHASE_ALL} and favorable" in line
-        )
-        self.assertNotIn("shadow_score", buy_gate_line)
+        # The condition that actually authorizes a BUY must still be gated
+        # on `favorable` (the existing heuristic) etc., never on
+        # shadow_score -- checked as "no line mentions both", robust to
+        # the guard clause being reformatted across multiple lines (it now
+        # also checks eligible/liquid, added 2026-09-12/13).
+        lines_with_favorable = [line for line in source.splitlines() if "favorable" in line]
+        self.assertTrue(lines_with_favorable)
+        for line in lines_with_favorable:
+            self.assertNotIn("shadow_score", line)
+
+    def test_v1_arm_sources_horizon_alignment_from_same_day_pde_signals(self) -> None:
+        """Regression for the feature-starvation fix: the shadow call must
+        be enriched from the same same-day canonical PDE signal lookup V3
+        uses (_load_today_pde_signals), not left at growth_score/confidence
+        only."""
+        import tae_parallel_paper_runtime as ppr
+
+        source = inspect.getsource(ppr._run_v1_arm)
+        self.assertIn("horizon_alignment_score=pde_sig.get(\"horizon_alignment_score\")", source)
+        self.assertIn("horizon_conflict_flag=pde_sig.get(\"horizon_conflict_flag\")", source)
+
+    def test_run_cycle_wires_pde_signals_into_v1_arm(self) -> None:
+        import tae_parallel_paper_runtime as ppr
+
+        source = inspect.getsource(ppr)
+        self.assertIn("v1_pde_signals = v3_pde_signals or _load_today_pde_signals()", source)
+        self.assertIn("pde_signals=v1_pde_signals", source)
 
 
 if __name__ == "__main__":

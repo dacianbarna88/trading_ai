@@ -15,7 +15,7 @@ import tae_parallel_paper_config as ppc
 import tae_parallel_paper_runtime as pprun
 
 
-def _marks(prices: dict[str, float], *, score: float = 90.0, signal: str = "STRONG BUY"):
+def _marks(prices: dict[str, float], *, score: float = 100.0, signal: str = "STRONG BUY"):
     def provider(tickers):
         out = {}
         for t in tickers or list(prices):

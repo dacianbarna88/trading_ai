@@ -32,6 +32,8 @@ import tae_strategy_v1_vol_stop as v1volstop
 import tae_strategy_v2_kelly_sizing as v2kelly
 import tae_strategy_v2_concentration as v2conc
 import tae_strategy_v2_relative_weakness as v2relweak
+import tae_liquidity_signal as liq
+import tae_macro_regime as macro
 import tae_shadow_entry_scorer as shadow_scorer
 try:
     from tae_strategy_v2_trailing import V2_PROFIT_TRAILING_REASON
@@ -62,7 +64,7 @@ PHASE_ALL = "all"
 # in the Phase 5 soak: with a 25-ticker watchlist, only 8 tickers cleared
 # 80 on a typical day, and once V1 held all of them there was nothing left
 # to evaluate. One named constant now, not three literals to keep in sync.
-V1_V2_ENTRY_MIN_SCORE = 60
+V1_V2_ENTRY_MIN_SCORE = 100
 
 # V2 had no position-count cap at all: it opened a new position for every
 # candidate that cleared entry across the 100-ticker watchlist, diluting a
@@ -816,6 +818,49 @@ def _mark_is_usable(snap: dict[str, Any] | None) -> tuple[bool, str, float]:
     return True, "FRESH", px
 
 
+LIQUIDITY_FETCH_PERIOD = "2mo"
+LIQUIDITY_FETCH_TIMEOUT_SECONDS = 60.0
+
+
+def _fetch_liquidity_flags(tickers: list[str]) -> dict[str, bool]:
+    """Sprint 3 Phase 2 (2026-09-13): one batched volume fetch per cycle
+    (not per ticker — same "don't repeat the serial-network-call mistake"
+    discipline as tae_parallel_paper_mean_reversion.fetch_batch_closes).
+    Backtested on real V1/V2 trade history: the LOW average-volume
+    tercile at entry had win_rate=20.0%/PF=0.39 vs HIGH tercile's
+    win_rate=54.9%/PF=0.92 (tae_liquidity_backtest.py) — the strongest,
+    cleanest split found this sprint. Fail-soft: a ticker missing from
+    the result (fetch failure, delisted, too little history) is treated
+    as liquid=True by callers (tae_liquidity_signal.is_liquid_enough),
+    not blocked on missing data."""
+    if not tickers:
+        return {}
+    try:
+        import yfinance as yf
+
+        from tae_network_hard_timeout import hard_timeout
+
+        with hard_timeout(LIQUIDITY_FETCH_TIMEOUT_SECONDS):
+            data = yf.download(
+                tickers, period=LIQUIDITY_FETCH_PERIOD, interval="1d", group_by="ticker",
+                auto_adjust=True, progress=False,
+            )
+    except Exception:
+        return {}
+    out: dict[str, bool] = {}
+    for t in tickers:
+        try:
+            vol = data[t]["Volume"].dropna() if len(tickers) > 1 else data["Volume"].dropna()
+        except (KeyError, TypeError):
+            continue
+        if vol.empty:
+            continue
+        avg = liq.average_volume([float(v) for v in vol])
+        if avg is not None:
+            out[t] = liq.is_liquid_enough(avg)
+    return out
+
+
 def default_mark_provider(tickers: list[str]) -> dict[str, dict[str, Any]]:
     """Best-effort marks from signals.csv / live_signals.csv; no silent entry-price invent.
 
@@ -881,7 +926,11 @@ def default_mark_provider(tickers: list[str]) -> dict[str, dict[str, Any]]:
             "mark_price": px,
             "score": score_f,
             "signal": signal,
-            "eligible": signal in {"STRONG BUY", "BUY"} or (score_f is not None and score_f >= V1_V2_ENTRY_MIN_SCORE),
+            # Score is a 5-level categorical signal (0/40/60/80/100), not continuous;
+            # "STRONG BUY" fires at a moving dynamic threshold well below 100, so it
+            # must NOT bypass the score floor here (empirically, score<100 entries are
+            # net-negative noise, see tae_score_decile_backtest.py).
+            "eligible": score_f is not None and score_f >= V1_V2_ENTRY_MIN_SCORE,
             "mark_freshness": freshness,
             "mark_age_seconds": 0.0,
             "data_fresh": True,
@@ -1881,6 +1930,7 @@ def _run_v1_arm(
     p: dict[str, Path],
     decision_id: str,
     phase: str = PHASE_ALL,
+    pde_signals: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     # Optional offline mirror mode — not the V1/V2 experiment default
     if str(cfg.get("V1_MODE") or portfolio.get("v1_mode") or "").upper() == "CANONICAL_PAPER_MIRROR":
@@ -1918,7 +1968,10 @@ def _run_v1_arm(
     mark_ok, mark_status, mark = _mark_is_usable(snap)
     score = snap.get("score") if isinstance(snap, dict) else None
     signal = _s((snap or {}).get("signal"))
-    favorable = signal in {"STRONG BUY", "BUY"} or (score is not None and float(score) >= V1_V2_ENTRY_MIN_SCORE)
+    # See eligible() above: "STRONG BUY" fires at a dynamic threshold below 100,
+    # so it must not bypass the score floor — the score-decile backtest showed
+    # score<100 entries are net-negative noise for this arm.
+    favorable = score is not None and float(score) >= V1_V2_ENTRY_MIN_SCORE
     pos = (portfolio.get("positions") or {}).get(ticker)
     action = "HOLD"
     reason = "V1_HOLD"
@@ -1927,9 +1980,12 @@ def _run_v1_arm(
     executed = False
     shadow_score: dict[str, Any] | None = None
     if not (pos and _f(pos.get("shares")) > 0) and phase_n in {PHASE_ENTRY, PHASE_ALL}:
+        pde_sig = (pde_signals or {}).get(_s(ticker).upper()) or {}
         shadow_score = shadow_scorer.shadow_entry_score(
             growth_score=score,
-            confidence=(snap or {}).get("confidence") if isinstance(snap, dict) else None,
+            confidence=pde_sig.get("confidence", (snap or {}).get("confidence") if isinstance(snap, dict) else None),
+            horizon_alignment_score=pde_sig.get("horizon_alignment_score"),
+            horizon_conflict_flag=pde_sig.get("horizon_conflict_flag"),
         )
     execution_id: str | None = None
     realized_pnl_fill: float | None = None
@@ -2118,7 +2174,22 @@ def _run_v1_arm(
                 pos["last_valid_mark"] = mark
                 pos["mark_status"] = mark_status if mark_status else "FRESH"
                 pos["mark_timestamp"] = _now()
-    elif (not has_pos) and phase_n in {PHASE_ENTRY, PHASE_ALL} and favorable and (snap or {}).get("eligible") is not False:
+    elif (
+        (not has_pos)
+        and phase_n in {PHASE_ENTRY, PHASE_ALL}
+        and favorable
+        and (snap or {}).get("eligible") is not False
+        and (snap or {}).get("liquid") is False
+    ):
+        action = "HOLD"
+        reason = "V1_BLOCKED_ILLIQUID"
+    elif (
+        (not has_pos)
+        and phase_n in {PHASE_ENTRY, PHASE_ALL}
+        and favorable
+        and (snap or {}).get("eligible") is not False
+        and (snap or {}).get("liquid") is not False
+    ):
         entry_ok, entry_reason = _entry_price_allowed(snap, mark_status)
         if not mark_ok:
             action = "HOLD"
@@ -2400,7 +2471,10 @@ def _run_v2_arm(
     mark_ok, mark_status, mark = _mark_is_usable(snap)
     score = snap.get("score") if isinstance(snap, dict) else None
     signal = _s((snap or {}).get("signal"))
-    favorable = signal in {"STRONG BUY", "BUY"} or (score is not None and float(score) >= V1_V2_ENTRY_MIN_SCORE)
+    # See _run_v1_arm: "STRONG BUY" fires at a dynamic threshold below 100, so it
+    # must not bypass the score floor — score<100 entries are net-negative noise
+    # (tae_score_decile_backtest.py).
+    favorable = score is not None and float(score) >= V1_V2_ENTRY_MIN_SCORE
     # Consume canonical Decision Brain / PDE action — do not invent BUY over SKIP.
     try:
         from tae_paper_execution import (
@@ -3069,14 +3143,23 @@ def _run_v2_arm(
                     reason = gate.code
                 else:
                     reentry_allowed = True
-            if entry_ok and _open_position_count(portfolio) >= V2_MAX_POSITIONS and (
-                (not in_watch and favorable and snap.get("eligible") is not False)
+            if (
+                entry_ok
+                and not in_watch
+                and favorable
+                and snap.get("eligible") is not False
+                and snap.get("liquid") is False
+            ):
+                action = "HOLD"
+                reason = "V2_BLOCKED_ILLIQUID"
+            elif entry_ok and _open_position_count(portfolio) >= V2_MAX_POSITIONS and (
+                (not in_watch and favorable and snap.get("eligible") is not False and snap.get("liquid") is not False)
                 or (in_watch and reentry_allowed)
             ):
                 action = "BLOCKED"
                 reason = "V2_MAX_POSITIONS_REACHED"
             elif entry_ok and (
-                (not in_watch and favorable and snap.get("eligible") is not False)
+                (not in_watch and favorable and snap.get("eligible") is not False and snap.get("liquid") is not False)
                 or (in_watch and reentry_allowed)
             ):
                 binp = pol.BuyPolicyInput(
@@ -3429,6 +3512,7 @@ def _run_v3_arm(
     phase: str = PHASE_ALL,
     blocked_rebuy: bool = False,
     pde_signals: dict[str, dict[str, Any]] | None = None,
+    regime: "v3pol.RegimeGrid | None" = None,
 ) -> dict[str, Any]:
     """
     V3 ("V_learning") — isolated parallel PAPER arm (Phase 3). No fixed
@@ -3444,16 +3528,14 @@ def _run_v3_arm(
     helper — V1/V2 don't share one either, and introducing one now would
     touch their hot path for no benefit to this change.
 
-    Known Phase-3 simplification: `regime.trend` / `regime.vol_tercile`
-    default to "UNKNOWN" (see below) — this runtime has no per-ticker
-    historical-closes feed today (`snap` is a single current-mark snapshot,
-    not a price series; V1/V2 don't retain one either). This matches
-    training-data reality: market_regime was constant "BULL" and
-    volatility_regime constant "UNKNOWN" across all historical decisions
-    (the scorer was never trained on real regime variation), so this is not
-    a regression versus what the model can actually use today. Follow-up:
-    wire a real closes feed once one exists in this runtime, then this
-    function needs no change — only the `regime =` line below moves.
+    Regime (2026-09-13, Sprint 3 Phase 1): `regime.vol_tercile` is now a
+    real once-per-cycle VIX tercile (see run_cycle's `v3_regime`,
+    tae_macro_regime.py) — backtested to actually split the technical
+    score's win rate (LOW-VIX 39.3%/PF 0.77 vs MED/HIGH ~20%/~0.25).
+    `regime.trend` stays "UNKNOWN": the observed window had zero BEAR days
+    to validate against, so it's not wired live until there's real
+    evidence either way. Caller passes `regime`; a default is kept here
+    only so direct/test calls without it don't crash.
     """
     _assert_paper_isolation(cfg)
     phase_n = _s(phase).lower() or PHASE_ALL
@@ -3463,7 +3545,7 @@ def _run_v3_arm(
     has_pos = bool(pos and _f(pos.get("shares")) > 0)
     ts_now = _now()
 
-    regime = v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile="UNKNOWN", realized_vol_annualized=None)
+    regime = regime or v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile="UNKNOWN", realized_vol_annualized=None)
 
     def _record(
         action: str,
@@ -3486,6 +3568,7 @@ def _run_v3_arm(
             "quantity": qty,
             "value": value,
             "p_profit": p_profit,
+            "regime": regime.regime_id,
             "mark_price": mark if mark_ok else None,
             "mark_status": mark_status,
             "ts": ts_now,
@@ -3724,6 +3807,15 @@ def run_cycle(
         marks0 = provider([])
         base_tickers = sorted(marks0.keys())[:30]
     marks = provider(base_tickers)
+    # Sprint 3 Phase 2 liquidity floor: only on the real production path —
+    # tests that inject their own mark_provider() must stay network-free.
+    if mark_provider is None:
+        try:
+            liquidity_flags = _fetch_liquidity_flags(list(marks.keys()))
+        except Exception:
+            liquidity_flags = {}
+        for t, snap in marks.items():
+            snap["liquid"] = liquidity_flags.get(t, True)
     # Freeze snapshot
     snap_id = snapshot_id(marks, ts)
     snap_path = p["snapshots"]
@@ -3766,7 +3858,22 @@ def run_cycle(
     v3_before_cash = 0.0
     v3_work: dict[str, Any] = {}
     v3_pde_signals: dict[str, dict[str, Any]] = {}
+    # Sprint 3 Phase 1: VIX tercile is the only regime dimension validated
+    # so far (tae_macro_regime_backtest.py, 2026-09-13) — LOW-VIX entries
+    # win_rate=39.3%/PF=0.77 vs MED/HIGH ~20%/~0.25 on real V1/V2 history.
+    # Trend/yield-curve had zero regime variation in the observed window
+    # and stay "UNKNOWN" until there's real evidence either way. One fetch
+    # per cycle (not per ticker) — reused at both RegimeGrid call sites
+    # below so the pre-pass candidate pool and the real decision score the
+    # same regime.
+    v3_regime = v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile="UNKNOWN", realized_vol_annualized=None)
     if v3_enabled:
+        try:
+            v3_regime = v3pol.RegimeGrid(
+                trend="UNKNOWN", vol_tercile=macro.fetch_current_vix_tercile(), realized_vol_annualized=None
+            )
+        except Exception:
+            pass
         try:
             v3_starting_capital = next(
                 (
@@ -3789,6 +3896,11 @@ def run_cycle(
 
     v3_candidate_pool: list[float] = []
     v3_sold_this_cycle: set[str] = set()
+    # V1's shadow entry scorer reuses the same same-day canonical PDE signal
+    # lookup V3 uses, so it isn't limited to growth_score/confidence alone.
+    # Reuse v3_pde_signals if already loaded for V3 this cycle; otherwise
+    # load it fresh (cheap local file read, own try/except inside).
+    v1_pde_signals = v3_pde_signals or _load_today_pde_signals()
 
     def _arm_pass(phase: str) -> None:
         for t in tickers_run:
@@ -3808,6 +3920,7 @@ def run_cycle(
                         p=p,
                         decision_id=f"{did}-V1-{phase}",
                         phase=phase,
+                        pde_signals=v1_pde_signals,
                     )
                 except Exception as exc:
                     result["v1_ok"] = False
@@ -3855,6 +3968,7 @@ def run_cycle(
                         phase=phase,
                         blocked_rebuy=t in v3_sold_this_cycle,
                         pde_signals=v3_pde_signals,
+                        regime=v3_regime,
                     )
                 except Exception as exc:
                     result["v3_ok"] = False
@@ -3897,8 +4011,11 @@ def run_cycle(
         # decide_v3 can calibrate its BUY threshold from *this cycle's* own
         # distribution instead of a fixed constant (research note §5). Must
         # run after the manage phase (which may have closed positions) and
-        # before the entry phase (which consumes this pool).
-        regime = v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile="UNKNOWN", realized_vol_annualized=None)
+        # before the entry phase (which consumes this pool). Reuses the
+        # SAME v3_regime computed once above — the pool and the real
+        # decision must score identical regime features or p_profit
+        # values in the pool won't be comparable to the live score.
+        regime = v3_regime
         for t in tickers_run:
             snap = marks.get(t)
             if not snap:

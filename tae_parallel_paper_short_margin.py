@@ -52,6 +52,15 @@ MAX_MARGIN_UTILIZATION_PCT = 0.5
 
 SHORT_ENTRY_MAX_SCORE = 20.0
 
+# Paused 2026-09-12: PF 0.08 / win rate 11% over the first 10 days and 9
+# covers on a deliberately crude entry (see module docstring). At this loss
+# rate the arm is burning capital faster than it's gathering useful
+# calibration data. Existing open positions are untouched -- they keep
+# being managed by the same stop-loss/trailing/margin-call exits below.
+# Flip back to False once the entry signal has been redesigned.
+PAUSE_NEW_SHORTS = True
+PAUSE_REASON = "SHORT_ENTRIES_PAUSED_WEAK_PF"
+
 STOP_LOSS_PCT = 3.0
 TRAILING_ACTIVATE_PCT = 5.0
 TRAILING_DISTANCE_PCT = 2.0
@@ -103,6 +112,25 @@ def _load_or_create_portfolio(path: Path) -> dict[str, Any]:
     return pf
 
 
+def _long_held_tickers_across_other_arms() -> frozenset[str]:
+    """Tickers currently held long (shares > 0) by V1, V2, or V3 -- used to
+    stop exp_short_margin from shorting a name another arm is already long
+    on (see the cross-arm collision guard in _decide_and_execute_ticker).
+    Reads the other arms' own portfolio.json files directly; this module
+    still never imports or mutates their execution code."""
+    held: set[str] = set()
+    for arm_dir in ("v1", "v2", "v3"):
+        path = Path("runtime_outputs/parallel_paper") / arm_dir / "portfolio.json"
+        try:
+            portfolio = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for ticker, pos in (portfolio.get("positions") or {}).items():
+            if pes._f((pos or {}).get("shares")) > 0:
+                held.add(ticker)
+    return frozenset(held)
+
+
 def _open_short_position_count(portfolio: dict[str, Any]) -> int:
     return sum(
         1 for pos in (portfolio.get("positions") or {}).values() if pes._f(pos.get("shares")) < 0
@@ -116,6 +144,7 @@ def _decide_and_execute_ticker(
     snap: dict[str, Any],
     p: dict[str, Path],
     decision_id: str,
+    long_held_elsewhere: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     mark_ok, mark_status, mark = ppr._mark_is_usable(snap)
     positions = portfolio.get("positions") or {}
@@ -226,6 +255,13 @@ def _decide_and_execute_ticker(
         score = snap.get("score")
         bearish = score is not None and float(score) <= SHORT_ENTRY_MAX_SCORE
         already_long = bool(pos and pes._f(pos.get("shares")) > 0)
+        # Cross-arm collision guard (2026-09-12): the overlap audit found
+        # exp_short_margin shorting 7 of V3's 12 open longs (plus DIA
+        # simultaneously long in V1+V2) simultaneously -- both sides pay
+        # commission/slippage on the same name while the net exposure
+        # nets toward zero, which is waste, not a deliberate hedge (the
+        # short side's signal is independent and often wrong on its own).
+        held_long_by_another_arm = ticker in long_held_elsewhere
         # Note: deliberately NOT gating on snap["eligible"] here — that flag
         # is computed for the long/BUY path (checked directly: the lowest-
         # score, most bearish-looking tickers in real data all come back
@@ -233,9 +269,11 @@ def _decide_and_execute_ticker(
         # this rule is meant to catch). Its semantics for a short entry are
         # unverified, so it's left out rather than reused on a guess.
         if (
-            mark_ok
+            not PAUSE_NEW_SHORTS
+            and mark_ok
             and bearish
             and not already_long
+            and not held_long_by_another_arm
             and _open_short_position_count(portfolio) < MAX_SHORT_POSITIONS
             and pes.margin_utilization_pct(portfolio) < MAX_MARGIN_UTILIZATION_PCT
         ):
@@ -269,6 +307,11 @@ def _decide_and_execute_ticker(
                             "cash_after": pes._f(portfolio.get("cash")),
                         },
                     )
+        elif bearish and not already_long:
+            if PAUSE_NEW_SHORTS:
+                reason = PAUSE_REASON
+            elif held_long_by_another_arm:
+                reason = "SHORT_BLOCKED_LONG_ELSEWHERE"
 
     dec = {
         "ts": ppr._now(),
@@ -299,12 +342,18 @@ def run_short_margin_cycle() -> dict[str, Any]:
 
     held_tickers = list((portfolio.get("positions") or {}).keys())
     all_tickers = sorted(set(tickers) | set(held_tickers))
+    long_held_elsewhere = _long_held_tickers_across_other_arms()
 
     for ticker in all_tickers:
         snap = marks.get(ticker) or {"mark_price": None, "score": None, "eligible": None}
         decision_id = f"SM-{ticker}-{uuid.uuid4().hex[:12].upper()}"
         _decide_and_execute_ticker(
-            portfolio=portfolio, ticker=ticker, snap=snap, p=p, decision_id=decision_id
+            portfolio=portfolio,
+            ticker=ticker,
+            snap=snap,
+            p=p,
+            decision_id=decision_id,
+            long_held_elsewhere=long_held_elsewhere,
         )
 
     mark_prices = {t: pes._f(s.get("mark_price")) for t, s in marks.items()}

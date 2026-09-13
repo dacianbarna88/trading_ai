@@ -249,5 +249,51 @@ class RuntimeSmokeTest(unittest.TestCase):
         self.assertEqual(sm.ARM_ID, "exp_short_margin")
 
 
+class EntryGatingTest(unittest.TestCase):
+    """2026-09-12: at PF 0.08 / win rate 11% over the first 10 days, new
+    shorts are paused (PAUSE_NEW_SHORTS). The overlap audit also found the
+    arm shorting names other arms already held long (7 of V3's 12 open
+    longs) -- both a waste (fees on both sides, near-zero net exposure) and
+    not a deliberate hedge, since the two signals are independent. These
+    lock in both guards directly against _decide_and_execute_ticker so a
+    future flip of PAUSE_NEW_SHORTS can't silently resurrect the collision
+    bug."""
+
+    def _bearish_snap(self) -> dict:
+        return {"mark_price": 100.0, "score": 5.0, "signal": "WAIT", "eligible": False}
+
+    def _run(self, *, paused: bool, long_held_elsewhere=frozenset()) -> dict:
+        import tae_parallel_paper_short_margin as sm
+        from unittest import mock
+
+        portfolio = {"cash": 30000.0, "positions": {}, "realized_pnl": 0.0, "margin_reserved": 0.0}
+        with mock.patch.object(sm, "PAUSE_NEW_SHORTS", paused), mock.patch.object(
+            sm, "_paths", return_value={"decisions": None, "trades": None}
+        ), mock.patch.object(sm, "_append_jsonl"):
+            return sm._decide_and_execute_ticker(
+                portfolio=portfolio,
+                ticker="ZZZ",
+                snap=self._bearish_snap(),
+                p=sm._paths(),
+                decision_id="TEST-1",
+                long_held_elsewhere=long_held_elsewhere,
+            )
+
+    def test_paused_blocks_an_otherwise_qualifying_short(self) -> None:
+        dec = self._run(paused=True)
+        self.assertEqual(dec["action"], "HOLD")
+        self.assertEqual(dec["reason"], "SHORT_ENTRIES_PAUSED_WEAK_PF")
+
+    def test_collision_with_a_long_held_elsewhere_blocks_the_short(self) -> None:
+        dec = self._run(paused=False, long_held_elsewhere=frozenset({"ZZZ"}))
+        self.assertEqual(dec["action"], "HOLD")
+        self.assertEqual(dec["reason"], "SHORT_BLOCKED_LONG_ELSEWHERE")
+
+    def test_unpaused_and_no_collision_still_opens_a_short(self) -> None:
+        dec = self._run(paused=False, long_held_elsewhere=frozenset())
+        self.assertEqual(dec["action"], "SHORT")
+        self.assertEqual(dec["reason"], "SHORT_BEARISH_SCORE")
+
+
 if __name__ == "__main__":
     unittest.main()
