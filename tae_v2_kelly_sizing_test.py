@@ -124,6 +124,79 @@ class RealDataSmokeTest(unittest.TestCase):
         self.assertIn("payoff_ratio", diag)
 
 
+class EntryScoreFilterTest(unittest.TestCase):
+    """2026-09-13: V1_V2_ENTRY_MIN_SCORE was raised 60->100. Without a
+    filter, the empirical edge keeps blending old score-60/80 trades
+    (weak/noisy, per tae_score_decile_backtest.py) into the sizing input
+    forever, silently understating what the CURRENT gate actually
+    produces. min_entry_score must exclude pre-regime-change trades."""
+
+    def _write_trade_with_entry(self, fh, *, ticker: str, decision_id: str, ts_buy: str, ts_close: str, pnl: float) -> None:
+        fh.write(json.dumps({"ts": ts_buy, "ticker": ticker, "action": "BUY", "decision_id": decision_id}) + "\n")
+        fh.write(json.dumps({"ts": ts_close, "ticker": ticker, "action": "CLOSE", "realized_pnl": pnl}) + "\n")
+
+    def test_filters_out_trades_entered_below_the_current_score_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trades_path = Path(tmp) / "trades.jsonl"
+            decisions_path = Path(tmp) / "decisions.jsonl"
+            with trades_path.open("w") as fh:
+                self._write_trade_with_entry(
+                    fh, ticker="OLD", decision_id="D-OLD",
+                    ts_buy="2026-07-01T10:00:00Z", ts_close="2026-07-05T10:00:00Z", pnl=5.0,
+                )
+                self._write_trade_with_entry(
+                    fh, ticker="NEW", decision_id="D-NEW",
+                    ts_buy="2026-09-13T10:00:00Z", ts_close="2026-09-14T10:00:00Z", pnl=50.0,
+                )
+            with decisions_path.open("w") as fh:
+                fh.write(json.dumps({"decision_id": "D-OLD", "score": 80.0}) + "\n")
+                fh.write(json.dumps({"decision_id": "D-NEW", "score": 100.0}) + "\n")
+
+            _, _, diag = v2kelly.compute_v2_empirical_edge(
+                trades_path, min_entry_score=100.0, decisions_path=decisions_path
+            )
+            self.assertEqual(diag["n_samples"], 1)
+
+    def test_without_min_entry_score_counts_everything_unfiltered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trades_path = Path(tmp) / "trades.jsonl"
+            decisions_path = Path(tmp) / "decisions.jsonl"
+            with trades_path.open("w") as fh:
+                self._write_trade_with_entry(
+                    fh, ticker="OLD", decision_id="D-OLD",
+                    ts_buy="2026-07-01T10:00:00Z", ts_close="2026-07-05T10:00:00Z", pnl=5.0,
+                )
+                self._write_trade_with_entry(
+                    fh, ticker="NEW", decision_id="D-NEW",
+                    ts_buy="2026-09-13T10:00:00Z", ts_close="2026-09-14T10:00:00Z", pnl=50.0,
+                )
+            with decisions_path.open("w") as fh:
+                fh.write(json.dumps({"decision_id": "D-OLD", "score": 80.0}) + "\n")
+                fh.write(json.dumps({"decision_id": "D-NEW", "score": 100.0}) + "\n")
+
+            _, _, diag = v2kelly.compute_v2_empirical_edge(trades_path)
+            self.assertEqual(diag["n_samples"], 2)
+
+    def test_zero_qualifying_trades_shrinks_fully_to_prior_not_a_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trades_path = Path(tmp) / "trades.jsonl"
+            decisions_path = Path(tmp) / "decisions.jsonl"
+            with trades_path.open("w") as fh:
+                self._write_trade_with_entry(
+                    fh, ticker="OLD", decision_id="D-OLD",
+                    ts_buy="2026-07-01T10:00:00Z", ts_close="2026-07-05T10:00:00Z", pnl=5.0,
+                )
+            with decisions_path.open("w") as fh:
+                fh.write(json.dumps({"decision_id": "D-OLD", "score": 80.0}) + "\n")
+
+            p_profit, payoff_ratio, diag = v2kelly.compute_v2_empirical_edge(
+                trades_path, min_entry_score=100.0, decisions_path=decisions_path
+            )
+            self.assertEqual(p_profit, v2kelly.DEFAULT_P_PROFIT)
+            self.assertEqual(payoff_ratio, v2kelly.DEFAULT_PAYOFF_RATIO)
+            self.assertEqual(diag["source"], "PRIOR_ONLY_NO_DATA")
+
+
 class RuntimeWiringSmokeTest(unittest.TestCase):
     def test_runtime_imports_v2kelly_module_and_max_positions_constant(self) -> None:
         import tae_parallel_paper_runtime as ppr
@@ -134,6 +207,15 @@ class RuntimeWiringSmokeTest(unittest.TestCase):
         # accounting for V2 already holding 49 positions, which made the cap
         # a permanent freeze on all new entries instead of a growth limit.
         self.assertEqual(ppr.V2_MAX_POSITIONS, 55)
+
+    def test_runtime_passes_min_entry_score_to_kelly_edge_computation(self) -> None:
+        import inspect
+
+        import tae_parallel_paper_runtime as ppr
+
+        source = inspect.getsource(ppr)
+        self.assertIn("v2kelly.v2_tranche_fraction_from_edge(", source)
+        self.assertIn("min_entry_score=V1_V2_ENTRY_MIN_SCORE", source)
 
 
 if __name__ == "__main__":

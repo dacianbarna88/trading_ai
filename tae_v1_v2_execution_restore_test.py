@@ -15,7 +15,14 @@ import tae_parallel_paper_config as ppc
 import tae_parallel_paper_runtime as pprun
 
 
-def _marks(prices: dict[str, float], *, score: float = 100.0, signal: str = "STRONG BUY"):
+def _marks(
+    prices: dict[str, float],
+    *,
+    score: float = 100.0,
+    signal: str = "STRONG BUY",
+    liquid: bool | None = None,
+    vix_favorable: bool | None = None,
+):
     def provider(tickers):
         out = {}
         for t in tickers or list(prices):
@@ -43,6 +50,10 @@ def _marks(prices: dict[str, float], *, score: float = 100.0, signal: str = "STR
                 "data_fresh": True,
                 "mark_status": "FRESH",
             }
+            if liquid is not None:
+                out[t]["liquid"] = liquid
+            if vix_favorable is not None:
+                out[t]["vix_favorable"] = vix_favorable
         return out
 
     return provider
@@ -152,6 +163,98 @@ class V1V2ExecutionRestoreTests(unittest.TestCase):
         self.assertNotEqual(before_v1, after_v1)
         self.assertEqual(hashlib.sha256(self.canonical.read_bytes()).hexdigest(), before_canon)
         self.assertEqual(hashlib.sha256(live_csv.read_bytes()).hexdigest(), before_live)
+
+    @staticmethod
+    def _last_entry_phase_decision(decisions_path: Path, ticker: str) -> dict:
+        """run_cycle's returned `v1_decisions`/`v2_decisions` merge the
+        manage+entry passes, preferring capital-mutating actions (BUY/
+        SELL/ERROR) and otherwise keeping the FIRST (manage-phase)
+        decision -- so a HOLD-with-a-specific-reason from the entry pass
+        (e.g. V1_BLOCKED_VIX_REGIME) is masked by the generic manage-phase
+        one in that merged view. Read the raw per-phase journal file
+        directly instead, same as every backtest script this sprint."""
+        decisions = []
+        with decisions_path.open() as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    decisions.append(json.loads(line))
+        matches = [d for d in decisions if d.get("ticker") == ticker and d.get("phase") == "entry"]
+        return matches[-1]
+
+    def test_v1_buy_blocked_by_unfavorable_vix_regime(self):
+        """Sprint 3 (2026-09-13): the compound-filter backtest found VIX=LOW
+        and liquidity=HIGH only clear PF>1 together (tae_compound_filter_
+        backtest.py) -- isolated, VIX=LOW alone is actually WEAK. So V1/V2
+        must never buy when vix_favorable is explicitly False, even with a
+        favorable score and liquid=True."""
+        from tae_test_isolation import isolate_adaptive_deployment
+
+        isolate_adaptive_deployment(self, extra_env={"DEFER_NEW_BUY_DURING_OPENING_NOISE": "false"})
+        cfg = self._cfg()
+        pprun.bootstrap(cfg)
+        p = ppc.paths()
+        c = pprun.run_cycle(
+            cfg=cfg,
+            mark_provider=_marks({"AAA": 100.0}, liquid=True, vix_favorable=False),
+            tickers=["AAA"],
+        )
+        self.assertTrue(c.get("ok"))
+        d1 = self._last_entry_phase_decision(p["v1_decisions"], "AAA")
+        self.assertEqual(d1["action"], "HOLD")
+        self.assertEqual(d1["reason"], "V1_BLOCKED_VIX_REGIME")
+
+    def test_v2_buy_blocked_by_unfavorable_vix_regime(self):
+        from tae_test_isolation import isolate_adaptive_deployment
+
+        isolate_adaptive_deployment(self, extra_env={"DEFER_NEW_BUY_DURING_OPENING_NOISE": "false"})
+        cfg = self._cfg()
+        pprun.bootstrap(cfg)
+        p = ppc.paths()
+        c = pprun.run_cycle(
+            cfg=cfg,
+            mark_provider=_marks({"AAA": 100.0}, liquid=True, vix_favorable=False),
+            tickers=["AAA"],
+        )
+        self.assertTrue(c.get("ok"))
+        d2 = self._last_entry_phase_decision(p["v2_decisions"], "AAA")
+        self.assertEqual(d2["action"], "HOLD")
+        self.assertEqual(d2["reason"], "V2_BLOCKED_VIX_REGIME")
+
+    def test_v1_buy_blocked_by_illiquidity(self):
+        from tae_test_isolation import isolate_adaptive_deployment
+
+        isolate_adaptive_deployment(self, extra_env={"DEFER_NEW_BUY_DURING_OPENING_NOISE": "false"})
+        cfg = self._cfg()
+        pprun.bootstrap(cfg)
+        p = ppc.paths()
+        c = pprun.run_cycle(
+            cfg=cfg,
+            mark_provider=_marks({"AAA": 100.0}, liquid=False),
+            tickers=["AAA"],
+        )
+        self.assertTrue(c.get("ok"))
+        d1 = self._last_entry_phase_decision(p["v1_decisions"], "AAA")
+        self.assertEqual(d1["action"], "HOLD")
+        self.assertEqual(d1["reason"], "V1_BLOCKED_ILLIQUID")
+
+    def test_v1_buy_still_succeeds_when_both_conditions_favorable(self):
+        """Regression guard: explicitly True liquid/vix_favorable (as the
+        real fetch sets for a clean cycle) must not accidentally block --
+        only an explicit False should."""
+        from tae_test_isolation import isolate_adaptive_deployment
+
+        isolate_adaptive_deployment(self, extra_env={"DEFER_NEW_BUY_DURING_OPENING_NOISE": "false"})
+        cfg = self._cfg()
+        pprun.bootstrap(cfg)
+        c = pprun.run_cycle(
+            cfg=cfg,
+            mark_provider=_marks({"AAA": 100.0}, liquid=True, vix_favorable=True),
+            tickers=["AAA"],
+        )
+        self.assertTrue(c.get("ok"))
+        d1 = [d for d in c.get("v1_decisions") or [] if d.get("ticker") == "AAA"][0]
+        self.assertEqual(d1["action"], "BUY")
 
     def test_v1_take_profit_sell(self):
         """V1's take-profit exit is now an armed trailing stop (Phase 1 of

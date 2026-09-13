@@ -126,6 +126,7 @@ def _decide_and_execute_ticker(
     mark_price: float | None,
     p: dict[str, Path],
     decision_id: str,
+    liquid: bool = True,
 ) -> dict[str, Any]:
     positions = portfolio.get("positions") or {}
     pos = positions.get(ticker)
@@ -200,7 +201,13 @@ def _decide_and_execute_ticker(
     else:
         if closes and price:
             diag = mrsig.entry_signal(closes)
-            if (
+            if diag.get("entry") and not liquid:
+                # Sprint 3 Phase 2 (2026-09-13): same liquidity floor
+                # gating V1/V2/V3 (LOW-liquidity PF 0.39 vs HIGH PF 0.92,
+                # tae_liquidity_backtest.py) -- a market-microstructure
+                # risk independent of which entry signal found the trade.
+                reason = "MR_BLOCKED_ILLIQUID"
+            elif (
                 diag.get("entry")
                 and _open_position_count(portfolio) < MAX_POSITIONS
                 and pe._f(portfolio.get("cash")) - MIN_CASH_RESERVE >= MIN_TRADE_USD
@@ -268,6 +275,10 @@ def run_mean_reversion_cycle() -> dict[str, Any]:
 
     marks = ppr.default_mark_provider(all_tickers)
     history = fetch_batch_closes(all_tickers)
+    try:
+        liquidity_flags = ppr._fetch_liquidity_flags(all_tickers)
+    except Exception:
+        liquidity_flags = {}
 
     for ticker in all_tickers:
         snap = marks.get(ticker) or {}
@@ -275,7 +286,13 @@ def run_mean_reversion_cycle() -> dict[str, Any]:
         closes = history.get(ticker)
         decision_id = f"MR-{ticker}-{uuid.uuid4().hex[:12].upper()}"
         _decide_and_execute_ticker(
-            portfolio=portfolio, ticker=ticker, closes=closes, mark_price=mark_price, p=p, decision_id=decision_id
+            portfolio=portfolio,
+            ticker=ticker,
+            closes=closes,
+            mark_price=mark_price,
+            p=p,
+            decision_id=decision_id,
+            liquid=liquidity_flags.get(ticker, True),
         )
 
     mark_prices = {t: pe._f(s.get("mark_price")) for t, s in marks.items()}

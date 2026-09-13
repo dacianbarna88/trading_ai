@@ -75,13 +75,22 @@ def collect_v1_closed_trades() -> list[dict[str, Any]]:
     return closed
 
 
-def collect_v2_closed_trades() -> list[dict[str, Any]]:
+def collect_v2_closed_trades(
+    *, trades_path: Path | str | None = None, decisions_path: Path | str | None = None
+) -> list[dict[str, Any]]:
     """CLOSE trades carry realized_pnl. `cycle_id` is missing on 111/112 CLOSE
     records in practice, so match each CLOSE to the most recent still-open
     BUY for that ticker (time-ordered per-ticker state machine) instead of
-    joining on cycle_id directly."""
-    trades = _load_jsonl(BASE / "v2" / "journals" / "trades.jsonl")
-    decisions = _load_jsonl(BASE / "v2" / "journals" / "decisions.jsonl")
+    joining on cycle_id directly.
+
+    trades_path/decisions_path default to the real production V2 journals
+    (this backtest script's original behavior); callers that need test
+    isolation (e.g. tae_strategy_v2_kelly_sizing's entry-score filter,
+    exercised against temp-dir fixtures) can override both."""
+    trades = _load_jsonl(Path(trades_path) if trades_path is not None else BASE / "v2" / "journals" / "trades.jsonl")
+    decisions = _load_jsonl(
+        Path(decisions_path) if decisions_path is not None else BASE / "v2" / "journals" / "decisions.jsonl"
+    )
     score_by_decision = _decision_score_index(decisions)
 
     open_entry_by_ticker: dict[str, dict[str, Any]] = {}

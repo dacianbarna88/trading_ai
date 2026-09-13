@@ -825,8 +825,8 @@ LIQUIDITY_FETCH_TIMEOUT_SECONDS = 60.0
 def _fetch_liquidity_flags(tickers: list[str]) -> dict[str, bool]:
     """Sprint 3 Phase 2 (2026-09-13): one batched volume fetch per cycle
     (not per ticker — same "don't repeat the serial-network-call mistake"
-    discipline as tae_parallel_paper_mean_reversion.fetch_batch_closes).
-    Backtested on real V1/V2 trade history: the LOW average-volume
+    discipline already applied to the isolated mean-reversion arm's own
+    batched fetcher). Backtested on real V1/V2 trade history: the LOW average-volume
     tercile at entry had win_rate=20.0%/PF=0.39 vs HIGH tercile's
     win_rate=54.9%/PF=0.92 (tae_liquidity_backtest.py) — the strongest,
     cleanest split found this sprint. Fail-soft: a ticker missing from
@@ -2189,6 +2189,17 @@ def _run_v1_arm(
         and favorable
         and (snap or {}).get("eligible") is not False
         and (snap or {}).get("liquid") is not False
+        and (snap or {}).get("vix_favorable") is False
+    ):
+        action = "HOLD"
+        reason = "V1_BLOCKED_VIX_REGIME"
+    elif (
+        (not has_pos)
+        and phase_n in {PHASE_ENTRY, PHASE_ALL}
+        and favorable
+        and (snap or {}).get("eligible") is not False
+        and (snap or {}).get("liquid") is not False
+        and (snap or {}).get("vix_favorable") is not False
     ):
         entry_ok, entry_reason = _entry_price_allowed(snap, mark_status)
         if not mark_ok:
@@ -2446,7 +2457,9 @@ def _run_v2_arm(
 
     phase_n = _s(phase).lower() or PHASE_ALL
     v2_cfg = load_strategy_v2_config()
-    v2_kelly_fraction, v2_kelly_diag = v2kelly.v2_tranche_fraction_from_edge(p["v2_trades"])
+    v2_kelly_fraction, v2_kelly_diag = v2kelly.v2_tranche_fraction_from_edge(
+        p["v2_trades"], min_entry_score=V1_V2_ENTRY_MIN_SCORE, decisions_path=p["v2_decisions"]
+    )
     v2_cfg["tranche_fraction"] = v2_kelly_fraction
     v2_cfg["_v2_kelly_diag"] = v2_kelly_diag
     v2_cfg["max_tranches"] = 5
@@ -3152,14 +3165,36 @@ def _run_v2_arm(
             ):
                 action = "HOLD"
                 reason = "V2_BLOCKED_ILLIQUID"
+            elif (
+                entry_ok
+                and not in_watch
+                and favorable
+                and snap.get("eligible") is not False
+                and snap.get("liquid") is not False
+                and snap.get("vix_favorable") is False
+            ):
+                action = "HOLD"
+                reason = "V2_BLOCKED_VIX_REGIME"
             elif entry_ok and _open_position_count(portfolio) >= V2_MAX_POSITIONS and (
-                (not in_watch and favorable and snap.get("eligible") is not False and snap.get("liquid") is not False)
+                (
+                    not in_watch
+                    and favorable
+                    and snap.get("eligible") is not False
+                    and snap.get("liquid") is not False
+                    and snap.get("vix_favorable") is not False
+                )
                 or (in_watch and reentry_allowed)
             ):
                 action = "BLOCKED"
                 reason = "V2_MAX_POSITIONS_REACHED"
             elif entry_ok and (
-                (not in_watch and favorable and snap.get("eligible") is not False and snap.get("liquid") is not False)
+                (
+                    not in_watch
+                    and favorable
+                    and snap.get("eligible") is not False
+                    and snap.get("liquid") is not False
+                    and snap.get("vix_favorable") is not False
+                )
                 or (in_watch and reentry_allowed)
             ):
                 binp = pol.BuyPolicyInput(
@@ -3674,6 +3709,12 @@ def _run_v3_arm(
             # it a moment later. Matches the existing V1/V2 precedent
             # ("Block same-run BUY after SELL on same ticker", 93d8f23).
             return _record("HOLD", "V3_BLOCKED_SAME_RUN_REBUY_AFTER_SELL")
+        if (snap or {}).get("liquid") is False:
+            # Sprint 3 Phase 2 (2026-09-13): same liquidity floor already
+            # gating V1/V2 (tae_liquidity_backtest.py: LOW-liquidity PF
+            # 0.39 vs HIGH PF 0.92) — a market-microstructure risk, not
+            # specific to any one entry signal, so it applies to V3 too.
+            return _record("HOLD", "V3_BLOCKED_ILLIQUID")
         decision = v3pol.decide_v3(
             ticker=ticker,
             snap=snap,
@@ -3807,15 +3848,31 @@ def run_cycle(
         marks0 = provider([])
         base_tickers = sorted(marks0.keys())[:30]
     marks = provider(base_tickers)
-    # Sprint 3 Phase 2 liquidity floor: only on the real production path —
-    # tests that inject their own mark_provider() must stay network-free.
+    # Sprint 3 Phase 2 liquidity floor + Phase 1 VIX regime: only on the
+    # real production path — tests that inject their own mark_provider()
+    # must stay network-free. VIX fetched once per cycle (not per ticker),
+    # reused below for V3's RegimeGrid so both consume the same value.
+    current_vix_tercile = "UNKNOWN"
     if mark_provider is None:
         try:
             liquidity_flags = _fetch_liquidity_flags(list(marks.keys()))
         except Exception:
             liquidity_flags = {}
+        try:
+            current_vix_tercile = macro.fetch_current_vix_tercile()
+        except Exception:
+            current_vix_tercile = "UNKNOWN"
+        # Compound-filter backtest (tae_compound_filter_backtest.py,
+        # 2026-09-13): VIX=LOW and liquidity=HIGH validated separately
+        # (Sprint 3 Phases 1/2), but isolated from each other they're
+        # actually WEAK (PF 0.33/0.20) -- only together do they clear
+        # PF 1.19 (the only profitable bucket found this sprint, n=74).
+        # So vix_favorable gates V1/V2 same as liquid: missing data
+        # (UNKNOWN) fails open, MED/HIGH VIX fails closed.
+        vix_favorable = current_vix_tercile not in ("MED", "HIGH")
         for t, snap in marks.items():
             snap["liquid"] = liquidity_flags.get(t, True)
+            snap["vix_favorable"] = vix_favorable
     # Freeze snapshot
     snap_id = snapshot_id(marks, ts)
     snap_path = p["snapshots"]
@@ -3862,18 +3919,13 @@ def run_cycle(
     # so far (tae_macro_regime_backtest.py, 2026-09-13) — LOW-VIX entries
     # win_rate=39.3%/PF=0.77 vs MED/HIGH ~20%/~0.25 on real V1/V2 history.
     # Trend/yield-curve had zero regime variation in the observed window
-    # and stay "UNKNOWN" until there's real evidence either way. One fetch
-    # per cycle (not per ticker) — reused at both RegimeGrid call sites
-    # below so the pre-pass candidate pool and the real decision score the
-    # same regime.
-    v3_regime = v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile="UNKNOWN", realized_vol_annualized=None)
+    # and stay "UNKNOWN" until there's real evidence either way. Reuses
+    # `current_vix_tercile` fetched once above (near the liquidity flags)
+    # rather than fetching again here, so the pre-pass candidate pool, the
+    # real V3 decision, and V1/V2's vix_favorable gate all score the same
+    # regime for this cycle.
+    v3_regime = v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile=current_vix_tercile, realized_vol_annualized=None)
     if v3_enabled:
-        try:
-            v3_regime = v3pol.RegimeGrid(
-                trend="UNKNOWN", vol_tercile=macro.fetch_current_vix_tercile(), realized_vol_annualized=None
-            )
-        except Exception:
-            pass
         try:
             v3_starting_capital = next(
                 (

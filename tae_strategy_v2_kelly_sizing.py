@@ -55,6 +55,8 @@ def compute_v2_empirical_edge(
     *,
     min_samples: int = MIN_SAMPLES,
     lookback: int = LOOKBACK_TRADES,
+    min_entry_score: float | None = None,
+    decisions_path: Path | str | None = None,
 ) -> tuple[float, float, dict[str, Any]]:
     """Returns (p_profit, payoff_ratio, diagnostics) from V2's own closed trades.
 
@@ -62,8 +64,29 @@ def compute_v2_empirical_edge(
     using n/(n+SHRINKAGE_K) weighting — the same shrinkage spirit as V3's
     LearningScorer — so a thin or early sample can't produce an
     overconfident sizing multiplier.
+
+    min_entry_score (2026-09-13): V1_V2_ENTRY_MIN_SCORE was raised 60->100
+    this sprint (score-decile backtest showed score<100 entries are
+    net-negative noise). Without this filter, the "empirical edge" mixes
+    old score-60/80 trades (weak, noisy) with any new score-100 trades,
+    silently understating the edge the CURRENT gate actually produces.
+    When set, this reuses tae_score_decile_backtest.collect_v2_closed_
+    trades' entry-score join (same one used to find the score<100 problem
+    in the first place) instead of _load_closed_trades' raw CLOSE-record
+    read, and only counts trades whose entry cleared min_entry_score.
+    Until enough new-regime trades exist this typically shrinks straight
+    to the prior (n=0) rather than fabricating a number from stale data
+    — which is the correct, honest behavior, not a bug.
     """
-    closed = _load_closed_trades(trades_path)[-lookback:]
+    if min_entry_score is not None:
+        import tae_score_decile_backtest as scoredecile
+
+        matched = scoredecile.collect_v2_closed_trades(trades_path=trades_path, decisions_path=decisions_path)
+        closed = [
+            {"realized_pnl": t["pnl"]} for t in matched if t.get("entry_score", 0) >= min_entry_score
+        ][-lookback:]
+    else:
+        closed = _load_closed_trades(trades_path)[-lookback:]
     pnls = [float(t.get("realized_pnl", 0.0)) for t in closed]
     n = len(pnls)
 
@@ -101,6 +124,8 @@ def v2_tranche_fraction_from_edge(
     base_fraction: float = 0.20,
     min_fraction: float = 0.05,
     max_fraction: float = 0.50,
+    min_entry_score: float | None = None,
+    decisions_path: Path | str | None = None,
 ) -> tuple[float, dict[str, Any]]:
     """Kelly-scaled tranche_fraction to replace V2's flat 0.20 constant.
 
@@ -110,7 +135,9 @@ def v2_tranche_fraction_from_edge(
     edge scales sizing up from there — clamped to [min_fraction,
     max_fraction] so a hot/cold streak can't push sizing to an extreme.
     """
-    p_profit, payoff_ratio, diag = compute_v2_empirical_edge(trades_path)
+    p_profit, payoff_ratio, diag = compute_v2_empirical_edge(
+        trades_path, min_entry_score=min_entry_score, decisions_path=decisions_path
+    )
     kelly = kelly_fraction(p_profit, payoff_ratio)
     kelly_at_prior = kelly_fraction(DEFAULT_P_PROFIT, DEFAULT_PAYOFF_RATIO)
     scale = (kelly / kelly_at_prior) if kelly_at_prior > 0 else 1.0

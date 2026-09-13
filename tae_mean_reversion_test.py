@@ -127,6 +127,23 @@ class DecideAndExecuteTickerTest(unittest.TestCase):
         self.assertEqual(dec["action"], "HOLD")
         self.assertNotIn("ZZZ", portfolio.get("positions") or {})
 
+    def test_illiquid_ticker_blocks_an_otherwise_qualifying_entry(self) -> None:
+        """Sprint 3 Phase 2 (2026-09-13): same liquidity floor gating
+        V1/V2/V3 (LOW PF 0.39 vs HIGH PF 0.92) -- a market-microstructure
+        risk, not specific to any one entry signal."""
+        portfolio = _fresh_portfolio()
+        dec = self._run(
+            portfolio=portfolio,
+            ticker="ZZZ",
+            closes=self._oversold_closes(),
+            mark_price=90.0,
+            decision_id="T5",
+            liquid=False,
+        )
+        self.assertEqual(dec["action"], "HOLD")
+        self.assertEqual(dec["reason"], "MR_BLOCKED_ILLIQUID")
+        self.assertNotIn("ZZZ", portfolio.get("positions") or {})
+
     def test_position_cap_blocks_new_entries(self) -> None:
         import tae_parallel_paper_mean_reversion as mr
 

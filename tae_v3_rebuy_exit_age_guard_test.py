@@ -140,6 +140,25 @@ class RuntimeWiringSmokeTest(unittest.TestCase):
         window = source[idx: idx + 400]
         self.assertIn("pos=pos", window)
 
+    def test_run_v3_arm_blocks_illiquid_entries_before_scoring(self) -> None:
+        """Sprint 3 Phase 2 (2026-09-13): the liquidity floor already
+        gating V1/V2 (LOW PF 0.39 vs HIGH PF 0.92) is a market-
+        microstructure risk, not specific to any one entry signal --
+        must block V3 too, before it even calls decide_v3."""
+        import inspect
+
+        import tae_parallel_paper_runtime as ppr
+
+        source = inspect.getsource(ppr._run_v3_arm)
+        self.assertIn('"liquid") is False', source)
+        self.assertIn("V3_BLOCKED_ILLIQUID", source)
+        idx = source.index('"liquid") is False')
+        # Two decide_v3 call sites exist (exit path has_position=True,
+        # entry path has_position=False) -- compare against the entry one,
+        # which is what the liquidity check must precede.
+        idx_entry_decide = source.index("has_position=False,")
+        self.assertLess(idx, idx_entry_decide, "liquidity check must come before the entry-path decide_v3 call")
+
 
 if __name__ == "__main__":
     unittest.main()
