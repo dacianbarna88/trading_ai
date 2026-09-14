@@ -90,6 +90,23 @@ def run_mean_reversion_once(_args: list[str] | None = None) -> int:
     return 0 if c.get("reconciliation_pass") else 1
 
 
+def run_quality_longterm_once(_args: list[str] | None = None) -> int:
+    """Explicit single cycle for the new isolated long-horizon accounting-
+    quality arm (exp_quality_longterm). Self-contained — does not touch
+    V1/V2/V3/exp_short_margin/exp_mean_reversion. Most hourly invocations
+    are mark-to-market only; the real monthly rebalance logic self-gates
+    on the arm's own last_rebalance_at timestamp."""
+    from tae_parallel_paper_quality_longterm import run_quality_longterm_cycle
+
+    print("===== TAE PARALLEL-PAPER-RUN-QUALITY-LONGTERM-ONCE =====")
+    c = run_quality_longterm_cycle()
+    print("arm", c.get("arm"), "rebalanced", c.get("rebalanced"))
+    print("account_value", c.get("account_value"), "cash", c.get("cash"))
+    print("open_positions", c.get("open_positions"))
+    print("reconciliation_pass", c.get("reconciliation_pass"))
+    return 0 if c.get("reconciliation_pass") else 1
+
+
 def run_health(_args: list[str] | None = None) -> int:
     from tae_parallel_paper_autostart import status_autostart
     from tae_parallel_paper_runtime import health_snapshot

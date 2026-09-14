@@ -74,4 +74,19 @@ else
     echo "WARNING: parallel-paper-run-mean-reversion-once exited $MEAN_REVERSION_EXIT"
 fi
 
+echo "----- exp_mean_reversion done, starting exp_quality_longterm run-once -----"
+# Self-contained isolated arm (tae_parallel_paper_quality_longterm.py,
+# added 2026-09-14) — does not touch V1/V2/V3/exp_short_margin/
+# exp_mean_reversion. Non-fatal, same reasoning as above. Most hourly
+# invocations are mark-to-market only -- the real monthly rebalance
+# self-gates on the arm's own last_rebalance_at timestamp.
+"$PYTHON_BIN" tae.py parallel-paper-run-quality-longterm-once
+QUALITY_LONGTERM_EXIT=$?
+if [ "$QUALITY_LONGTERM_EXIT" -eq 0 ]; then
+    mkdir -p "$SCRIPT_DIR/runtime_outputs/parallel_paper/exp_quality_longterm"
+    date -u '+%Y-%m-%dT%H:%M:%SZ' > "$SCRIPT_DIR/runtime_outputs/parallel_paper/exp_quality_longterm/hourly_trigger_last_success.txt"
+else
+    echo "WARNING: parallel-paper-run-quality-longterm-once exited $QUALITY_LONGTERM_EXIT"
+fi
+
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') hourly refresh end ====="

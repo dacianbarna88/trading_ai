@@ -129,6 +129,7 @@ COMMANDS = {
     "parallel-paper-run-once": parallel_paper.run_once,
     "parallel-paper-run-short-margin-once": parallel_paper.run_short_margin_once,
     "parallel-paper-run-mean-reversion-once": parallel_paper.run_mean_reversion_once,
+    "parallel-paper-run-quality-longterm-once": parallel_paper.run_quality_longterm_once,
     "parallel-paper-health": parallel_paper.run_health,
     "parallel-paper-report": parallel_paper.run_report,
     "parallel-paper-report-3way": parallel_paper.run_report_3way,
