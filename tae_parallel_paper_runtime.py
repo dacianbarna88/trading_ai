@@ -34,6 +34,7 @@ import tae_strategy_v2_concentration as v2conc
 import tae_strategy_v2_relative_weakness as v2relweak
 import tae_liquidity_signal as liq
 import tae_macro_regime as macro
+import tae_news_sentiment_signal as news_signal
 import tae_shadow_entry_scorer as shadow_scorer
 try:
     from tae_strategy_v2_trailing import V2_PROFIT_TRAILING_REASON
@@ -1979,6 +1980,7 @@ def _run_v1_arm(
     qty = 0.0
     executed = False
     shadow_score: dict[str, Any] | None = None
+    news_shadow: dict[str, Any] | None = None
     if not (pos and _f(pos.get("shares")) > 0) and phase_n in {PHASE_ENTRY, PHASE_ALL}:
         pde_sig = (pde_signals or {}).get(_s(ticker).upper()) or {}
         shadow_score = shadow_scorer.shadow_entry_score(
@@ -1987,6 +1989,16 @@ def _run_v1_arm(
             horizon_alignment_score=pde_sig.get("horizon_alignment_score"),
             horizon_conflict_flag=pde_sig.get("horizon_conflict_flag"),
         )
+        # Post-Sprint-3 roadmap item 1 (2026-09-14): first genuinely
+        # independent (non-price-derived) signal in this system. No
+        # historical news archive exists to backtest against, so this
+        # stays shadow/log-only until real prospective correlation data
+        # accumulates over the coming weeks -- same log-only discipline
+        # already applied just above. Does not affect the buy decision.
+        # Pre-fetched once per cycle into snap["news_sentiment_shadow"]
+        # (see run_cycle's news_shadow_batch, same pattern as liquid/
+        # vix_favorable) rather than fetched here per ticker.
+        news_shadow = (snap or {}).get("news_sentiment_shadow") if isinstance(snap, dict) else None
     execution_id: str | None = None
     realized_pnl_fill: float | None = None
     has_pos = bool(pos and _f(pos.get("shares")) > 0)
@@ -2409,6 +2421,7 @@ def _run_v1_arm(
         "writes_live": False,
         "writes_broker": False,
         "shadow_entry_score": shadow_score,
+        "news_sentiment_shadow": news_shadow,
     }
     _append_jsonl(p["v1_decisions"], dec)
     _append_jsonl(
@@ -2430,6 +2443,8 @@ def _run_v2_arm(
     p: dict[str, Path],
     decision_id: str,
     phase: str = PHASE_ALL,
+    v2_kelly_fraction: float | None = None,
+    v2_kelly_diag: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not v2_parallel_mutation_allowed(cfg_par):
         return {
@@ -2457,9 +2472,18 @@ def _run_v2_arm(
 
     phase_n = _s(phase).lower() or PHASE_ALL
     v2_cfg = load_strategy_v2_config()
-    v2_kelly_fraction, v2_kelly_diag = v2kelly.v2_tranche_fraction_from_edge(
-        p["v2_trades"], min_entry_score=V1_V2_ENTRY_MIN_SCORE, decisions_path=p["v2_decisions"]
-    )
+    if v2_kelly_fraction is None or v2_kelly_diag is None:
+        # Perf note (2026-09-14): _run_v2_arm runs once per ticker per
+        # phase (~200x/cycle). compute_v2_empirical_edge's min_entry_score
+        # path re-parses the ENTIRE v2 decisions.jsonl (hundreds of
+        # thousands of lines by now) to join entry scores -- profiled at
+        # ~795s/cycle (75%+ of total runtime) when called per-ticker
+        # instead of once. Callers (run_cycle) MUST pass these precomputed
+        # -- this fallback exists only for direct/test calls, not the
+        # real hot path.
+        v2_kelly_fraction, v2_kelly_diag = v2kelly.v2_tranche_fraction_from_edge(
+            p["v2_trades"], min_entry_score=V1_V2_ENTRY_MIN_SCORE, decisions_path=p["v2_decisions"]
+        )
     v2_cfg["tranche_fraction"] = v2_kelly_fraction
     v2_cfg["_v2_kelly_diag"] = v2_kelly_diag
     v2_cfg["max_tranches"] = 5
@@ -3870,9 +3894,23 @@ def run_cycle(
         # So vix_favorable gates V1/V2 same as liquid: missing data
         # (UNKNOWN) fails open, MED/HIGH VIX fails closed.
         vix_favorable = current_vix_tercile not in ("MED", "HIGH")
+        # Post-Sprint-3 roadmap item 1: shadow-only news sentiment, one
+        # disk-cached batch fetch per cycle (news_signal.fetch_shadow_
+        # news_batch), not one network call per ticker per cycle.
+        try:
+            news_shadow_batch = news_signal.fetch_shadow_news_batch(list(marks.keys()))
+        except Exception:
+            news_shadow_batch = {}
         for t, snap in marks.items():
             snap["liquid"] = liquidity_flags.get(t, True)
             snap["vix_favorable"] = vix_favorable
+            snap["news_sentiment_shadow"] = news_shadow_batch.get(t)
+    # V2 Kelly edge: once per cycle, not once per ticker (perf fix,
+    # 2026-09-14 — see _run_v2_arm's docstring note). No network I/O,
+    # local-file-only, so safe to compute regardless of mark_provider.
+    v2_kelly_fraction, v2_kelly_diag = v2kelly.v2_tranche_fraction_from_edge(
+        p["v2_trades"], min_entry_score=V1_V2_ENTRY_MIN_SCORE, decisions_path=p["v2_decisions"]
+    )
     # Freeze snapshot
     snap_id = snapshot_id(marks, ts)
     snap_path = p["snapshots"]
@@ -3994,6 +4032,8 @@ def run_cycle(
                         p=p,
                         decision_id=f"{did}-V2-{phase}",
                         phase=phase,
+                        v2_kelly_fraction=v2_kelly_fraction,
+                        v2_kelly_diag=v2_kelly_diag,
                     )
                 except Exception as exc:
                     result["v2_ok"] = False
