@@ -183,7 +183,25 @@ def paths(root: Path | None = None) -> dict[str, Path]:
     }
 
 
+_git_head_cache: str | None = None
+
+
 def git_head() -> str:
+    """Short git HEAD hash, memoized per-process.
+
+    Perf note (2026-09-15): this used to shell out to `git rev-parse` on
+    every call -- deployment_metadata() alone calls it once per BUY-
+    candidate ticker via resolve_buy_notional(), and a subprocess spawn
+    occasionally stalls for seconds under disk/scheduler contention
+    (surfaced by tae_slow_call_guard's new instrumentation as a real
+    "SLOW _run_v1_arm ticker=ADBE ... elapsed=4.3s" log line). This
+    process's git HEAD cannot change during its own lifetime (no daemon,
+    no long-running process in this codebase), so one subprocess spawn
+    per process, not one per call, is safe and eliminates the variance.
+    """
+    global _git_head_cache
+    if _git_head_cache is not None:
+        return _git_head_cache
     try:
         out = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -191,9 +209,10 @@ def git_head() -> str:
             stderr=subprocess.DEVNULL,
             text=True,
         )
-        return out.strip() or "UNKNOWN"
+        _git_head_cache = out.strip() or "UNKNOWN"
     except (OSError, subprocess.CalledProcessError):
-        return "UNKNOWN"
+        _git_head_cache = "UNKNOWN"
+    return _git_head_cache
 
 
 def default_state(*, created_by: str = "migrate_default") -> dict[str, Any]:
