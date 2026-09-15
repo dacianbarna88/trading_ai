@@ -36,6 +36,7 @@ import tae_liquidity_signal as liq
 import tae_macro_regime as macro
 import tae_news_sentiment_signal as news_signal
 import tae_shadow_entry_scorer as shadow_scorer
+import tae_slow_call_guard as slow_call_guard
 try:
     from tae_strategy_v2_trailing import V2_PROFIT_TRAILING_REASON
 except ImportError:  # fail-soft constant for V2 profit-trailing reason
@@ -4002,16 +4003,17 @@ def run_cycle(
             d2: dict[str, Any]
             if cfg.get("V1_PARALLEL_ENABLED"):
                 try:
-                    d1 = _run_v1_arm(
-                        portfolio=v1_work,
-                        ticker=t,
-                        snap=snap,
-                        cfg=cfg,
-                        p=p,
-                        decision_id=f"{did}-V1-{phase}",
-                        phase=phase,
-                        pde_signals=v1_pde_signals,
-                    )
+                    with slow_call_guard.warn_if_slow(f"[parallel_runtime] SLOW _run_v1_arm ticker={t} phase={phase}"):
+                        d1 = _run_v1_arm(
+                            portfolio=v1_work,
+                            ticker=t,
+                            snap=snap,
+                            cfg=cfg,
+                            p=p,
+                            decision_id=f"{did}-V1-{phase}",
+                            phase=phase,
+                            pde_signals=v1_pde_signals,
+                        )
                 except Exception as exc:
                     result["v1_ok"] = False
                     result["errors"].append(f"V1:{t}:{phase}:{exc}")
@@ -4024,17 +4026,18 @@ def run_cycle(
 
             if cfg.get("V2_PARALLEL_ENABLED"):
                 try:
-                    d2 = _run_v2_arm(
-                        portfolio=v2_work,
-                        ticker=t,
-                        snap=snap,
-                        cfg_par=cfg,
-                        p=p,
-                        decision_id=f"{did}-V2-{phase}",
-                        phase=phase,
-                        v2_kelly_fraction=v2_kelly_fraction,
-                        v2_kelly_diag=v2_kelly_diag,
-                    )
+                    with slow_call_guard.warn_if_slow(f"[parallel_runtime] SLOW _run_v2_arm ticker={t} phase={phase}"):
+                        d2 = _run_v2_arm(
+                            portfolio=v2_work,
+                            ticker=t,
+                            snap=snap,
+                            cfg_par=cfg,
+                            p=p,
+                            decision_id=f"{did}-V2-{phase}",
+                            phase=phase,
+                            v2_kelly_fraction=v2_kelly_fraction,
+                            v2_kelly_diag=v2_kelly_diag,
+                        )
                 except Exception as exc:
                     result["v2_ok"] = False
                     result["errors"].append(f"V2:{t}:{phase}:{exc}")
@@ -4048,20 +4051,21 @@ def run_cycle(
             d3: dict[str, Any]
             if v3_enabled and v3_scorer is not None:
                 try:
-                    d3 = _run_v3_arm(
-                        portfolio=v3_work,
-                        ticker=t,
-                        snap=snap,
-                        cfg=cfg,
-                        p=p,
-                        decision_id=f"{did}-V3-{phase}",
-                        scorer=v3_scorer,
-                        candidate_pool_p_profit=v3_candidate_pool if phase == PHASE_ENTRY else None,
-                        phase=phase,
-                        blocked_rebuy=t in v3_sold_this_cycle,
-                        pde_signals=v3_pde_signals,
-                        regime=v3_regime,
-                    )
+                    with slow_call_guard.warn_if_slow(f"[parallel_runtime] SLOW _run_v3_arm ticker={t} phase={phase}"):
+                        d3 = _run_v3_arm(
+                            portfolio=v3_work,
+                            ticker=t,
+                            snap=snap,
+                            cfg=cfg,
+                            p=p,
+                            decision_id=f"{did}-V3-{phase}",
+                            scorer=v3_scorer,
+                            candidate_pool_p_profit=v3_candidate_pool if phase == PHASE_ENTRY else None,
+                            phase=phase,
+                            blocked_rebuy=t in v3_sold_this_cycle,
+                            pde_signals=v3_pde_signals,
+                            regime=v3_regime,
+                        )
                 except Exception as exc:
                     result["v3_ok"] = False
                     result["errors"].append(f"V3:{t}:{phase}:{exc}")

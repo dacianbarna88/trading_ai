@@ -34,6 +34,7 @@ from typing import Any
 import tae_mean_reversion_signal as mrsig
 import tae_paper_execution as pe
 import tae_parallel_paper_runtime as ppr
+import tae_slow_call_guard as slow_call_guard
 from tae_network_hard_timeout import hard_timeout
 
 ARM_ID = "exp_mean_reversion"
@@ -285,15 +286,16 @@ def run_mean_reversion_cycle() -> dict[str, Any]:
         mark_price = pe._f(snap.get("mark_price")) if snap.get("mark_price") else None
         closes = history.get(ticker)
         decision_id = f"MR-{ticker}-{uuid.uuid4().hex[:12].upper()}"
-        _decide_and_execute_ticker(
-            portfolio=portfolio,
-            ticker=ticker,
-            closes=closes,
-            mark_price=mark_price,
-            p=p,
-            decision_id=decision_id,
-            liquid=liquidity_flags.get(ticker, True),
-        )
+        with slow_call_guard.warn_if_slow(f"[mean_reversion] SLOW _decide_and_execute_ticker ticker={ticker}"):
+            _decide_and_execute_ticker(
+                portfolio=portfolio,
+                ticker=ticker,
+                closes=closes,
+                mark_price=mark_price,
+                p=p,
+                decision_id=decision_id,
+                liquid=liquidity_flags.get(ticker, True),
+            )
 
     mark_prices = {t: pe._f(s.get("mark_price")) for t, s in marks.items()}
     mark_meta = {

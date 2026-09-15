@@ -22,6 +22,7 @@ from typing import Any
 import tae_parallel_paper_config as ppc
 import tae_parallel_paper_runtime as pprun
 import tae_paper_execution as pe
+import tae_slow_call_guard as slow_call_guard
 
 MODE = "PAPER_ONLY"
 SCHEMA = "tae.canonical_dual_strategy.v1"
@@ -185,39 +186,32 @@ def run_v2_challenger_cycle(*, mark_provider=None) -> dict[str, Any]:
     # ~1h45m (confirmed via `py-spy dump` mid-hang -- the child process was
     # genuinely CPU-bound inside this loop, not blocked on network I/O) with
     # no way to tell afterward which ticker/phase actually ate the time,
-    # since the loop prints nothing per-ticker. Logging any call slower than
-    # SLOW_TICKER_THRESHOLD_SEC turns a future recurrence into a log-read
-    # instead of a live process-forensics session.
-    import time as _time
-
+    # since the loop prints nothing per-ticker. warn_if_slow (extracted
+    # 2026-09-15 into tae_slow_call_guard) turns a future recurrence into a
+    # log-read instead of a live process-forensics session.
     for phase in ("manage", "entry"):
         for ticker in tickers:
             snap = marks.get(ticker) or {}
             decision_id = f"V2-{phase}-{ticker}-{snap_id[:10]}"
-            _t0 = _time.perf_counter()
-            try:
-                out = pprun._run_v2_arm(
-                    portfolio=portfolio,
-                    ticker=ticker,
-                    snap=snap,
-                    cfg_par=cfg,
-                    p=p,
-                    decision_id=decision_id,
-                    phase=phase,
-                    v2_kelly_fraction=v2_kelly_fraction,
-                    v2_kelly_diag=v2_kelly_diag,
-                )
-            except Exception as exc:  # isolate V2 failures from V1
-                errors.append(f"{ticker}/{phase}:{exc}")
-                continue
-            finally:
-                _elapsed = _time.perf_counter() - _t0
-                if _elapsed >= SLOW_TICKER_THRESHOLD_SEC:
-                    print(
-                        f">>> [dual_strategy] SLOW _run_v2_arm ticker={ticker} phase={phase} "
-                        f"elapsed={_elapsed:.1f}s",
-                        flush=True,
+            with slow_call_guard.warn_if_slow(
+                f"[dual_strategy] SLOW _run_v2_arm ticker={ticker} phase={phase}",
+                threshold_sec=SLOW_TICKER_THRESHOLD_SEC,
+            ):
+                try:
+                    out = pprun._run_v2_arm(
+                        portfolio=portfolio,
+                        ticker=ticker,
+                        snap=snap,
+                        cfg_par=cfg,
+                        p=p,
+                        decision_id=decision_id,
+                        phase=phase,
+                        v2_kelly_fraction=v2_kelly_fraction,
+                        v2_kelly_diag=v2_kelly_diag,
                     )
+                except Exception as exc:  # isolate V2 failures from V1
+                    errors.append(f"{ticker}/{phase}:{exc}")
+                    continue
             if not isinstance(out, dict):
                 continue
             # _run_v2_arm returns a flat decision row (mutates portfolio in-place).

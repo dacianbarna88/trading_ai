@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import tae_mtime_indexed_cache as mtime_indexed_cache
+
 SCHEMA = "tae.paper_portfolio.v1"
 MODE = "PAPER_ONLY"
 DAILY_EQUITY_SCHEMA = "tae.paper_daily_equity.v1"
@@ -568,26 +570,53 @@ def is_decision_brain_skip(action: Any) -> bool:
     return normalize_decision_brain_action(action) in DECISION_BRAIN_SKIP_ACTIONS
 
 
+_paper_decisions_index_cache: dict[str, Any] = {"mtime": None, "index": {}}
+
+
+def _build_paper_decisions_index(path: Path) -> dict[str, list[dict[str, Any]]]:
+    """One full pass over paper_decisions.json, building
+    {ticker: [rows...]} for every ticker at once (all rows kept, not just
+    the latest, since callers may need to exclude one specific decision_id
+    and fall back to the next-latest)."""
+    doc = load_json(path) or {}
+    rows = (r for r in (doc.get("decisions") or []) if isinstance(r, dict))
+    return mtime_indexed_cache.group_rows_by_key(rows, key_fn=lambda r: _s(r.get("ticker")).upper())
+
+
 def _latest_paper_decision_for_ticker(
     ticker: str,
     *,
     exclude_decision_id: str | None = None,
     decisions_doc: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Latest PDE decision row for ticker from paper_decisions SSOT (read-only)."""
-    doc = decisions_doc
-    if doc is None:
-        doc = load_json(DECISIONS_JSON) or {}
-    rows = [r for r in (doc.get("decisions") or []) if isinstance(r, dict)]
+    """Latest PDE decision row for ticker from paper_decisions SSOT (read-only).
+
+    Perf note (2026-09-15): this used to reload and re-scan the entire,
+    ever-growing paper_decisions.json (1.7MB+/~43k rows by now) on every
+    call -- called once per ticker per phase from _run_v2_arm via
+    resolve_decision_brain_verdict(), up to ~1000x/cycle in
+    tae_canonical_dual_strategy.py's S&P-500-wide loop. Same "re-parse a
+    growing journal per-ticker instead of once" bug class already fixed
+    three times this sprint. Now uses the same shared mtime-cached index
+    (tae_mtime_indexed_cache) as _latest_longitudinal_action_for_ticker
+    below, unless an explicit decisions_doc is passed in (already-loaded
+    doc; e.g. tests, or a caller that has it in hand anyway)."""
     ticker_u = _s(ticker).upper()
     excl = _s(exclude_decision_id)
-    candidates: list[dict[str, Any]] = []
-    for row in rows:
-        if _s(row.get("ticker")).upper() != ticker_u:
-            continue
-        if excl and _s(row.get("decision_id")) == excl:
-            continue
-        candidates.append(row)
+    if decisions_doc is not None:
+        rows_for_ticker = [
+            r
+            for r in (decisions_doc.get("decisions") or [])
+            if isinstance(r, dict) and _s(r.get("ticker")).upper() == ticker_u
+        ]
+    else:
+        index = mtime_indexed_cache.cached_mtime_index(
+            DECISIONS_JSON,
+            cache=_paper_decisions_index_cache,
+            build_index=_build_paper_decisions_index,
+        )
+        rows_for_ticker = index.get(ticker_u) or []
+    candidates = [r for r in rows_for_ticker if not (excl and _s(r.get("decision_id")) == excl)]
     if not candidates:
         return None
     candidates.sort(key=lambda r: _s(r.get("timestamp") or r.get("generated_at")))
@@ -601,25 +630,17 @@ _longitudinal_index_cache: dict[str, Any] = {"mtime": None, "index": {}}
 def _build_longitudinal_latest_index(path: Path) -> dict[str, dict[str, Any]]:
     """One full pass over the (large, growing) longitudinal-memory
     journal, building {ticker: latest_row} for every ticker at once."""
+    grouped = mtime_indexed_cache.group_rows_by_key(
+        mtime_indexed_cache.iter_jsonl_rows(path), key_fn=lambda r: _s(r.get("ticker")).upper()
+    )
     index: dict[str, dict[str, Any]] = {}
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(row, dict):
-                continue
-            ticker_u = _s(row.get("ticker")).upper()
-            if not ticker_u:
-                continue
-            prev = index.get(ticker_u)
-            if prev is None or _s(row.get("timestamp")) >= _s(prev.get("timestamp")):
-                index[ticker_u] = row
-    except OSError:
-        return {}
+    for ticker_u, rows in grouped.items():
+        latest: dict[str, Any] | None = None
+        for row in rows:
+            if latest is None or _s(row.get("timestamp")) >= _s(latest.get("timestamp")):
+                latest = row
+        if latest is not None:
+            index[ticker_u] = latest
     return index
 
 
@@ -640,14 +661,10 @@ def _latest_longitudinal_action_for_ticker(ticker: str) -> tuple[str | None, dic
     path = _LONGITUDINAL_MEMORY_PATH
     if not path.is_file():
         return None, None
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return None, None
-    if _longitudinal_index_cache.get("mtime") != mtime:
-        _longitudinal_index_cache["index"] = _build_longitudinal_latest_index(path)
-        _longitudinal_index_cache["mtime"] = mtime
-    latest = _longitudinal_index_cache["index"].get(_s(ticker).upper())
+    index = mtime_indexed_cache.cached_mtime_index(
+        path, cache=_longitudinal_index_cache, build_index=_build_longitudinal_latest_index
+    )
+    latest = index.get(_s(ticker).upper())
     if not latest:
         return None, None
     return normalize_decision_brain_action(latest.get("action")), latest

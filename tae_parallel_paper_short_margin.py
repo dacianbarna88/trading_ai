@@ -36,6 +36,7 @@ from typing import Any
 
 import tae_paper_execution_short as pes
 import tae_parallel_paper_runtime as ppr
+import tae_slow_call_guard as slow_call_guard
 import tae_strategy_v1_vol_stop as v1volstop
 
 ARM_ID = "exp_short_margin"
@@ -347,14 +348,15 @@ def run_short_margin_cycle() -> dict[str, Any]:
     for ticker in all_tickers:
         snap = marks.get(ticker) or {"mark_price": None, "score": None, "eligible": None}
         decision_id = f"SM-{ticker}-{uuid.uuid4().hex[:12].upper()}"
-        _decide_and_execute_ticker(
-            portfolio=portfolio,
-            ticker=ticker,
-            snap=snap,
-            p=p,
-            decision_id=decision_id,
-            long_held_elsewhere=long_held_elsewhere,
-        )
+        with slow_call_guard.warn_if_slow(f"[short_margin] SLOW _decide_and_execute_ticker ticker={ticker}"):
+            _decide_and_execute_ticker(
+                portfolio=portfolio,
+                ticker=ticker,
+                snap=snap,
+                p=p,
+                decision_id=decision_id,
+                long_held_elsewhere=long_held_elsewhere,
+            )
 
     mark_prices = {t: pes._f(s.get("mark_price")) for t, s in marks.items()}
     mark_meta = {

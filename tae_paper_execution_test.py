@@ -2470,5 +2470,84 @@ class LongitudinalActionIndexCacheTest(unittest.TestCase):
         self.assertEqual(action, "SELL_PAPER")
 
 
+class PaperDecisionsIndexCacheTest(unittest.TestCase):
+    """Perf fix (2026-09-15, instance #4 of the same bug class):
+    _latest_paper_decision_for_ticker used to reload+re-scan the entire
+    paper_decisions.json on every call -- called once per ticker per phase
+    from _run_v2_arm via resolve_decision_brain_verdict(), up to
+    ~1000x/cycle in tae_canonical_dual_strategy.py's S&P-500-wide loop. Now
+    uses the same shared mtime-cached index as the longitudinal-memory fix."""
+
+    def setUp(self) -> None:
+        pe._paper_decisions_index_cache["mtime"] = None
+        pe._paper_decisions_index_cache["path"] = None
+        pe._paper_decisions_index_cache["index"] = {}
+        self._tmp = tempfile.TemporaryDirectory()
+        self._path = Path(self._tmp.name) / "paper_decisions.json"
+        self._patcher = mock.patch.object(pe, "DECISIONS_JSON", self._path)
+        self._patcher.start()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self._tmp.cleanup()
+        pe._paper_decisions_index_cache["mtime"] = None
+        pe._paper_decisions_index_cache["path"] = None
+        pe._paper_decisions_index_cache["index"] = {}
+
+    def _write(self, rows: list[dict]) -> None:
+        self._path.write_text(json.dumps({"decisions": rows}), encoding="utf-8")
+
+    def test_missing_file_returns_none_not_a_crash(self) -> None:
+        self.assertIsNone(pe._latest_paper_decision_for_ticker("AAPL"))
+
+    def test_picks_the_latest_row_per_ticker_by_timestamp(self) -> None:
+        self._write(
+            [
+                {"decision_id": "D1", "ticker": "AAPL", "action": "BUY_PAPER", "timestamp": "2026-01-01T00:00:00Z"},
+                {"decision_id": "D2", "ticker": "AAPL", "action": "SELL_PAPER", "timestamp": "2026-02-01T00:00:00Z"},
+                {"decision_id": "D3", "ticker": "MSFT", "action": "BUY_PAPER", "timestamp": "2026-01-15T00:00:00Z"},
+            ]
+        )
+        row = pe._latest_paper_decision_for_ticker("AAPL")
+        self.assertEqual(row["decision_id"], "D2")
+
+    def test_exclude_decision_id_falls_back_to_next_latest(self) -> None:
+        self._write(
+            [
+                {"decision_id": "D1", "ticker": "AAPL", "action": "BUY_PAPER", "timestamp": "2026-01-01T00:00:00Z"},
+                {"decision_id": "D2", "ticker": "AAPL", "action": "SELL_PAPER", "timestamp": "2026-02-01T00:00:00Z"},
+            ]
+        )
+        row = pe._latest_paper_decision_for_ticker("AAPL", exclude_decision_id="D2")
+        self.assertEqual(row["decision_id"], "D1")
+
+    def test_second_call_reuses_the_cached_index_not_a_full_reparse(self) -> None:
+        self._write([{"decision_id": "D1", "ticker": "AAPL", "action": "BUY_PAPER", "timestamp": "2026-01-01T00:00:00Z"}])
+        pe._latest_paper_decision_for_ticker("AAPL")
+        cached_index_id = id(pe._paper_decisions_index_cache["index"])
+
+        with mock.patch.object(pe, "_build_paper_decisions_index") as rebuild:
+            pe._latest_paper_decision_for_ticker("MSFT")
+            rebuild.assert_not_called()
+        self.assertEqual(id(pe._paper_decisions_index_cache["index"]), cached_index_id)
+
+    def test_file_change_invalidates_the_cache(self) -> None:
+        self._write([{"decision_id": "D1", "ticker": "AAPL", "action": "BUY_PAPER", "timestamp": "2026-01-01T00:00:00Z"}])
+        pe._latest_paper_decision_for_ticker("AAPL")
+
+        import time as _time
+
+        _time.sleep(0.01)
+        self._write([{"decision_id": "D2", "ticker": "AAPL", "action": "SELL_PAPER", "timestamp": "2026-03-01T00:00:00Z"}])
+        row = pe._latest_paper_decision_for_ticker("AAPL")
+        self.assertEqual(row["decision_id"], "D2")
+
+    def test_explicit_decisions_doc_bypasses_the_cache(self) -> None:
+        # No file on disk at all -- decisions_doc must be used as-is.
+        doc = {"decisions": [{"decision_id": "D9", "ticker": "AAPL", "action": "HOLD_PAPER", "timestamp": "2026-01-01T00:00:00Z"}]}
+        row = pe._latest_paper_decision_for_ticker("AAPL", decisions_doc=doc)
+        self.assertEqual(row["decision_id"], "D9")
+
+
 if __name__ == "__main__":
     unittest.main()

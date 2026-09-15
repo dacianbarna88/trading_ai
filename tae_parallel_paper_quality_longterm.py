@@ -43,6 +43,7 @@ import tae_accounting_quality_score as fscore
 import tae_financial_statements_snapshot as fss
 import tae_paper_execution as pe
 import tae_parallel_paper_runtime as ppr
+import tae_slow_call_guard as slow_call_guard
 
 ARM_ID = "exp_quality_longterm"
 ARM_DIR = Path("runtime_outputs/parallel_paper") / ARM_ID
@@ -125,7 +126,8 @@ def compute_eligible_scores(tickers: list[str]) -> dict[str, float]:
     snapshot = fss.fetch_statements(tickers)
     filtered: dict[str, float] = {}
     for t in tickers:
-        result = fscore.compute_f_score(snapshot.get(t) or {})
+        with slow_call_guard.warn_if_slow(f"[quality_longterm] SLOW compute_f_score ticker={t}"):
+            result = fscore.compute_f_score(snapshot.get(t) or {})
         if result["score"] is not None and result["scoreable"] >= MIN_SCOREABLE:
             filtered[t] = result["score"]
     return filtered
