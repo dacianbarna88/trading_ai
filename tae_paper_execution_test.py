@@ -2405,5 +2405,70 @@ class AdaptiveDeploymentIsolationRegressionTest(unittest.TestCase):
         self.assertEqual(order["fill_price"], 25.0)
 
 
+class LongitudinalActionIndexCacheTest(unittest.TestCase):
+    """Perf fix (2026-09-15): _latest_longitudinal_action_for_ticker used
+    to re-parse the entire longitudinal-memory journal on every call --
+    called once per ticker per phase from _run_v2_arm (~1000x/cycle in
+    tae_canonical_dual_strategy.py's S&P-500-wide loop), causing a real
+    14h45m hang overnight. Now builds a {ticker: latest_row} index once
+    per file version (cached by mtime)."""
+
+    def setUp(self) -> None:
+        pe._longitudinal_index_cache["mtime"] = None
+        pe._longitudinal_index_cache["index"] = {}
+        self._tmp = tempfile.TemporaryDirectory()
+        self._path = Path(self._tmp.name) / "decisions.jsonl"
+        self._patcher = mock.patch.object(pe, "_LONGITUDINAL_MEMORY_PATH", self._path)
+        self._patcher.start()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self._tmp.cleanup()
+        pe._longitudinal_index_cache["mtime"] = None
+        pe._longitudinal_index_cache["index"] = {}
+
+    def _write(self, rows: list[dict]) -> None:
+        with self._path.open("w") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+
+    def test_missing_file_returns_none_not_a_crash(self) -> None:
+        action, row = pe._latest_longitudinal_action_for_ticker("AAPL")
+        self.assertIsNone(action)
+        self.assertIsNone(row)
+
+    def test_picks_the_latest_row_per_ticker_by_timestamp(self) -> None:
+        self._write(
+            [
+                {"ticker": "AAPL", "action": "BUY_PAPER", "timestamp": "2026-01-01T00:00:00Z"},
+                {"ticker": "AAPL", "action": "SELL_PAPER", "timestamp": "2026-02-01T00:00:00Z"},
+                {"ticker": "MSFT", "action": "BUY_PAPER", "timestamp": "2026-01-15T00:00:00Z"},
+            ]
+        )
+        action, row = pe._latest_longitudinal_action_for_ticker("AAPL")
+        self.assertEqual(action, "SELL_PAPER")
+
+    def test_second_call_reuses_the_cached_index_not_a_full_reparse(self) -> None:
+        self._write([{"ticker": "AAPL", "action": "BUY_PAPER", "timestamp": "2026-01-01T00:00:00Z"}])
+        pe._latest_longitudinal_action_for_ticker("AAPL")
+        cached_index_id = id(pe._longitudinal_index_cache["index"])
+
+        with mock.patch.object(pe, "_build_longitudinal_latest_index") as rebuild:
+            pe._latest_longitudinal_action_for_ticker("MSFT")
+            rebuild.assert_not_called()
+        self.assertEqual(id(pe._longitudinal_index_cache["index"]), cached_index_id)
+
+    def test_file_change_invalidates_the_cache(self) -> None:
+        self._write([{"ticker": "AAPL", "action": "BUY_PAPER", "timestamp": "2026-01-01T00:00:00Z"}])
+        pe._latest_longitudinal_action_for_ticker("AAPL")
+
+        import time as _time
+
+        _time.sleep(0.01)
+        self._write([{"ticker": "AAPL", "action": "SELL_PAPER", "timestamp": "2026-03-01T00:00:00Z"}])
+        action, _row = pe._latest_longitudinal_action_for_ticker("AAPL")
+        self.assertEqual(action, "SELL_PAPER")
+
+
 if __name__ == "__main__":
     unittest.main()

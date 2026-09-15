@@ -144,6 +144,23 @@ def run_v2_challenger_cycle(*, mark_provider=None) -> dict[str, Any]:
     v1_port = pe.load_json(pe.PORTFOLIO_JSON) or {}
     from research.market_scanner import get_sp500_tickers
 
+    # Perf fix (2026-09-15): this loop below calls pprun._run_v2_arm once
+    # per ticker (up to ~500 S&P 500 tickers) per phase (manage+entry) --
+    # up to ~1000 calls/cycle. Without v2_kelly_fraction/diag precomputed
+    # and passed in, _run_v2_arm's fallback recomputes it EVERY call,
+    # re-parsing the entire (large, growing) v2/journals/decisions.jsonl
+    # each time. This is the exact bug class fixed in tae_parallel_paper_
+    # runtime.run_cycle() on 2026-09-14 (200x/cycle there) -- this second,
+    # separate call site was missed and caused a real 14h45m hang
+    # overnight 2026-09-14/15 (confirmed: process alive since 20:00,
+    # stuck deep in JSON parsing when sampled, only reached ticker "DIA"
+    # after 8+ minutes on the *manual recovery* rerun the next morning).
+    import tae_strategy_v2_kelly_sizing as v2kelly
+
+    v2_kelly_fraction, v2_kelly_diag = v2kelly.v2_tranche_fraction_from_edge(
+        p["v2_trades"], min_entry_score=pprun.V1_V2_ENTRY_MIN_SCORE, decisions_path=p["v2_decisions"]
+    )
+
     tickers = sorted(
         {
             *(str(t).upper() for t in (portfolio.get("positions") or {})),
@@ -187,6 +204,8 @@ def run_v2_challenger_cycle(*, mark_provider=None) -> dict[str, Any]:
                     p=p,
                     decision_id=decision_id,
                     phase=phase,
+                    v2_kelly_fraction=v2_kelly_fraction,
+                    v2_kelly_diag=v2_kelly_diag,
                 )
             except Exception as exc:  # isolate V2 failures from V1
                 errors.append(f"{ticker}/{phase}:{exc}")

@@ -594,13 +594,14 @@ def _latest_paper_decision_for_ticker(
     return candidates[-1]
 
 
-def _latest_longitudinal_action_for_ticker(ticker: str) -> tuple[str | None, dict[str, Any] | None]:
-    """Latest longitudinal memory action for ticker (Decision Brain audit SSOT). Fail-open."""
-    path = Path("runtime_outputs/longitudinal_memory/decisions.jsonl")
-    if not path.is_file():
-        return None, None
-    ticker_u = _s(ticker).upper()
-    latest: dict[str, Any] | None = None
+_LONGITUDINAL_MEMORY_PATH = Path("runtime_outputs/longitudinal_memory/decisions.jsonl")
+_longitudinal_index_cache: dict[str, Any] = {"mtime": None, "index": {}}
+
+
+def _build_longitudinal_latest_index(path: Path) -> dict[str, dict[str, Any]]:
+    """One full pass over the (large, growing) longitudinal-memory
+    journal, building {ticker: latest_row} for every ticker at once."""
+    index: dict[str, dict[str, Any]] = {}
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
@@ -611,12 +612,42 @@ def _latest_longitudinal_action_for_ticker(ticker: str) -> tuple[str | None, dic
                 continue
             if not isinstance(row, dict):
                 continue
-            if _s(row.get("ticker")).upper() != ticker_u:
+            ticker_u = _s(row.get("ticker")).upper()
+            if not ticker_u:
                 continue
-            if latest is None or _s(row.get("timestamp")) >= _s(latest.get("timestamp")):
-                latest = row
+            prev = index.get(ticker_u)
+            if prev is None or _s(row.get("timestamp")) >= _s(prev.get("timestamp")):
+                index[ticker_u] = row
+    except OSError:
+        return {}
+    return index
+
+
+def _latest_longitudinal_action_for_ticker(ticker: str) -> tuple[str | None, dict[str, Any] | None]:
+    """Latest longitudinal memory action for ticker (Decision Brain audit
+    SSOT). Fail-open.
+
+    Perf note (2026-09-15): this used to re-read and re-parse the ENTIRE
+    journal (56MB+/~10k lines by now) on every single call -- called once
+    per ticker per phase from _run_v2_arm, up to ~1000x/cycle in
+    tae_canonical_dual_strategy.py's S&P-500-wide loop (measured ~0.8s/
+    call there, ~13+ min/cycle just for this). Same "re-parse a growing
+    journal per-ticker instead of once" bug class already fixed twice
+    this sprint (V2 Kelly sizing, both call sites) -- this is the third
+    instance. Now builds a {ticker: latest_row} index ONCE per file
+    version (cached by mtime, so it naturally invalidates when the file
+    changes) instead of scanning the whole file for every ticker."""
+    path = _LONGITUDINAL_MEMORY_PATH
+    if not path.is_file():
+        return None, None
+    try:
+        mtime = path.stat().st_mtime
     except OSError:
         return None, None
+    if _longitudinal_index_cache.get("mtime") != mtime:
+        _longitudinal_index_cache["index"] = _build_longitudinal_latest_index(path)
+        _longitudinal_index_cache["mtime"] = mtime
+    latest = _longitudinal_index_cache["index"].get(_s(ticker).upper())
     if not latest:
         return None, None
     return normalize_decision_brain_action(latest.get("action")), latest
