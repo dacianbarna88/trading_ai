@@ -57,15 +57,32 @@ SHADOW_SCORER_CACHE_TTL_SECONDS = 1800.0
 _cache: dict[str, Any] = {}
 
 
-def _get_scorer(*, now: datetime):
+def _get_scorer(*, now: datetime, scorer: Any | None = None):
+    if scorer is not None:
+        # Perf fix (2026-09-15): caller already has a freshly-fit scorer
+        # for this cycle (tae_parallel_paper_runtime.run_cycle fits one for
+        # V3's own real scoring) -- use it instead of doing a second,
+        # fully independent LearningScorer().fit() here. This module's own
+        # in-memory TTL cache below never actually helped in production:
+        # each hourly cycle is a brand-new process, so the "cache" reset
+        # every call anyway, meaning shadow_entry_score() was silently
+        # paying a full LearningScorer().fit() -- which re-reads the
+        # entire, ever-growing training corpus (300k+ JSON lines and
+        # growing) -- on top of run_cycle's own V3 fit, every single
+        # cycle. Surfaced as a real "SLOW _run_v1_arm ticker=ADBE ...
+        # elapsed=4.3s" warning once tae_slow_call_guard instrumentation
+        # reached this call site (misattributed to whichever ticker
+        # happened to be the first BUY-entry candidate, since that's where
+        # this module's own from-scratch fit was triggered).
+        return scorer
     cached = _cache.get("scorer")
     if cached is not None and (now - cached["fitted_at"]).total_seconds() < SHADOW_SCORER_CACHE_TTL_SECONDS:
         return cached["scorer"]
     import tae_strategy_v3_learning_policy as v3pol
 
-    scorer = v3pol.LearningScorer().fit()
-    _cache["scorer"] = {"fitted_at": now, "scorer": scorer}
-    return scorer
+    fitted = v3pol.LearningScorer().fit()
+    _cache["scorer"] = {"fitted_at": now, "scorer": fitted}
+    return fitted
 
 
 def shadow_entry_score(
@@ -76,6 +93,7 @@ def shadow_entry_score(
     horizon_alignment_score: float | None = None,
     horizon_conflict_flag: bool | None = None,
     now: datetime | None = None,
+    scorer: Any | None = None,
 ) -> dict[str, Any] | None:
     """Returns a small dict {p_profit, source, n_train, shrinkage_weight,
     ...} for logging, or None if scoring failed for any reason (this must
@@ -97,17 +115,22 @@ def shadow_entry_score(
     is never populated by _load_today_pde_signals either) -- the model was
     never trained on real variation of them, so inventing real values here
     would score against features the model can't actually use, not fix
-    anything."""
+    anything.
+
+    scorer (2026-09-15): pass the caller's own already-fitted
+    LearningScorer (e.g. run_cycle's per-cycle V3 scorer) to skip this
+    module's independent fit entirely -- see _get_scorer's perf note.
+    Omit to keep the old standalone in-memory-TTL-cached-fit behavior."""
     moment = now or datetime.now(timezone.utc)
     try:
-        scorer = _get_scorer(now=moment)
+        resolved_scorer = _get_scorer(now=moment, scorer=scorer)
         record = {
             "growth_score": growth_score,
             "confidence": confidence,
             "horizon_alignment_score": horizon_alignment_score,
             "horizon_conflict_flag": horizon_conflict_flag,
         }
-        p_profit, diag = scorer.predict_proba(action, record)
+        p_profit, diag = resolved_scorer.predict_proba(action, record)
         return {"p_profit": round(float(p_profit), 4), **diag}
     except Exception as exc:  # pragma: no cover - defensive, shadow-only
         return {"error": str(exc)}

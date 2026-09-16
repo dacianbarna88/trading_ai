@@ -54,9 +54,9 @@ class ShadowScoreTest(unittest.TestCase):
         calls = []
         real_fit = shadow._get_scorer
 
-        def _counting_get_scorer(*, now):
+        def _counting_get_scorer(*, now, scorer=None):
             calls.append(now)
-            return real_fit(now=now)
+            return real_fit(now=now, scorer=scorer)
 
         with mock.patch.object(shadow, "_get_scorer", side_effect=_counting_get_scorer):
             shadow.shadow_entry_score(growth_score=10.0)
@@ -65,6 +65,25 @@ class ShadowScoreTest(unittest.TestCase):
         self.assertEqual(len(calls), 3)  # _get_scorer called each time...
         # ...but the cache inside it means only the first actually fits.
         self.assertIn("scorer", shadow._cache)
+
+    def test_passing_a_prefit_scorer_skips_the_independent_fit_entirely(self) -> None:
+        """Perf fix (2026-09-15): a caller that already has a fitted scorer
+        for this cycle (run_cycle's own V3 fit) must short-circuit straight
+        through -- no fit, no touching the in-memory cache at all (that
+        in-memory cache never survives across the short-lived hourly-cycle
+        processes that are the real caller in production, so relying on it
+        alone silently cost a full from-scratch refit every single cycle
+        on top of run_cycle's own V3 fit)."""
+
+        class _FakeScorer:
+            def predict_proba(self, action, record):
+                return 0.42, {"source": "FAKE_PREFIT"}
+
+        fake = _FakeScorer()
+        result = shadow.shadow_entry_score(growth_score=75.0, scorer=fake)
+        self.assertEqual(result["p_profit"], 0.42)
+        self.assertEqual(result["source"], "FAKE_PREFIT")
+        self.assertEqual(shadow._cache, {})
 
 
 class RuntimeWiringSmokeTest(unittest.TestCase):
@@ -106,6 +125,24 @@ class RuntimeWiringSmokeTest(unittest.TestCase):
         source = inspect.getsource(ppr)
         self.assertIn("v1_pde_signals = v3_pde_signals or _load_today_pde_signals()", source)
         self.assertIn("pde_signals=v1_pde_signals", source)
+
+    def test_v1_arm_forwards_its_prefit_v3_scorer_into_the_shadow_call(self) -> None:
+        """Perf fix (2026-09-15): _run_v1_arm must pass its own v3_scorer
+        parameter straight through to shadow_entry_score's `scorer=` --
+        otherwise the shadow scorer silently falls back to its own
+        independent from-scratch fit every cycle (see tae_shadow_entry_
+        scorer._get_scorer's perf note)."""
+        import tae_parallel_paper_runtime as ppr
+
+        source = inspect.getsource(ppr._run_v1_arm)
+        self.assertIn("v3_scorer:", source)
+        self.assertIn("scorer=v3_scorer", source)
+
+    def test_run_cycle_forwards_its_v3_scorer_into_the_v1_arm_pass(self) -> None:
+        import tae_parallel_paper_runtime as ppr
+
+        source = inspect.getsource(ppr)
+        self.assertIn("v3_scorer=v3_scorer", source)
 
 
 if __name__ == "__main__":

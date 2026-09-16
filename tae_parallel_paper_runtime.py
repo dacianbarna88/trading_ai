@@ -1933,6 +1933,7 @@ def _run_v1_arm(
     decision_id: str,
     phase: str = PHASE_ALL,
     pde_signals: dict[str, dict[str, Any]] | None = None,
+    v3_scorer: "v3pol.LearningScorer | None" = None,
 ) -> dict[str, Any]:
     # Optional offline mirror mode — not the V1/V2 experiment default
     if str(cfg.get("V1_MODE") or portfolio.get("v1_mode") or "").upper() == "CANONICAL_PAPER_MIRROR":
@@ -1989,6 +1990,7 @@ def _run_v1_arm(
             confidence=pde_sig.get("confidence", (snap or {}).get("confidence") if isinstance(snap, dict) else None),
             horizon_alignment_score=pde_sig.get("horizon_alignment_score"),
             horizon_conflict_flag=pde_sig.get("horizon_conflict_flag"),
+            scorer=v3_scorer,
         )
         # Post-Sprint-3 roadmap item 1 (2026-09-14): first genuinely
         # independent (non-price-derived) signal in this system. No
@@ -4013,6 +4015,7 @@ def run_cycle(
                             decision_id=f"{did}-V1-{phase}",
                             phase=phase,
                             pde_signals=v1_pde_signals,
+                            v3_scorer=v3_scorer,
                         )
                 except Exception as exc:
                     result["v1_ok"] = False
