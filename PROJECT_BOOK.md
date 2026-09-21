@@ -1,12 +1,12 @@
 # Trading AI — PROJECT BOOK (Canonical Journal)
 
-**Last updated:** 2026-08-03  
-**Constitution SSOT:** [`TAE_CONSTITUTION.md`](TAE_CONSTITUTION.md) **v2.2**  
+**Last updated:** 2026-08-03 (entries below); governance pointers corrected 2026-09-21 — see `SESSION_START.md` §10 for current state and full doc index.
+**Constitution SSOT:** [`TAE_CONSTITUTION.md`](_archive_unused_reports_20260817/TAE_CONSTITUTION.md) **v2.2** — archived 2026-08-17, historical intent only
 **Governance mode:** `PAPER_ONLY` \| `NO_BROKER` \| `NO_LIVE_PROMOTION` \| **`ARCHITECTURE_FREEZE`**  
 **Latest documentation sprint:** `TAE_CANONICAL_DOCUMENTATION_CLOSURE`
 
-> **Read first each session:** [`SESSION_START.md`](SESSION_START.md)  
-> **On conflict:** Constitution governs. This book must stay synced to it.
+> **Read first each session:** [`SESSION_START.md`](SESSION_START.md) — the single entry point; this book is architecture detail, not the bootstrap.
+> **On conflict:** `SESSION_START.md` governs current state; this book governs architecture/why; the archived Constitution is historical intent only.
 
 ---
 
@@ -208,8 +208,8 @@ Next operational action: `ACCUMULATE_NATURAL_BINDING_SKIP_GATE_OUTCOMES`.
 
 | Document | Role |
 |----------|------|
-| `TAE_CONSTITUTION.md` | Sole project-state SSOT (+ ARCHITECTURE_FREEZE) |
-| `SESSION_START.md` | Sole session bootstrap |
+| `_archive_unused_reports_20260817/TAE_CONSTITUTION.md` | Historical design/governance intent (archived 2026-08-17, no longer live SSOT) |
+| `SESSION_START.md` | Sole session bootstrap — current state + full document index (§10) |
 | `PROJECT_BOOK.md` | This journal |
 | `TAE_DEVELOPMENT_PROTOCOL.md` | Development process |
 | `TAE_GIT_GOVERNANCE.md` | Git rules |
