@@ -1517,8 +1517,29 @@ def _resolve_parallel_daemon_pid(
             pid = int(raw)
         except (TypeError, ValueError, OSError):
             continue
-        if _pid_alive(pid):
-            candidates.append((pid, label))
+        if not _pid_alive(pid):
+            continue
+        # Bug found 2026-09-21: a stale artifact (pid file / heartbeat /
+        # runtime_status.json -- e.g. left over from the retired
+        # com.tradingai.parallel-paper daemon, dead since 2026-08-03) can
+        # still name a PID number the OS has since recycled for an
+        # unrelated process. _pid_alive() alone can't tell the difference
+        # -- confirmed for real: PID 581 from a stale 2026-08-03 artifact
+        # is now macOS's unrelated useractivityd, and health_snapshot()
+        # reported it as the running daemon. find_parallel_paper_daemon_pids()
+        # below already verifies cmdline for its own "discovered"
+        # candidates; apply the same check to artifact-declared candidates
+        # so a recycled PID can't be mistaken for a live daemon just
+        # because an old artifact still names it.
+        try:
+            from core.process_identity import read_cmdline
+
+            cmd_text = read_cmdline(pid)
+        except Exception:
+            cmd_text = None
+        if not _cmdline_is_parallel_daemon(cmd_text, project_dir=project_dir):
+            continue
+        candidates.append((pid, label))
 
     discovered = find_parallel_paper_daemon_pids(project_dir=project_dir) if allow_process_discovery else []
     # Only promote discovery when artifacts already reference that pid or artifacts are empty/stale.

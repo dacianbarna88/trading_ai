@@ -107,13 +107,60 @@ def run_quality_longterm_once(_args: list[str] | None = None) -> int:
     return 0 if c.get("reconciliation_pass") else 1
 
 
+def _retired_autostart_status() -> dict[str, Any]:
+    """Status only for the retired com.tradingai.parallel-paper LaunchAgent.
+
+    Bug found 2026-09-21: this used to import a dedicated
+    tae_parallel_paper_autostart module, which does not exist on main --
+    it only ever existed on an unmerged branch (cursor/x12b-legacy-archive-
+    hotfix) -- so every call here raised ModuleNotFoundError. Recreating
+    that module is explicitly wrong: tae_canonical_dual_strategy_test.py's
+    test_01_no_daemon_module_required() asserts
+    tae_parallel_paper_autostart.py must NOT exist, as a guard against
+    accidentally restoring the daemon path retired 2026-08-03 (see
+    ~/Library/LaunchAgents/disabled_trading_ai/
+    com.tradingai.parallel-paper.RETIREMENT_MANIFEST.20260803T164137Z.json
+    -- classification RETIRE_LEGACY_ORPHAN, "do_not_accidental_restore":
+    true). Real automation today is the shared hourly cron job instead
+    (com.tradingai.hourly-refresh -> tae_hourly_refresh.sh ->
+    'tae.py parallel-paper-run-once'). This inline helper reports that
+    honestly, with no install/remove capability for the retired
+    LaunchAgent -- restoring it requires a dedicated sprint per the
+    manifest's own restore_prerequisites, not a CLI health check.
+    """
+    import subprocess
+    from pathlib import Path
+
+    hourly_plist = Path.home() / "Library" / "LaunchAgents" / "com.tradingai.hourly-refresh.plist"
+    try:
+        proc = subprocess.run(["launchctl", "list"], capture_output=True, text=True, check=False)
+        hourly_listed = "com.tradingai.hourly-refresh" in (proc.stdout or "")
+    except OSError:
+        hourly_listed = False
+    return {
+        "ok": True,
+        "retired_label": "com.tradingai.parallel-paper",
+        "retired": True,
+        "retirement_note": (
+            "Dedicated parallel-paper LaunchAgent retired 2026-08-03 "
+            "(RETIRE_LEGACY_ORPHAN, do_not_accidental_restore=true). "
+            "Automation now runs via the shared hourly cron job "
+            "(com.tradingai.hourly-refresh), not a dedicated daemon."
+        ),
+        "active_automation_label": "com.tradingai.hourly-refresh",
+        "active_automation_plist_installed": hourly_plist.is_file(),
+        "active_automation_launchctl_listed": hourly_listed,
+        "install_supported": False,
+        "remove_supported": False,
+    }
+
+
 def run_health(_args: list[str] | None = None) -> int:
-    from tae_parallel_paper_autostart import status_autostart
     from tae_parallel_paper_runtime import health_snapshot
 
     print("===== TAE PARALLEL-PAPER-HEALTH =====")
     h = health_snapshot()
-    h["autostart"] = status_autostart()
+    h["autostart"] = _retired_autostart_status()
     _print(h)
     ok_states = {
         "RUNNING_HEALTHY",
@@ -171,27 +218,30 @@ def run_cycle_cmd(_args: list[str] | None = None) -> int:
 
 
 def run_autostart_install(_args: list[str] | None = None) -> int:
-    from tae_parallel_paper_autostart import install_autostart
-
     print("===== TAE PARALLEL-PAPER-AUTOSTART-INSTALL — PAPER ONLY =====")
-    st = install_autostart()
+    st = _retired_autostart_status()
+    st["ok"] = False
+    st["reason"] = (
+        "install is intentionally unsupported: the retired "
+        "com.tradingai.parallel-paper LaunchAgent requires a dedicated "
+        "sprint + HEAD/main target verification + anti-duplication proof "
+        "per its retirement manifest before it can ever come back. Use "
+        "the existing com.tradingai.hourly-refresh job instead."
+    )
     _print(st)
-    return 0 if st.get("ok") else 1
+    return 1
 
 
 def run_autostart_status(_args: list[str] | None = None) -> int:
-    from tae_parallel_paper_autostart import status_autostart
-
     print("===== TAE PARALLEL-PAPER-AUTOSTART-STATUS =====")
-    st = status_autostart()
-    _print(st)
+    _print(_retired_autostart_status())
     return 0
 
 
 def run_autostart_remove(_args: list[str] | None = None) -> int:
-    from tae_parallel_paper_autostart import remove_autostart
-
     print("===== TAE PARALLEL-PAPER-AUTOSTART-REMOVE =====")
-    st = remove_autostart()
+    st = _retired_autostart_status()
+    st["removed"] = False
+    st["reason"] = "Nothing to remove -- the parallel-paper LaunchAgent was already retired/archived 2026-08-03."
     _print(st)
-    return 0 if st.get("ok") else 1
+    return 0
