@@ -358,7 +358,41 @@ def _prior_day_av(arm: str, day: str, cum_path: Path) -> float | None:
     if not days:
         return None
     days.sort(key=lambda d: _s(d.get("date")))
-    return _f(days[-1].get(f"{arm}_av"))
+    key = f"{arm}_av"
+    raw = days[-1].get(key)
+    # Bug found 2026-09-21: arms without a recorded {arm}_av on any prior
+    # day (V3/V4/... -- update_cumulative_report() only ever wrote V1_av/
+    # V2_av) hit `_f(None)` here, which defaults to 0.0, NOT None -- so
+    # daily_baseline below became 0.0 instead of falling back to
+    # start_cap, and "Daily total PnL" silently became a copy of ending_av
+    # (the whole account value, not a daily delta). Distinguish "no value
+    # recorded for this arm" from "recorded value of exactly 0.0".
+    if raw is None:
+        return None
+    return _f(raw)
+
+
+def _record_extra_arm_baseline(arm: str, day: str, ending_av: float, cum_path: Path) -> None:
+    """Merge `{arm}_av` into today's row of the same cumulative_json
+    update_cumulative_report() maintains, for arms that function doesn't
+    know about (V3 and beyond). Creates today's row if V1/V2's own update
+    hasn't run yet today; otherwise merges in without disturbing their
+    fields -- update_cumulative_report()'s own merge (see there) then
+    preserves this value regardless of which report runs first."""
+    try:
+        cum = json.loads(cum_path.read_text(encoding="utf-8")) if cum_path.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        cum = {}
+    days = list(cum.get("days") or [])
+    row = next((d for d in days if d.get("date") == day), None)
+    if row is None:
+        row = {"date": day}
+        days.append(row)
+    row[f"{arm}_av"] = ending_av
+    days.sort(key=lambda d: _s(d.get("date")))
+    cum["days"] = days
+    cum.setdefault("schema", "tae.parallel_paper.cumulative.v1")
+    _atomic_write_json(cum_path, cum)
 
 
 def _arm_day_metrics(
@@ -758,21 +792,27 @@ def update_cumulative_report(*, day_report: dict[str, Any], cfg: dict[str, Any] 
 
     day = day_report["date"]
     days = list(cum.get("days") or [])
-    # Replace same day (idempotent)
+    # Replace same day (idempotent), but preserve any extra per-arm keys
+    # (e.g. V3_av/V3_pnl) that _record_extra_arm_baseline() may already
+    # have written for today from the 3-way report -- this function only
+    # owns the V1/V2 keys it sets below, regardless of call order.
+    existing_today = next((d for d in days if d.get("date") == day), None)
     days = [d for d in days if d.get("date") != day]
     v = day_report["executive_conclusion"]["verdict"]
-    days.append(
-        {
-            "date": day,
-            "verdict": v,
-            "V1_av": day_report["v1"]["ending_av"],
-            "V2_av": day_report["v2"]["ending_av"],
-            "V1_pnl": day_report["v1"]["daily_total_pnl"],
-            "V2_pnl": day_report["v2"]["daily_total_pnl"],
-            "V1_dd": day_report["v1"]["drawdown"],
-            "V2_dd": day_report["v2"]["drawdown"],
-        }
-    )
+    new_row = {
+        "date": day,
+        "verdict": v,
+        "V1_av": day_report["v1"]["ending_av"],
+        "V2_av": day_report["v2"]["ending_av"],
+        "V1_pnl": day_report["v1"]["daily_total_pnl"],
+        "V2_pnl": day_report["v2"]["daily_total_pnl"],
+        "V1_dd": day_report["v1"]["drawdown"],
+        "V2_dd": day_report["v2"]["drawdown"],
+    }
+    if existing_today:
+        for k, val in existing_today.items():
+            new_row.setdefault(k, val)
+    days.append(new_row)
     days.sort(key=lambda x: x["date"])
 
     v1w = sum(1 for d in days if d["verdict"] == "V1_WIN")
@@ -819,6 +859,10 @@ def update_cumulative_report(*, day_report: dict[str, Any], cfg: dict[str, Any] 
         w = csv.DictWriter(
             fh,
             fieldnames=["date", "verdict", "V1_av", "V2_av", "V1_pnl", "V2_pnl", "V1_dd", "V2_dd"],
+            # rows may carry extra per-arm keys (e.g. V3_av/V3_pnl) recorded by
+            # _record_extra_arm_baseline() for the 3-way report -- this CSV
+            # stays V1/V2-only by design, so ignore rather than crash on them.
+            extrasaction="ignore",
         )
         w.writeheader()
         for d in days:
@@ -1021,6 +1065,12 @@ def generate_three_way_report(
     arms_metrics = {"V1": m1, "V2": m2}
     if v3 is not None:
         arms_metrics["V3"] = _arm_day_metrics("V3", v3, cfg, marks, day=day, cum_path=p["cumulative_json"])
+        # Bug found 2026-09-21: update_cumulative_report() (called only from
+        # generate_daily_report) never recorded V3_av, so _prior_day_av("V3", ...)
+        # always fell back to 0.0 (see its own fix note) and V3's "Daily total
+        # PnL" silently equaled its whole ending_av. Record V3's own baseline
+        # here so tomorrow's run has a real prior-day AV to diff against.
+        _record_extra_arm_baseline("V3", day, arms_metrics["V3"]["ending_av"], p["cumulative_json"])
 
     verdict = compute_three_way_verdict(arms_metrics)
     divergences = compute_three_way_divergence(p, day)
