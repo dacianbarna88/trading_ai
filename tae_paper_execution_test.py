@@ -396,6 +396,81 @@ class PaperExecutionTest(unittest.TestCase):
                         row = json.loads(line)
                         self.assertGreater(pe._f(row.get("fill_shares") or row.get("shares")), 0)
 
+    def test_run_paper_execution_write_report_flag_suppresses_integrity_report_too(self) -> None:
+        """Regression (2026-09-22): _run_paper_execution_body hardcoded
+        write_report_flag=True on both its internal check_paper_profit_
+        integrity() calls (preflight + post-check), ignoring the caller's
+        own write_report_flag entirely. Any test/caller that passed
+        write_report_flag=False (as every existing test here already did)
+        but did NOT also separately patch INTEGRITY_REPORT_JSON/
+        INTEGRITY_REPORT_MD still silently overwrote the real, tracked
+        root-level report files with fixture numbers -- exactly what
+        happened to TAE_PAPER_PROFIT_INTEGRITY_GUARD_REPORT.md. Fixed by
+        propagating write_report_flag instead of hardcoding True; this
+        test deliberately leaves INTEGRITY_REPORT_JSON/INTEGRITY_REPORT_MD
+        UNPATCHED (pointed at a throwaway temp path standing in for the
+        real root-level default) to prove write_report_flag=False alone
+        is now sufficient, with no separate path patch required."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decisions_path = root / "runtime_outputs/paper_decisions/paper_decisions.json"
+            accounting_path = root / "tae_accounting_snapshot.json"
+            out_dir = root / "runtime_outputs/paper_execution"
+            decisions_path.parent.mkdir(parents=True)
+            out_dir.mkdir(parents=True)
+            decisions_path.write_text(
+                json.dumps(
+                    {
+                        "decisions": [
+                            {
+                                "decision_id": "PDEC-TEST-002",
+                                "ticker": "AAPL",
+                                "action": "HOLD_PAPER",
+                                "confidence": 0.5,
+                                "evidence": "hold",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            accounting_path.write_text(
+                json.dumps(
+                    {
+                        "cash_available": 5000,
+                        "account_value_corrected": 10000,
+                        "effective_contributed_capital": 30000.0,
+                        "open_positions": [
+                            {"ticker": "AAPL", "shares": 5, "current_price": 100, "pnl": 0},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            # Stand-in for the real root-level default -- proves the fix
+            # works via write_report_flag alone, without this path itself
+            # being patched to a temp dir.
+            standin_integrity_md = root / "standin_integrity_report.md"
+            standin_integrity_json = root / "standin_integrity_report.json"
+            with mock.patch.object(pe, "DECISIONS_JSON", decisions_path), mock.patch.object(
+                pe, "ACCOUNTING_JSON", accounting_path
+            ), mock.patch.object(pe, "OUTPUT_DIR", out_dir), mock.patch.object(
+                pe, "PORTFOLIO_JSON", out_dir / "paper_portfolio.json"
+            ), mock.patch.object(
+                pe, "ORDERS_JSONL", out_dir / "paper_orders.jsonl"
+            ), mock.patch.object(
+                pe, "TRADES_JSONL", out_dir / "paper_trades.jsonl"
+            ), mock.patch.object(
+                pe, "ATTRIBUTION_JSON", out_dir / "rule_outcome_attribution.json"
+            ), mock.patch.object(pe, "REPORT_MD", root / "TAE_PAPER_EXECUTION_REPORT.md"), mock.patch.object(
+                pe, "INTEGRITY_REPORT_JSON", standin_integrity_json
+            ), mock.patch.object(pe, "INTEGRITY_REPORT_MD", standin_integrity_md), mock.patch.object(
+                pe, "VALIDATION_PROFIT_JSON", out_dir / "validation.json"
+            ):
+                result = pe.run_paper_execution(write_report_flag=False)
+                self.assertTrue(result["ok"])
+            self.assertFalse(standin_integrity_md.is_file(), "write_report_flag=False must suppress the integrity report too")
+            self.assertFalse(standin_integrity_json.is_file(), "write_report_flag=False must suppress the integrity report too")
 
     def test_mtm_uses_live_price_not_avg(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -663,7 +738,9 @@ class PaperExecutionTest(unittest.TestCase):
                 pe, "ATTRIBUTION_JSON", out_dir / "rule_outcome_attribution.json"
             ), mock.patch.object(pe, "ACCOUNTING_JSON", out_dir / "acct.json"), mock.patch.object(
                 pe, "REPORT_MD", Path(tmp) / "report.md"
-            ):
+            ), mock.patch.object(
+                pe, "INTEGRITY_REPORT_JSON", out_dir / "integrity.json"
+            ), mock.patch.object(pe, "INTEGRITY_REPORT_MD", out_dir / "integrity.md"):
                 result = pe.run_paper_execution(write_report_flag=False)
             self.assertTrue(result["ok"])
             self.assertEqual(result["stats"]["reexecuted_on_action_change"], 1)

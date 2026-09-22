@@ -41,7 +41,19 @@ class ShadowScoreTest(unittest.TestCase):
         defaults, which is why the shadow score clustered narrowly
         (0.91-0.94) regardless of the ticker. horizon_alignment_score has
         the largest learned weight of any feature, so a real value must
-        move p_profit versus the neutral-default (50.0) case."""
+        move p_profit versus the neutral-default (50.0) case.
+
+        Needs a real, non-trivial LearningScorer fit -- i.e. real BUY_PAPER
+        training history under runtime_outputs/ (longitudinal memory +
+        cross-arm bridge). On a fresh checkout with no runtime_outputs/,
+        the fit degenerates to a base-rate-only model with no learned
+        weights, so no feature can move p_profit -- skip rather than fail
+        in that environment (CI hygiene fix, 2026-09-22)."""
+        import tae_strategy_v3_learning_policy as v3pol
+
+        buy_model = v3pol.LearningScorer().fit().models.get("BUY_PAPER")
+        if buy_model is None or buy_model.weights is None:
+            self.skipTest("no real BUY_PAPER training data available (fresh checkout, runtime_outputs/ missing)")
         default_result = shadow.shadow_entry_score(growth_score=80.0, confidence=0.5)
         enriched_result = shadow.shadow_entry_score(
             growth_score=80.0, confidence=0.5, horizon_alignment_score=90.0

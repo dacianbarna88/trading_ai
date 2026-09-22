@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +16,8 @@ from tae_roi001_challenger import (
     run_roi_economic_orchestration,
 )
 from tae_roi_queue_ssot import bootstrap_roi_queue_if_absent
+
+FIXTURE_ROI_QUEUE_JSON = Path(__file__).resolve().parent / "test_fixtures" / "tae_roi_queue_ssot_fixture.json"
 
 
 class RoiQueueSsotTest(unittest.TestCase):
@@ -32,7 +33,14 @@ class RoiQueueSsotTest(unittest.TestCase):
                 self.assertEqual(result.get("verdict"), "BLOCKED_BY_ROI_STATE_CONFLICT")
 
     def test_restored_queue_enforces_single_active_roi(self) -> None:
-        raw = subprocess.check_output(["git", "show", "d7b67c2:tae_roi_queue.json"])
+        """Regression fixture (2026-09-22): this used to read a specific
+        historical commit (`git show d7b67c2:tae_roi_queue.json`) that
+        only exists locally (a dangling WIP commit, never pushed to
+        origin, never part of main's history) -- the test only ever
+        passed on the machine where that commit happened to still be
+        reachable. Snapshotted once into a real, committed fixture file
+        instead, so this test is hermetic and CI-portable."""
+        raw = FIXTURE_ROI_QUEUE_JSON.read_text(encoding="utf-8")
         doc = ensure_single_active_roi(json.loads(raw))
         self.assertEqual(doc.get("active_count"), 1)
         self.assertIsNone(doc.get("orchestration_error"))

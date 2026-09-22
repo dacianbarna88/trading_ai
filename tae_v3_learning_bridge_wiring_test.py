@@ -16,6 +16,10 @@ class BridgeToggleTest(unittest.TestCase):
         without_bridge = load_training_data(include_cross_arm_bridge=False)
         n_with = len(with_bridge["SELL_PAPER"].y) if "SELL_PAPER" in with_bridge else 0
         n_without = len(without_bridge["SELL_PAPER"].y) if "SELL_PAPER" in without_bridge else 0
+        if n_with == 0:
+            # No real SELL_PAPER samples at all (fresh checkout, runtime_
+            # outputs/ missing) -- nothing to compare (CI hygiene fix, 2026-09-22).
+            self.skipTest("no real SELL_PAPER training samples available (fresh checkout, runtime_outputs/ missing)")
         self.assertGreater(
             n_with, n_without,
             "default load_training_data() must include more SELL_PAPER "

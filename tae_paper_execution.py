@@ -4320,7 +4320,7 @@ def _run_paper_execution_body(*, write_report_flag: bool = True) -> dict[str, An
     preflight = check_paper_profit_integrity(
         portfolio=portfolio,
         accounting=accounting,
-        write_report_flag=True,
+        write_report_flag=write_report_flag,
         update_validation_json=True,
     )
     portfolio["profit_integrity_status"] = preflight.get("status")
@@ -4593,7 +4593,7 @@ def _run_paper_execution_body(*, write_report_flag: bool = True) -> dict[str, An
         portfolio=portfolio,
         accounting=accounting,
         orders=orders,
-        write_report_flag=True,
+        write_report_flag=write_report_flag,
         update_validation_json=True,
     )
     portfolio["profit_integrity_status"] = post_integrity.get("status")

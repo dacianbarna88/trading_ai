@@ -92,6 +92,13 @@ class NeutralDefaultRegressionTest(unittest.TestCase):
             "AAPL": {"confidence": 0.85, "horizon_alignment_score": 80.0, "horizon_conflict_flag": False},
         }
         scorer = v3pol.LearningScorer().fit()
+        buy_model = scorer.models.get("BUY_PAPER")
+        if buy_model is None or buy_model.weights is None:
+            self.skipTest(
+                "no real BUY_PAPER training data available (fresh checkout, "
+                "runtime_outputs/ missing) -- fit degenerates to a base-rate-"
+                "only model with no learned weights for any feature to move"
+            )
         regime = v3pol.RegimeGrid(trend="UNKNOWN", vol_tercile="UNKNOWN", realized_vol_annualized=None)
 
         without = ppr._enrich_snap_for_v3(raw_snap, "AAPL", {})

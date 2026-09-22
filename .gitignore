@@ -24,6 +24,10 @@ bot_pid.txt
 # ...but not source-controlled manifests that happen to be .txt
 !requirements.txt
 
+# ...and not hermetic test fixtures that happen to be .json (2026-09-22)
+!test_fixtures/
+!test_fixtures/**
+
 # Keep source code and markdown tracked manually
 
 # Python cache

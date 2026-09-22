@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import tae_paper_execution as pe
 from tae_full_implementation_audit import build_gap_backlog, build_inventory, build_logic_map
 from tae_full_paper_cycle import (
     build_promotion_gate,
@@ -132,9 +133,22 @@ class FullPaperCycleTest(unittest.TestCase):
                 json.dumps({"verdict_summary": {"PROMISING": 1}, "results": []}),
                 encoding="utf-8",
             )
+            # Regression (2026-09-22): collect_summary() reaches
+            # tae_paper_execution.check_paper_profit_integrity() with
+            # write_report_flag=True hardcoded (no way for this caller to
+            # suppress it) and PORTFOLIO_JSON/INTEGRITY_REPORT_MD/JSON left
+            # completely unmocked -- this test was silently overwriting the
+            # real, tracked TAE_PAPER_PROFIT_INTEGRITY_GUARD_REPORT.md with
+            # a fresh real recompute on every run (not fixture garbage this
+            # time, since it reads real on-disk state, but the same
+            # "a unit test must not mutate tracked repo files" hygiene bug).
             with mock.patch("tae_full_paper_cycle.ACCOUNTING_JSON", base / "tae_accounting_snapshot.json"), mock.patch(
                 "tae_full_paper_cycle.VALIDATION_JSON", val_dir / "decision_validation_results.json"
-            ), mock.patch("tae_full_paper_cycle.PROMOTION_JSON", base / "promotion_gate.json"):
+            ), mock.patch("tae_full_paper_cycle.PROMOTION_JSON", base / "promotion_gate.json"), mock.patch.object(
+                pe, "OUTPUT_DIR", base
+            ), mock.patch.object(pe, "PORTFOLIO_JSON", base / "paper_portfolio.json"), mock.patch.object(
+                pe, "INTEGRITY_REPORT_JSON", base / "integrity.json"
+            ), mock.patch.object(pe, "INTEGRITY_REPORT_MD", base / "integrity.md"):
                 summary = collect_summary([{"step": "health", "ok": True}], forbidden_ok=True)
                 self.assertIn(summary["final_verdict"], {"READY_FOR_PAPER_DAY", "READY_WITH_WARNINGS", "BLOCKED_WITH_REASONS"})
                 self.assertFalse(summary["live_promotion_allowed"])
