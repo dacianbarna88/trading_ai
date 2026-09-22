@@ -24,9 +24,11 @@ bot_pid.txt
 # ...but not source-controlled manifests that happen to be .txt
 !requirements.txt
 
-# ...and not hermetic test fixtures that happen to be .json (2026-09-22)
-!test_fixtures/
-!test_fixtures/**
+# ...and not the committed ROI-queue bootstrap snapshot, which happens
+# to be .json (2026-09-22) -- production's last-known-good recovery data
+# for the gitignored runtime tae_roi_queue.json, read by
+# tae_roi_queue_ssot.py and tae_roi_queue_ssot_test.py
+!tae_roi_queue_bootstrap_snapshot.json
 
 # Keep source code and markdown tracked manually
 

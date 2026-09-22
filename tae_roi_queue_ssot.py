@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -14,20 +13,22 @@ from tae_roi001_challenger import (
     save_roi_queue_ssot,
 )
 
-_BOOTSTRAP_GIT_REF = "d7b67c2:tae_roi_queue.json"
+# Last known valid queue, snapshotted 2026-07-31 (previously read via
+# `git show d7b67c2:tae_roi_queue.json` -- that commit was a local-only
+# WIP commit, never pushed to origin and not part of main's history, so
+# this bootstrap silently failed (returned None) anywhere except the one
+# machine where it happened to still be reachable). Committed directly so
+# recovery works identically on every checkout.
+_BOOTSTRAP_SNAPSHOT_PATH = Path(__file__).resolve().parent / "tae_roi_queue_bootstrap_snapshot.json"
 
 
 def _load_bootstrap_doc() -> dict[str, Any] | None:
-    """Last known valid queue from git history (read-only)."""
+    """Last known valid queue, from the committed bootstrap snapshot (read-only)."""
     try:
-        raw = subprocess.check_output(
-            ["git", "show", _BOOTSTRAP_GIT_REF],
-            stderr=subprocess.DEVNULL,
-            cwd=Path(__file__).resolve().parent,
-        )
+        raw = _BOOTSTRAP_SNAPSHOT_PATH.read_text(encoding="utf-8")
         doc = json.loads(raw)
         return doc if isinstance(doc, dict) and doc.get("queue") is not None else None
-    except (subprocess.CalledProcessError, json.JSONDecodeError, OSError):
+    except (OSError, json.JSONDecodeError):
         return None
 
 

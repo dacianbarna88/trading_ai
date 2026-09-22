@@ -17,7 +17,7 @@ from tae_roi001_challenger import (
 )
 from tae_roi_queue_ssot import bootstrap_roi_queue_if_absent
 
-FIXTURE_ROI_QUEUE_JSON = Path(__file__).resolve().parent / "test_fixtures" / "tae_roi_queue_ssot_fixture.json"
+FIXTURE_ROI_QUEUE_JSON = Path(__file__).resolve().parent / "tae_roi_queue_bootstrap_snapshot.json"
 
 
 class RoiQueueSsotTest(unittest.TestCase):
@@ -38,8 +38,10 @@ class RoiQueueSsotTest(unittest.TestCase):
         only exists locally (a dangling WIP commit, never pushed to
         origin, never part of main's history) -- the test only ever
         passed on the machine where that commit happened to still be
-        reachable. Snapshotted once into a real, committed fixture file
-        instead, so this test is hermetic and CI-portable."""
+        reachable. Same underlying data is now the committed bootstrap
+        snapshot production itself recovers from (tae_roi_queue_ssot.
+        _load_bootstrap_doc) -- one real, portable source of truth
+        instead of two (a test-only copy and an unreachable git ref)."""
         raw = FIXTURE_ROI_QUEUE_JSON.read_text(encoding="utf-8")
         doc = ensure_single_active_roi(json.loads(raw))
         self.assertEqual(doc.get("active_count"), 1)
