@@ -18,6 +18,9 @@ BUILDERS = {
     "trend_filtered_mix": lambda p: strategies.trend_filtered_mix(p, sma_months=10),
     "core_plus_gtaa": lambda p: strategies.core_plus_sleeve(p, strategies.gtaa(p, sma_months=10), 0.5),
     "core_plus_dual": lambda p: strategies.core_plus_sleeve(p, strategies.dual_momentum(p), 0.7),
+    "gtaa_weekly": lambda p: strategies.gtaa(p, sma_months=6, freq="W"),
+    "dual_biweekly": lambda p: strategies.dual_momentum(p, lookback_months=3, freq="2W"),
+    "core_plus_gtaa_weekly": lambda p: strategies.core_plus_sleeve(p, strategies.gtaa(p, 6, freq="W"), 0.7, "W"),
 }
 
 
@@ -73,6 +76,14 @@ class WeightsTest(unittest.TestCase):
         w = strategies.core_plus_sleeve(prices, strategies.gtaa(prices, sma_months=10), core_weight=0.7)
         self.assertTrue((w["SPY"] >= 0.42 - 1e-12).all())  # 0.7 * 0.6 from the core alone
         self.assertTrue((w["IEF"] >= 0.28 - 1e-12).all())
+
+    def test_decision_dates_by_frequency(self) -> None:
+        idx = pd.bdate_range("2024-01-01", "2024-03-31")
+        m, w, w2 = (strategies.decision_dates(idx, f) for f in ("M", "W", "2W"))
+        self.assertEqual(len(m), 3)
+        self.assertEqual(len(w), 13)
+        self.assertEqual(list(w2), list(w[::2]))
+        self.assertTrue(all(d.weekday() == 4 for d in w[:-1]))  # Fridays (no holidays in bdate_range)
 
     def test_vol_target_only_scales_down(self) -> None:
         prices = random_prices()

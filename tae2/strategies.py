@@ -24,25 +24,59 @@ def _frame(dates: pd.DatetimeIndex, cols: Sequence[str]) -> pd.DataFrame:
     return pd.DataFrame(0.0, index=dates, columns=list(cols))
 
 
+TRADING_DAYS_PER_MONTH = 21
+
+
 def _monthly(prices: pd.DataFrame) -> pd.DataFrame:
     return prices.loc[month_ends(prices.index)]
 
 
-def fixed_mix(prices: pd.DataFrame, weights: dict[str, float]) -> pd.DataFrame:
-    """Constant weights, rebalanced monthly (buy-and-hold when one asset)."""
-    dates = month_ends(prices.index)
+def decision_dates(index: pd.DatetimeIndex, freq: str = "M") -> pd.DatetimeIndex:
+    """Rebalance dates: last trading day of each month ("M"), each week ("W") or every other week ("2W")."""
+    if freq == "M":
+        return month_ends(index)
+    iso = index.isocalendar()
+    weekly = pd.DatetimeIndex(pd.Series(index, index=index).groupby([iso.year.values, iso.week.values]).max().values)
+    if freq == "W":
+        return weekly
+    if freq == "2W":
+        return weekly[::2]
+    raise ValueError(f"unknown rebalance frequency {freq!r}")
+
+
+def _sampled(prices: pd.DataFrame, freq: str, lookback_months: int, how: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(prices at decision dates, their N-month moving average or N-month-ago price).
+
+    Monthly keeps the original month-end calculation; weekly variants use the
+    same horizon measured in trading days (N x 21) on daily prices.
+    """
+    if freq == "M":
+        m = _monthly(prices)
+        ref = m.rolling(lookback_months).mean() if how == "sma" else m.shift(lookback_months)
+        return m, ref
+    days = lookback_months * TRADING_DAYS_PER_MONTH
+    dates = decision_dates(prices.index, freq)
+    ref = prices.rolling(days).mean() if how == "sma" else prices.shift(days)
+    return prices.loc[dates], ref.loc[dates]
+
+
+def fixed_mix(prices: pd.DataFrame, weights: dict[str, float], freq: str = "M") -> pd.DataFrame:
+    """Constant weights, rebalanced on each decision date (buy-and-hold when one asset)."""
+    dates = decision_dates(prices.index, freq)
     out = _frame(dates, prices.columns)
     for t, w in weights.items():
         out[t] = w
     return out
 
 
-def gtaa(prices: pd.DataFrame, sma_months: int = 10, assets: Sequence[str] = GTAA_ASSETS) -> pd.DataFrame:
-    """Each asset gets 1/n when its month-end close is above its N-month average, else that slice goes to cash."""
-    m = _monthly(prices)
+def gtaa(
+    prices: pd.DataFrame, sma_months: int = 10, assets: Sequence[str] = GTAA_ASSETS, freq: str = "M"
+) -> pd.DataFrame:
+    """Each asset gets 1/n when its close is above its N-month average, else that slice goes to cash."""
+    m, avg = _sampled(prices[list(assets)], freq, sma_months, "sma")
     out = _frame(m.index, prices.columns)
-    above = m[list(assets)] > m[list(assets)].rolling(sma_months).mean()
-    ready = m[list(assets)].rolling(sma_months).mean().notna().all(axis=1)
+    above = m > avg
+    ready = avg.notna().all(axis=1)
     for d in m.index[ready]:
         on = above.loc[d]
         for t in assets:
@@ -51,10 +85,10 @@ def gtaa(prices: pd.DataFrame, sma_months: int = 10, assets: Sequence[str] = GTA
     return out.loc[ready[ready].index]
 
 
-def dual_momentum(prices: pd.DataFrame, lookback_months: int = 12) -> pd.DataFrame:
+def dual_momentum(prices: pd.DataFrame, lookback_months: int = 12, freq: str = "M") -> pd.DataFrame:
     """Antonacci-style: equities (best of SPY/EFA) when US stocks beat cash, else bonds."""
-    m = _monthly(prices)
-    ret = m / m.shift(lookback_months) - 1
+    m, past = _sampled(prices, freq, lookback_months, "past")
+    ret = m / past - 1
     out = _frame(m.index, prices.columns)
     ready = ret[["SPY", "EFA", config.CASH]].notna().all(axis=1)
     for d in m.index[ready]:
@@ -126,9 +160,11 @@ def blend(parts: Sequence[tuple[pd.DataFrame, float]]) -> pd.DataFrame:
     return sum(targets.loc[dates, cols] * weight for targets, weight in parts)
 
 
-def core_plus_sleeve(prices: pd.DataFrame, sleeve: pd.DataFrame, core_weight: float = 0.6) -> pd.DataFrame:
-    """A 60/40 core holding `core_weight` of the money, the rest in `sleeve`."""
-    return blend([(fixed_mix(prices, {"SPY": 0.6, "IEF": 0.4}), core_weight), (sleeve, 1 - core_weight)])
+def core_plus_sleeve(
+    prices: pd.DataFrame, sleeve: pd.DataFrame, core_weight: float = 0.6, freq: str = "M"
+) -> pd.DataFrame:
+    """A 60/40 core holding `core_weight` of the money, the rest in `sleeve` (same rebalance dates)."""
+    return blend([(fixed_mix(prices, {"SPY": 0.6, "IEF": 0.4}, freq), core_weight), (sleeve, 1 - core_weight)])
 
 
 def trend_filtered_mix(

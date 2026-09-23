@@ -68,17 +68,17 @@ def families(plan: config.ResearchPlan = config.PLAN) -> list[Family]:
         Family("60/40 with trend filter", strategies.trend_filtered_mix, {"sma_months": plan.sma_months}),
         Family(
             "60/40 core + GTAA sleeve",
-            lambda p, sma_months, core_weight: strategies.core_plus_sleeve(
-                p, strategies.gtaa(p, sma_months=sma_months), core_weight
+            lambda p, sma_months, core_weight, freq: strategies.core_plus_sleeve(
+                p, strategies.gtaa(p, sma_months=sma_months, freq=freq), core_weight, freq
             ),
-            {"sma_months": plan.sma_months, "core_weight": plan.core_weight},
+            {"sma_months": plan.sma_months, "core_weight": plan.core_weight, "freq": plan.rebalance},
         ),
         Family(
             "60/40 core + dual momentum sleeve",
-            lambda p, lookback_months, core_weight: strategies.core_plus_sleeve(
-                p, strategies.dual_momentum(p, lookback_months=lookback_months), core_weight
+            lambda p, lookback_months, core_weight, freq: strategies.core_plus_sleeve(
+                p, strategies.dual_momentum(p, lookback_months=lookback_months, freq=freq), core_weight, freq
             ),
-            {"lookback_months": plan.momentum_months, "core_weight": plan.core_weight},
+            {"lookback_months": plan.momentum_months, "core_weight": plan.core_weight, "freq": plan.rebalance},
         ),
     ]
 

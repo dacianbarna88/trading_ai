@@ -75,6 +75,7 @@ class ResearchPlan:
     top_n: tuple[int, ...] = (2, 3, 4)
     vol_target: tuple[float, ...] = (0.06, 0.08, 0.10)
     core_weight: tuple[float, ...] = (0.5, 0.7)  # share kept in the 60/40 core (phase 2 blends)
+    rebalance: tuple[str, ...] = ("M", "2W", "W")  # month-end, every other week, weekly
     extra: dict[str, object] = field(default_factory=dict)
 
 
