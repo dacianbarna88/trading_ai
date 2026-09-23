@@ -88,6 +88,16 @@ class SignalMathTest(unittest.TestCase):
         self.assertEqual(out["reason"], "REVERTED")
 
 
+def _open_snap(price: float) -> dict:
+    return {
+        "mark_price": price,
+        "mark_freshness": "FRESH",
+        "mark_status": "FRESH",
+        "market_session": "OPEN",
+        "data_fresh": True,
+    }
+
+
 class DecideAndExecuteTickerTest(unittest.TestCase):
     def _oversold_closes(self) -> list:
         return [100.0] * 34 + [99.0, 98.0, 90.0]
@@ -109,11 +119,30 @@ class DecideAndExecuteTickerTest(unittest.TestCase):
             closes=self._oversold_closes(),
             mark_price=90.0,
             decision_id="T1",
+            snap=_open_snap(90.0),
         )
         self.assertEqual(dec["action"], "BUY")
         self.assertEqual(dec["reason"], "MEAN_REVERSION_OVERSOLD")
         self.assertIn("ZZZ", portfolio["positions"])
         self.assertGreater(portfolio["positions"]["ZZZ"]["shares"], 0.0)
+
+    def test_closed_market_blocks_an_otherwise_qualifying_entry(self) -> None:
+        """2026-09-23: entries go through the shared parallel-paper buy gate,
+        so a closed session blocks this arm's BUY like V1/V2/V3's."""
+        portfolio = _fresh_portfolio()
+        snap = dict(_open_snap(90.0), mark_freshness="MARKET_CLOSED", mark_status="MARKET_CLOSED",
+                    market_session="CLOSED")
+        dec = self._run(
+            portfolio=portfolio,
+            ticker="ZZZ",
+            closes=self._oversold_closes(),
+            mark_price=90.0,
+            decision_id="T1",
+            snap=snap,
+        )
+        self.assertEqual(dec["action"], "HOLD")
+        self.assertEqual(dec["reason"], "MARKET_CLOSED")
+        self.assertNotIn("ZZZ", portfolio.get("positions") or {})
 
     def test_no_buy_without_oversold_signal(self) -> None:
         portfolio = _fresh_portfolio()

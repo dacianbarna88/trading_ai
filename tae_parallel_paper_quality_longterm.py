@@ -170,6 +170,7 @@ def _rebalance(portfolio: dict[str, Any], marks: dict[str, dict[str, Any]], p: d
 
     account_value = pe._f(portfolio.get("account_value"), pe._f(portfolio.get("cash")))
     new_entries = target_tickers - held_tickers
+    blocked_entries: dict[str, str] = {}
     if new_entries:
         target_notional = account_value / TARGET_HOLDINGS if TARGET_HOLDINGS else 0.0
         for ticker in new_entries:
@@ -182,7 +183,10 @@ def _rebalance(portfolio: dict[str, Any], marks: dict[str, dict[str, Any]], p: d
             if notional <= 0:
                 continue
             cash_before = cash
-            shares, _after = pe._buy_shares(portfolio, ticker, notional, mark)
+            shares, _after, gate_reason = ppr.gated_buy_shares(portfolio, ticker, notional, mark, snap=snap)
+            if gate_reason != "OK":
+                blocked_entries[ticker] = gate_reason
+                continue
             if shares > 0:
                 execution_id = f"QLTEX-{uuid.uuid4().hex[:16].upper()}"
                 _append_jsonl(
@@ -202,7 +206,11 @@ def _rebalance(portfolio: dict[str, Any], marks: dict[str, dict[str, Any]], p: d
                     },
                 )
 
-    portfolio["last_rebalance_at"] = ppr._now()
+    # An entry the shared buy gate blocked (closed session / stale mark) must
+    # not wait a whole REBALANCE_INTERVAL_DAYS: leave the rebalance due so the
+    # next hourly run retries it.
+    if not blocked_entries:
+        portfolio["last_rebalance_at"] = ppr._now()
     _append_jsonl(
         p["decisions"],
         {
@@ -211,7 +219,8 @@ def _rebalance(portfolio: dict[str, Any], marks: dict[str, dict[str, Any]], p: d
             "action": "REBALANCE",
             "target_tickers": sorted(target_tickers),
             "sold": sorted(held_tickers - target_tickers),
-            "bought": sorted(new_entries),
+            "bought": sorted(new_entries - set(blocked_entries)),
+            "blocked_entries": blocked_entries,
             "scoreable_universe": len(filtered),
             "watchlist_size": len(tickers),
         },

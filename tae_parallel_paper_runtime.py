@@ -16,7 +16,7 @@ import os
 import traceback
 import uuid
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -135,6 +135,56 @@ def _entry_price_allowed(snap: dict[str, Any] | None, mark_status: str) -> tuple
     if (snap or {}).get("data_fresh") is False:
         return False, "MARK_STALE"
     return True, "OK"
+
+
+def buy_allowed(snap: dict[str, Any] | None) -> tuple[bool, str]:
+    """The one BUY gate every parallel-paper arm shares: a usable mark AND an
+    open session. Arms reach it through gated_buy_shares / _execute_v2_buy,
+    never by calling pe._buy_shares / pe.execute_decision directly —
+    tae_parallel_paper_buy_gate_test.py fails on any new direct call.
+
+    Why a single chokepoint (2026-09-23): each arm used to copy V1's entry
+    checks by hand, and V3 (added 2026-08-27) shipped without this one —
+    44 BUYs on closed markets over 13 days before anyone noticed.
+    """
+    mark_ok, mark_status, _mark = _mark_is_usable(snap)
+    if not mark_ok:
+        return False, mark_status
+    return _entry_price_allowed(snap, mark_status)
+
+
+def gated_buy_shares(
+    portfolio: dict[str, Any],
+    ticker: str,
+    notional: float,
+    price: float,
+    *,
+    snap: dict[str, Any] | None,
+    **buy_kwargs: Any,
+) -> tuple[float, dict[str, Any] | None, str]:
+    """pe._buy_shares behind buy_allowed(). Returns (shares, position_after, reason);
+    reason is "OK" on a fill attempt, else the block reason (no mutation)."""
+    ok, reason = buy_allowed(snap)
+    if not ok:
+        return 0.0, None, reason
+    shares, after = pe._buy_shares(portfolio, ticker, notional, price, **buy_kwargs)
+    return shares, after, "OK"
+
+
+def _execute_v2_buy(snap: dict[str, Any] | None, exec_dec: dict[str, Any], portfolio: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    """V2 OPEN_CYCLE / ADD_TRANCHE execution behind buy_allowed()."""
+    ok, reason = buy_allowed(snap)
+    if not ok:
+        # Callers record reason = order["status"] on non-EXECUTED orders.
+        return {"status": reason, "reason": reason, "reason_code": reason}
+    return pe.execute_decision(exec_dec, portfolio, **kwargs)
+
+
+def _execute_v2_close(exec_dec: dict[str, Any], portfolio: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    """V2 CLOSE_CYCLE execution. Not behind buy_allowed(): protective exits
+    stay allowed on a MARKET_CLOSED previous close (SELL semantics protected);
+    a STALE/unavailable mark is already rejected upstream by _mark_is_usable."""
+    return pe.execute_decision(exec_dec, portfolio, **kwargs)
 
 
 def _assert_paper_isolation(cfg: dict[str, Any] | None = None) -> None:
@@ -863,18 +913,128 @@ def _fetch_liquidity_flags(tickers: list[str]) -> dict[str, bool]:
     return out
 
 
-def default_mark_provider(tickers: list[str]) -> dict[str, dict[str, Any]]:
-    """Best-effort marks from signals.csv / live_signals.csv; no silent entry-price invent.
+# live_signals.csv is rewritten by every hourly refresh; a row older than this
+# means the refresh did not run (laptop asleep, crashed job) and its price is
+# not a current mark.
+SIGNAL_ROW_MAX_AGE_SECONDS = 3 * 3600
+PRICE_BAR_DATE_FETCH_PERIOD = "10d"
+PRICE_BAR_DATE_FETCH_TIMEOUT_SECONDS = 60.0
+PRICE_BAR_DATE_CACHE_TTL_SECONDS = 600.0
+_PRICE_BAR_DATE_CACHE: dict[str, tuple[float, date | None]] = {}
+
+
+def _expected_session_date(ticker: str, now: datetime) -> date:
+    """Exchange-local date of the latest regular session that has already opened.
+
+    A current mark must come from that session's daily bar: during the session
+    the bar is today's; before the open (or on a weekend) it is the previous
+    weekday's. No holiday calendar exists in the project, so the day after an
+    exchange holiday reads as stale until the open — fail-closed, by design.
+    """
+    from zoneinfo import ZoneInfo
+
+    from markets.market_config import MARKETS
+    from markets.market_hours import get_ticker_market
+
+    cfg = MARKETS.get(get_ticker_market(ticker)) or MARKETS["US"]
+    local = now.astimezone(ZoneInfo(cfg["timezone"]))
+    opened = local.replace(hour=cfg["open_hour"], minute=cfg["open_minute"], second=0, microsecond=0)
+    day = local.date()
+    if local.weekday() < 5 and local >= opened:
+        return day
+    day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+def _fetch_price_bar_dates(tickers: list[str]) -> dict[str, date | None]:
+    """Date of each ticker's latest daily bar with a real Close, one batched fetch.
+
+    live_bot.py (protected) prices live_signals.csv from the same Yahoo daily
+    series after dropping NaN-Close rows, so this date is the date its Price
+    belongs to. Yahoo sometimes leaves a completed session's bar out (2026-09-23:
+    no 2026-09-22 bar at all), which made Monday's close look like Tuesday's.
+    None = could not verify (fetch failed / no data) — callers fail closed.
+    """
+    now_s = datetime.now(timezone.utc).timestamp()
+    out: dict[str, date | None] = {}
+    missing = []
+    for t in tickers:
+        hit = _PRICE_BAR_DATE_CACHE.get(t)
+        if hit is not None and now_s - hit[0] < PRICE_BAR_DATE_CACHE_TTL_SECONDS:
+            out[t] = hit[1]
+        else:
+            missing.append(t)
+    if not missing:
+        return out
+    data = None
+    try:
+        import yfinance as yf
+
+        from tae_network_hard_timeout import hard_timeout
+
+        with hard_timeout(PRICE_BAR_DATE_FETCH_TIMEOUT_SECONDS):
+            data = yf.download(
+                missing, period=PRICE_BAR_DATE_FETCH_PERIOD, interval="1d", group_by="ticker",
+                auto_adjust=False, progress=False,
+            )
+    except Exception:
+        data = None
+    for t in missing:
+        bar_date: date | None = None
+        if data is not None and not getattr(data, "empty", True):
+            try:
+                frame = data[t] if t in data.columns.get_level_values(0) else data
+                closes = frame["Close"].dropna()
+                if not closes.empty:
+                    bar_date = closes.index[-1].date()
+            except (KeyError, TypeError, AttributeError, IndexError):
+                bar_date = None
+        out[t] = bar_date
+        if bar_date is not None:
+            # Only cache real answers; a failed fetch retries next call.
+            _PRICE_BAR_DATE_CACHE[t] = (now_s, bar_date)
+    return out
+
+
+def _signal_row_age_seconds(row: dict[str, Any], now: datetime) -> float | None:
+    """Age of a live_signals.csv row from its Time column (host-local naive time)."""
+    raw = _s(row.get("Time") or row.get("time"))
+    if not raw:
+        return None
+    try:
+        written = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").astimezone()
+    except ValueError:
+        return None
+    return max(0.0, (now - written).total_seconds())
+
+
+def default_mark_provider(
+    tickers: list[str],
+    *,
+    now: datetime | None = None,
+    price_bar_date_fetcher: Callable[[list[str]], dict[str, date | None]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Marks from live_signals.csv, each verified before it can be traded on.
 
     Session-aware labeling (MARKET_SESSION_POLICY=session_aware_mark_and_report):
     valid previous-close while the ticker market is closed is MARKET_CLOSED (usable),
     not a silent stale fallback and not a defect.
+
+    Fail closed, never fall back (2026-09-23). A price is MARK_STALE — unusable
+    for BUY and SELL alike via _mark_is_usable — when its row is older than
+    SIGNAL_ROW_MAX_AGE_SECONDS, when its daily bar predates the latest session
+    that has opened (_expected_session_date), or when that date can't be
+    verified. A ticker missing from live_signals.csv is MARK_UNAVAILABLE: the
+    retired June signals.csv is no longer read (it leaked NVDA 212.56 into a
+    V2 close on 2026-09-23 and AAPL 311.73 into a V1 sell on 2026-09-09).
+    If the session check itself errors, the market is treated as closed.
     """
     out: dict[str, dict[str, Any]] = {}
     rows: dict[str, dict[str, Any]] = {}
-    for signals in (Path("signals.csv"), Path("live_signals.csv")):
-        if not signals.is_file():
-            continue
+    signals = Path("live_signals.csv")
+    if signals.is_file():
         try:
             import csv
 
@@ -890,10 +1050,17 @@ def default_mark_provider(tickers: list[str]) -> dict[str, dict[str, Any]]:
     if not targets:
         targets = sorted(rows.keys())[:40]
     ts = _now()
+    now_dt = now or datetime.now(timezone.utc)
     try:
         from markets.market_hours import is_ticker_market_open
     except Exception:  # pragma: no cover - defensive
         is_ticker_market_open = None  # type: ignore[assignment]
+    priced = [t for t in targets if _f((rows.get(t) or {}).get("Price"), 0.0) > 0]
+    fetch_dates = price_bar_date_fetcher or _fetch_price_bar_dates
+    try:
+        bar_dates = fetch_dates(priced) if priced else {}
+    except Exception:
+        bar_dates = {}
     for t in targets:
         row = rows.get(t) or {}
         px = _f(row.get("Price") or row.get("price") or row.get("Close") or row.get("Current_Price"), 0.0)
@@ -916,14 +1083,26 @@ def default_mark_provider(tickers: list[str]) -> dict[str, dict[str, Any]]:
                 "mark_status": "MARK_UNAVAILABLE",
             }
             continue
-        market_open = True
+        market_open = False
         if is_ticker_market_open is not None:
             try:
-                market_open = bool(is_ticker_market_open(t))
+                market_open = bool(is_ticker_market_open(t, now_dt))
             except Exception:
-                market_open = True
+                market_open = False
+        age_s = _signal_row_age_seconds(row, now_dt)
+        bar_date = bar_dates.get(t)
+        expected = _expected_session_date(t, now_dt)
+        stale_reason = None
+        if age_s is None:
+            stale_reason = "SIGNAL_TIME_UNKNOWN"
+        elif age_s > SIGNAL_ROW_MAX_AGE_SECONDS:
+            stale_reason = "SIGNAL_ROW_TOO_OLD"
+        elif bar_date is None:
+            stale_reason = "PRICE_DATE_UNVERIFIED"
+        elif bar_date < expected:
+            stale_reason = "PRICE_BAR_MISSING"
         # Closed session: previous close remains usable for MTM/report, labeled explicitly.
-        freshness = "FRESH" if market_open else "MARKET_CLOSED"
+        freshness = "MARK_STALE" if stale_reason else ("FRESH" if market_open else "MARKET_CLOSED")
         out[t] = {
             "mark_price": px,
             "score": score_f,
@@ -934,11 +1113,14 @@ def default_mark_provider(tickers: list[str]) -> dict[str, dict[str, Any]]:
             # net-negative noise, see tae_score_decile_backtest.py).
             "eligible": score_f is not None and score_f >= V1_V2_ENTRY_MIN_SCORE,
             "mark_freshness": freshness,
-            "mark_age_seconds": 0.0,
-            "data_fresh": True,
+            "mark_age_seconds": age_s,
+            "data_fresh": stale_reason is None,
             "mark_timestamp": ts,
             "mark_status": freshness,
             "market_session": "OPEN" if market_open else "CLOSED",
+            "mark_stale_reason": stale_reason,
+            "price_bar_date": bar_date.isoformat() if bar_date else None,
+            "expected_session_date": expected.isoformat(),
         }
     return out
 
@@ -2287,11 +2469,12 @@ def _run_v1_arm(
                     "positions": deepcopy(portfolio.get("positions") or {}),
                 }
                 cost_cfg = _paper_tx_cost_cfg(cfg)
-                shares, after = pe._buy_shares(
+                shares, after, _gate_reason = gated_buy_shares(
                     portfolio,
                     ticker,
                     notional,
                     mark,
+                    snap=snap,
                     apply_paper_tx_costs=True,
                     paper_tx_cost_cfg=cost_cfg,
                 )
@@ -2401,6 +2584,9 @@ def _run_v1_arm(
                             decision_id=decision_id,
                             execution_id=execution_id,
                         )
+                elif _gate_reason != "OK":
+                    action = "BLOCKED"
+                    reason = _gate_reason
                 else:
                     action = "BLOCKED"
                     eco = _take_fill_economics(portfolio)
@@ -2685,7 +2871,7 @@ def _run_v2_arm(
                 exec_dec = xp.materialize_close_decision(xd, xin, cfg=v2_cfg)
                 if exec_dec:
                     cost_cfg = _paper_tx_cost_cfg(cfg_par)
-                    order = pe.execute_decision(
+                    order = _execute_v2_close(
                         exec_dec,
                         portfolio,
                         accounting=None,
@@ -2888,7 +3074,8 @@ def _run_v2_arm(
                                 "cash": cash_before,
                                 "positions": deepcopy(portfolio.get("positions") or {}),
                             }
-                            order = pe.execute_decision(
+                            order = _execute_v2_buy(
+                                snap,
                                 exec_dec,
                                 portfolio,
                                 accounting=None,
@@ -3061,7 +3248,8 @@ def _run_v2_arm(
                                 "cash": cash_before,
                                 "positions": deepcopy(portfolio.get("positions") or {}),
                             }
-                            order = pe.execute_decision(
+                            order = _execute_v2_buy(
+                                snap,
                                 exec_dec,
                                 portfolio,
                                 accounting=None,
@@ -3288,7 +3476,8 @@ def _run_v2_arm(
                             "positions": deepcopy(portfolio.get("positions") or {}),
                         }
                         cost_cfg = _paper_tx_cost_cfg(cfg_par)
-                        order = pe.execute_decision(
+                        order = _execute_v2_buy(
+                            snap,
                             exec_dec,
                             portfolio,
                             accounting=None,
@@ -3782,10 +3971,15 @@ def _run_v3_arm(
         notional = decision.quantity_usd
         cash_before = _f(portfolio.get("cash"))
         cost_cfg = _paper_tx_cost_cfg(cfg)
-        shares, after = pe._buy_shares(
-            portfolio, ticker, notional, mark,
+        shares, after, gate_reason = gated_buy_shares(
+            portfolio, ticker, notional, mark, snap=snap,
             apply_paper_tx_costs=True, paper_tx_cost_cfg=cost_cfg,
         )
+        if gate_reason != "OK":
+            return _record(
+                "BLOCKED", gate_reason, p_profit=decision.p_profit,
+                diagnostics=decision.diagnostics,
+            )
         if shares <= 0 or not after:
             return _record(
                 "HOLD", "V3_BUY_FILL_REJECTED", p_profit=decision.p_profit,
