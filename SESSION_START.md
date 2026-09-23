@@ -37,10 +37,22 @@ https://claude.ai/artifact/4rmxeAZzqAHfMPQivuugyA
 |---|---|
 | 0 Legacy bot stopped | Done: launchd job unloaded, code at tag `legacy-bot-final` |
 | 1 Research lab | Done: data validation, backtester, strategies, gates, walk-forward, tests |
-| 2 Selection | In progress: first run, 74 variants, none passes every gate yet |
+| 2 Selection | In progress: 94 variants; two pass every gate (see below) |
 | 3 Engine on broker paper API (Alpaca) | Not started; needs Dacian's Alpaca paper account and keys |
 | 4 Paper for 3+ months | Not started |
 | 5 Real money | Owner decision only; Claude never places real trades |
+
+## Phase 2 result (2026-09-23, 94 variants, 10 bps costs, data to 2026-09-21)
+
+| Strategy | CAGR | Sharpe | Max DD | Sharpe 2008–16 / 2017–26 | Robustness |
+|---|---:|---:|---:|---|---|
+| 60/40 (benchmark) | 8.3% | 0.78 | −31.4% | 0.63 / 0.93 | — |
+| 60/40 core 50% + dual momentum 3m 50% | 9.1% | 0.89 | −20.0% | 0.75 / 1.02 | Fragile: only the 3-month lookback beats 60/40; 6/9/12 don't |
+| 60/40 core 70% + GTAA 6m 30% | 7.2% | 0.81 | −23.7% | 0.65 / 0.97 | Robust on drawdown: all 8 variants cut max DD to −17..−25%; first-half Sharpe edge is thin |
+
+Both still pass at 20 bps costs. Neither adds much return; the gain is smaller
+crashes (2008: −5% vs −18% for the dual-momentum blend). Next: run both on
+Alpaca paper next to 60/40 (phase 3–4).
 
 ## Commands
 

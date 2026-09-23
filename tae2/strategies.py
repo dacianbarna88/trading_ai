@@ -115,3 +115,36 @@ def vol_target(prices: pd.DataFrame, base: pd.DataFrame, target: float = 0.10, w
         out.loc[d, w.index] = w.values * scale
         out.loc[d, config.CASH] = 1 - out.loc[d, w.index].sum()
     return out
+
+
+def blend(parts: Sequence[tuple[pd.DataFrame, float]]) -> pd.DataFrame:
+    """Weighted sum of several strategies' targets, on the decision dates they all share."""
+    dates = parts[0][0].index
+    for targets, _ in parts[1:]:
+        dates = dates.intersection(targets.index)
+    cols = parts[0][0].columns
+    return sum(targets.loc[dates, cols] * weight for targets, weight in parts)
+
+
+def core_plus_sleeve(prices: pd.DataFrame, sleeve: pd.DataFrame, core_weight: float = 0.6) -> pd.DataFrame:
+    """A 60/40 core holding `core_weight` of the money, the rest in `sleeve`."""
+    return blend([(fixed_mix(prices, {"SPY": 0.6, "IEF": 0.4}), core_weight), (sleeve, 1 - core_weight)])
+
+
+def trend_filtered_mix(
+    prices: pd.DataFrame,
+    sma_months: int = 10,
+    equity: str = "SPY",
+    bond: str = "IEF",
+    equity_weight: float = 0.6,
+) -> pd.DataFrame:
+    """60/40 whose equity slice moves to cash while equities sit below their N-month average."""
+    m = _monthly(prices)
+    avg = m[equity].rolling(sma_months).mean()
+    ready = avg.notna()
+    out = _frame(m.index, prices.columns)
+    out[bond] = 1 - equity_weight
+    on = m[equity] > avg
+    out[equity] = np.where(on, equity_weight, 0.0)
+    out[config.CASH] += np.where(on, 0.0, equity_weight)
+    return out.loc[ready[ready].index]
