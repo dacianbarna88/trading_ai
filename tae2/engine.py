@@ -26,12 +26,16 @@ STATE = Path("state/engine.json")
 JOURNAL = Path("state/runs.jsonl")
 FILL_TIMEOUT_S = 120
 
-# Strategies that passed the phase 2 gates, plus the benchmark.
+# Strategies that passed the gates, plus the benchmark. All rebalance at month-end:
+# every-other-week results depended on which weeks were picked (Sharpe 0.88 vs
+# 0.76 shifted by one week) and weekly matched monthly, so faster adds only turnover.
+# The dual-momentum blend was dropped: only one lookback beats 60/40.
 DEPLOYABLE: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
+    "core_gtaa_50": lambda p: strategies.core_plus_sleeve(p, strategies.gtaa(p, sma_months=6), core_weight=0.5),
     "core_gtaa": lambda p: strategies.core_plus_sleeve(p, strategies.gtaa(p, sma_months=6), core_weight=0.7),
-    "core_dual": lambda p: strategies.core_plus_sleeve(p, strategies.dual_momentum(p, lookback_months=3), core_weight=0.5),
     "sixty_forty": lambda p: strategies.fixed_mix(p, {"SPY": 0.6, "IEF": 0.4}),
 }
+DEFAULT_STRATEGY = "core_gtaa_50"
 
 
 OFFLINE_EQUITY = 30_000.0

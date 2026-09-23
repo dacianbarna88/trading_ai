@@ -31,17 +31,27 @@ def _monthly(prices: pd.DataFrame) -> pd.DataFrame:
     return prices.loc[month_ends(prices.index)]
 
 
+# Every-other-week rebalances fall on weeks an even number of weeks after this
+# Monday, so the schedule is the same in backtest and live whatever the data start.
+BIWEEKLY_ANCHOR = pd.Timestamp("2000-01-03")
+
+
+def week_start(d: pd.Timestamp) -> pd.Timestamp:
+    return (d - pd.Timedelta(days=d.weekday())).normalize()
+
+
 def decision_dates(index: pd.DatetimeIndex, freq: str = "M") -> pd.DatetimeIndex:
     """Rebalance dates: last trading day of each month ("M"), each week ("W") or every other week ("2W")."""
     if freq == "M":
         return month_ends(index)
-    iso = index.isocalendar()
-    weekly = pd.DatetimeIndex(pd.Series(index, index=index).groupby([iso.year.values, iso.week.values]).max().values)
+    if freq not in ("W", "2W"):
+        raise ValueError(f"unknown rebalance frequency {freq!r}")
+    monday = index - pd.to_timedelta(index.weekday, unit="D")
+    weekly = pd.DatetimeIndex(pd.Series(index, index=index).groupby(monday.normalize()).max().values)
     if freq == "W":
         return weekly
-    if freq == "2W":
-        return weekly[::2]
-    raise ValueError(f"unknown rebalance frequency {freq!r}")
+    weeks = ((weekly - pd.to_timedelta(weekly.weekday, unit="D")).normalize() - BIWEEKLY_ANCHOR).days // 7
+    return weekly[weeks % 2 == 0]
 
 
 def _sampled(prices: pd.DataFrame, freq: str, lookback_months: int, how: str) -> tuple[pd.DataFrame, pd.DataFrame]:
