@@ -1,14 +1,23 @@
-"""Command line: `python -m tae2 research [--refresh] [--allow-data-issues]`."""
+"""Command line.
+
+python -m tae2 research [--refresh] [--allow-data-issues]
+python -m tae2 rebalance [--strategy core_gtaa|core_dual|sixty_forty] [--submit]
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
+from dataclasses import asdict
 
-from tae2 import data, research
+from tae2 import data, engine, research
+from tae2.broker import load_dotenv
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv()  # .env may set TAE2_STRATEGY and the Alpaca paper keys
     parser = argparse.ArgumentParser(prog="python -m tae2")
     sub = parser.add_subparsers(dest="command", required=True)
     r = sub.add_parser("research", help="walk-forward test of every candidate against the gates")
@@ -18,7 +27,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="run even when validation reports problems (they are listed in the report)",
     )
+    e = sub.add_parser("rebalance", help="bring the Alpaca paper account to the strategy's latest targets")
+    e.add_argument("--strategy", default=os.environ.get("TAE2_STRATEGY", "core_gtaa"), choices=sorted(engine.DEPLOYABLE))
+    e.add_argument("--submit", action="store_true", help="send the orders (paper only); without it, only show them")
     args = parser.parse_args(argv)
+
+    if args.command == "rebalance":
+        report = engine.run(args.strategy, submit=args.submit)
+        print(json.dumps(asdict(report), indent=2))
+        return 0 if report.status in {"dry_run", "submitted", "already_done"} else 3
 
     prices, issues = data.load(refresh=args.refresh)
     blocking = [i for i in issues if i.kind != "JUMP"]

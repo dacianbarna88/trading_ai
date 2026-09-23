@@ -8,3 +8,6 @@ venv/
 # Downloaded prices and generated reports: reproducible, never committed.
 data_cache/
 output/
+
+# Engine state and logs (the broker keeps the books; this is only the local audit trail).
+state/
