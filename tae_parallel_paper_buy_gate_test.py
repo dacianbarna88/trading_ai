@@ -187,6 +187,15 @@ class PriceFreshnessTest(_ProviderCase):
         self.assertEqual(snap["mark_freshness"], "FRESH")
         self.assertEqual(ppr.buy_allowed(snap), (True, "OK"))
 
+    def test_pre_open_row_read_after_the_open_is_stale(self) -> None:
+        # 2026-09-23 16:37 local: the 16:00 file (written pre-open) still held
+        # Monday's close, while Yahoo's bar date fetched after the open was today's.
+        self._write_signals(datetime(2026, 9, 23, 13, 0, tzinfo=timezone.utc), [("AMD", 615.52)])
+        now = datetime(2026, 9, 23, 13, 37, tzinfo=timezone.utc)
+        snap = self._marks(now, {"AMD": date(2026, 9, 23)}, ["AMD"])["AMD"]
+        self.assertEqual(snap["mark_stale_reason"], "SIGNAL_ROW_BEFORE_SESSION")
+        self.assertFalse(ppr.buy_allowed(snap)[0])
+
     def test_old_signal_row_is_stale_even_with_a_current_bar(self) -> None:
         self._write_signals(self.IN_SESSION - timedelta(hours=5), [("AMD", 618.0)])
         snap = self._marks(self.IN_SESSION, {"AMD": date(2026, 9, 23)}, ["AMD"])["AMD"]
