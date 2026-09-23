@@ -50,7 +50,16 @@ https://claude.ai/artifact/4rmxeAZzqAHfMPQivuugyA
 | 60/40 core 50% + dual momentum 3m 50% | 9.1% | 0.89 | −20.0% | 0.75 / 1.02 | Fragile: only the 3-month lookback beats 60/40; 6/9/12 don't |
 | 60/40 core 70% + GTAA 6m 30% | 7.2% | 0.81 | −23.7% | 0.65 / 0.97 | Robust on drawdown: all 8 variants cut max DD to −17..−25%; first-half Sharpe edge is thin |
 
-Both still pass at 20 bps costs. Neither adds much return; the gain is smaller
+Rebalance frequency test (126 variants, frequency chosen in-sample like any
+parameter): weekly never helps (more turnover, same or lower Sharpe). Every
+other week slightly improves the GTAA blend; the walk-forward pick is **60/40
+core 50% + GTAA 6m, every 2 weeks: 7.1%/yr, Sharpe 0.88, max DD −17.4%,
+Sharpe after 2017 1.00 — PASS**. The dual-momentum blend now fails: in-sample
+chose every 2 weeks, which scored 0.80 after 2017 (below 60/40's 0.93),
+confirming it is fragile. The engine still runs monthly `core_gtaa` until
+Dacian decides whether to switch.
+
+Both monthly candidates above still pass at 20 bps costs. Neither adds much return; the gain is smaller
 crashes (2008: −5% vs −18% for the dual-momentum blend). Next: run both on
 Alpaca paper next to 60/40 (phase 3–4).
 
