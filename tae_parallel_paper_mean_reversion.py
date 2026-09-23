@@ -128,6 +128,7 @@ def _decide_and_execute_ticker(
     p: dict[str, Path],
     decision_id: str,
     liquid: bool = True,
+    snap: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     positions = portfolio.get("positions") or {}
     pos = positions.get(ticker)
@@ -218,8 +219,12 @@ def _decide_and_execute_ticker(
                 notional = min(MAX_TRADE_USD, investable * 0.25)
                 if notional >= MIN_TRADE_USD:
                     cash_before = cash
-                    shares, after = pe._buy_shares(portfolio, ticker, notional, price)
-                    if shares > 0:
+                    shares, after, gate_reason = ppr.gated_buy_shares(
+                        portfolio, ticker, notional, price, snap=snap
+                    )
+                    if gate_reason != "OK":
+                        reason = gate_reason
+                    elif shares > 0:
                         action = "BUY"
                         reason = BUY_REASON
                         qty = shares
@@ -295,6 +300,7 @@ def run_mean_reversion_cycle() -> dict[str, Any]:
                 p=p,
                 decision_id=decision_id,
                 liquid=liquidity_flags.get(ticker, True),
+                snap=snap,
             )
 
     mark_prices = {t: pe._f(s.get("mark_price")) for t, s in marks.items()}
