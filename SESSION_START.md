@@ -38,7 +38,7 @@ https://claude.ai/artifact/4rmxeAZzqAHfMPQivuugyA
 | 0 Legacy bot stopped | Done: launchd job unloaded, code at tag `legacy-bot-final` |
 | 1 Research lab | Done: data validation, backtester, strategies, gates, walk-forward, tests |
 | 2 Selection | In progress: 94 variants; two pass every gate (see below) |
-| 3 Engine on broker paper API (Alpaca) | Not started; needs Dacian's Alpaca paper account and keys |
+| 3 Engine on broker paper API (Alpaca) | Built (`tae2/engine.py`); waiting for Dacian's Alpaca paper keys to go live |
 | 4 Paper for 3+ months | Not started |
 | 5 Real money | Owner decision only; Claude never places real trades |
 
@@ -54,11 +54,34 @@ Both still pass at 20 bps costs. Neither adds much return; the gain is smaller
 crashes (2008: −5% vs −18% for the dual-momentum blend). Next: run both on
 Alpaca paper next to 60/40 (phase 3–4).
 
+## Paper engine (phase 3)
+
+`python -m tae2 rebalance` computes the strategy's targets for the latest
+*completed* month-end, with the same functions and validated prices as the
+backtest, and plans orders for the Alpaca **paper** account. Without
+`--submit` it only prints them (with no keys it plans for an empty $30k
+book). With `--submit` it sells first, waits for fills, then buys with
+dollar-sized orders, and records the decision in `state/engine.json` so it
+never executes the same month twice. It stops before touching the broker on
+bad data, a closed market, open orders from an earlier run, or a blocked
+account. The paper URL is hard-wired; any other Alpaca URL is refused. The
+engine owns the whole account: positions outside the targets are sold.
+
+Going live on paper:
+1. Create an Alpaca account, open the **Paper** dashboard, generate API keys.
+2. `cp .env.example .env` and paste the two keys; pick `TAE2_STRATEGY`
+   (`core_gtaa` is the default and the more robust candidate).
+3. `python -m tae2 rebalance` (dry run against the real paper account).
+4. Schedule it: `cp deploy/com.tae2.rebalance.plist ~/Library/LaunchAgents/`
+   then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tae2.rebalance.plist`.
+   It runs weekdays at 21:30 Bucharest time; logs go to `state/launchd.log`.
+
 ## Commands
 
 ```bash
 pip install -r requirements.txt
 python -m tae2 research --refresh      # download prices, validate, run every candidate
+python -m tae2 rebalance              # show the orders the engine would place
 python -m unittest discover -s tests -t .
 ```
 
@@ -77,6 +100,10 @@ prices to `data_cache/` (both gitignored).
 | `tae2/stats.py` | Metrics and the deflated Sharpe ratio |
 | `tae2/gates.py` | Pass/fail gates |
 | `tae2/research.py` | Walk-forward run and Markdown report |
+| `tae2/engine.py` | Paper execution: targets → orders, once per decision |
+| `tae2/rebalance.py` | Pure order planning (sells first, no leverage) |
+| `tae2/broker.py` | Minimal Alpaca client, paper URL only |
+| `deploy/` | Daily launchd job (install by hand, see above) |
 | `tests/` | Hermetic tests, incl. no-lookahead for every strategy |
 
 ## Rules
