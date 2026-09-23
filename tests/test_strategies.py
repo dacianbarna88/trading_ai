@@ -15,6 +15,9 @@ BUILDERS = {
     "relative_momentum": lambda p: strategies.relative_momentum(p, lookback_months=6, top_n=3),
     "inverse_volatility": lambda p: strategies.inverse_volatility(p),
     "vol_target": lambda p: strategies.vol_target(p, strategies.gtaa(p, sma_months=10), target=0.05),
+    "trend_filtered_mix": lambda p: strategies.trend_filtered_mix(p, sma_months=10),
+    "core_plus_gtaa": lambda p: strategies.core_plus_sleeve(p, strategies.gtaa(p, sma_months=10), 0.5),
+    "core_plus_dual": lambda p: strategies.core_plus_sleeve(p, strategies.dual_momentum(p), 0.7),
 }
 
 
@@ -56,6 +59,20 @@ class WeightsTest(unittest.TestCase):
         prices[config.CASH] = np.linspace(100, 105, len(prices))
         w = strategies.dual_momentum(prices)
         self.assertTrue((w["IEF"] == 1.0).all())
+
+    def test_trend_filter_parks_the_equity_slice_in_cash(self) -> None:
+        prices = random_prices()
+        prices["SPY"] = np.linspace(200, 100, len(prices))
+        w = strategies.trend_filtered_mix(prices, sma_months=10)
+        self.assertTrue((w["SPY"] == 0).all())
+        np.testing.assert_allclose(w[config.CASH].values, 0.6)
+        np.testing.assert_allclose(w["IEF"].values, 0.4)
+
+    def test_blend_keeps_the_core_share(self) -> None:
+        prices = random_prices()
+        w = strategies.core_plus_sleeve(prices, strategies.gtaa(prices, sma_months=10), core_weight=0.7)
+        self.assertTrue((w["SPY"] >= 0.42 - 1e-12).all())  # 0.7 * 0.6 from the core alone
+        self.assertTrue((w["IEF"] >= 0.28 - 1e-12).all())
 
     def test_vol_target_only_scales_down(self) -> None:
         prices = random_prices()

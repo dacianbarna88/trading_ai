@@ -64,6 +64,22 @@ def families(plan: config.ResearchPlan = config.PLAN) -> list[Family]:
         ),
         Family("Inverse volatility", strategies.inverse_volatility),
         Family("Inverse volatility + vol target", _with_vol_target(strategies.inverse_volatility), {"target": plan.vol_target}),
+        # Phase 2: keep a 60/40 core and add a trend-following layer.
+        Family("60/40 with trend filter", strategies.trend_filtered_mix, {"sma_months": plan.sma_months}),
+        Family(
+            "60/40 core + GTAA sleeve",
+            lambda p, sma_months, core_weight: strategies.core_plus_sleeve(
+                p, strategies.gtaa(p, sma_months=sma_months), core_weight
+            ),
+            {"sma_months": plan.sma_months, "core_weight": plan.core_weight},
+        ),
+        Family(
+            "60/40 core + dual momentum sleeve",
+            lambda p, lookback_months, core_weight: strategies.core_plus_sleeve(
+                p, strategies.dual_momentum(p, lookback_months=lookback_months), core_weight
+            ),
+            {"lookback_months": plan.momentum_months, "core_weight": plan.core_weight},
+        ),
     ]
 
 
