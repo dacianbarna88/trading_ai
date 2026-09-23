@@ -948,6 +948,20 @@ def _expected_session_date(ticker: str, now: datetime) -> date:
     return day
 
 
+def _session_open_at(ticker: str, session_date: date) -> datetime:
+    """Regular-session open of `session_date` on the ticker's exchange (tz-aware)."""
+    from zoneinfo import ZoneInfo
+
+    from markets.market_config import MARKETS
+    from markets.market_hours import get_ticker_market
+
+    cfg = MARKETS.get(get_ticker_market(ticker)) or MARKETS["US"]
+    return datetime(
+        session_date.year, session_date.month, session_date.day,
+        cfg["open_hour"], cfg["open_minute"], tzinfo=ZoneInfo(cfg["timezone"]),
+    )
+
+
 def _fetch_price_bar_dates(tickers: list[str]) -> dict[str, date | None]:
     """Date of each ticker's latest daily bar with a real Close, one batched fetch.
 
@@ -1024,9 +1038,9 @@ def default_mark_provider(
 
     Fail closed, never fall back (2026-09-23). A price is MARK_STALE — unusable
     for BUY and SELL alike via _mark_is_usable — when its row is older than
-    SIGNAL_ROW_MAX_AGE_SECONDS, when its daily bar predates the latest session
-    that has opened (_expected_session_date), or when that date can't be
-    verified. A ticker missing from live_signals.csv is MARK_UNAVAILABLE: the
+    SIGNAL_ROW_MAX_AGE_SECONDS or was written before the latest opened session
+    (_expected_session_date) began, when its daily bar predates that session,
+    or when that date can't be verified. A ticker missing from live_signals.csv is MARK_UNAVAILABLE: the
     retired June signals.csv is no longer read (it leaked NVDA 212.56 into a
     V2 close on 2026-09-23 and AAPL 311.73 into a V1 sell on 2026-09-09).
     If the session check itself errors, the market is treated as closed.
@@ -1097,6 +1111,11 @@ def default_mark_provider(
             stale_reason = "SIGNAL_TIME_UNKNOWN"
         elif age_s > SIGNAL_ROW_MAX_AGE_SECONDS:
             stale_reason = "SIGNAL_ROW_TOO_OLD"
+        elif now_dt - timedelta(seconds=age_s) < _session_open_at(t, expected):
+            # Written before the session it must price opened, so its Price can't
+            # be from that session — however fresh the bar date fetched now is
+            # (2026-09-23 16:37: the 16:00 pre-open file still held Monday's close).
+            stale_reason = "SIGNAL_ROW_BEFORE_SESSION"
         elif bar_date is None:
             stale_reason = "PRICE_DATE_UNVERIFIED"
         elif bar_date < expected:
