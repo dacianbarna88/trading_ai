@@ -82,7 +82,11 @@ class WeightsTest(unittest.TestCase):
         m, w, w2 = (strategies.decision_dates(idx, f) for f in ("M", "W", "2W"))
         self.assertEqual(len(m), 3)
         self.assertEqual(len(w), 13)
-        self.assertEqual(list(w2), list(w[::2]))
+        self.assertEqual(len(w2), 7)
+        self.assertTrue(set(w2) <= set(w))
+        # The every-other-week schedule doesn't depend on where the data starts.
+        later = strategies.decision_dates(idx[10:], "2W")
+        self.assertEqual(list(later), [d for d in w2 if d >= idx[10]])
         self.assertTrue(all(d.weekday() == 4 for d in w[:-1]))  # Fridays (no holidays in bdate_range)
 
     def test_vol_target_only_scales_down(self) -> None:

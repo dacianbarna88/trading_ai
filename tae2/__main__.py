@@ -1,7 +1,7 @@
 """Command line.
 
 python -m tae2 research [--refresh] [--allow-data-issues]
-python -m tae2 rebalance [--strategy core_gtaa|core_dual|sixty_forty] [--submit]
+python -m tae2 rebalance [--strategy core_gtaa_50|core_gtaa|sixty_forty] [--submit]
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         help="run even when validation reports problems (they are listed in the report)",
     )
     e = sub.add_parser("rebalance", help="bring the Alpaca paper account to the strategy's latest targets")
-    e.add_argument("--strategy", default=os.environ.get("TAE2_STRATEGY", "core_gtaa"), choices=sorted(engine.DEPLOYABLE))
+    e.add_argument("--strategy", default=os.environ.get("TAE2_STRATEGY", engine.DEFAULT_STRATEGY), choices=sorted(engine.DEPLOYABLE))
     e.add_argument("--submit", action="store_true", help="send the orders (paper only); without it, only show them")
     args = parser.parse_args(argv)
 

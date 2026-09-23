@@ -50,14 +50,16 @@ https://claude.ai/artifact/4rmxeAZzqAHfMPQivuugyA
 | 60/40 core 50% + dual momentum 3m 50% | 9.1% | 0.89 | −20.0% | 0.75 / 1.02 | Fragile: only the 3-month lookback beats 60/40; 6/9/12 don't |
 | 60/40 core 70% + GTAA 6m 30% | 7.2% | 0.81 | −23.7% | 0.65 / 0.97 | Robust on drawdown: all 8 variants cut max DD to −17..−25%; first-half Sharpe edge is thin |
 
-Rebalance frequency test (126 variants, frequency chosen in-sample like any
-parameter): weekly never helps (more turnover, same or lower Sharpe). Every
-other week slightly improves the GTAA blend; the walk-forward pick is **60/40
-core 50% + GTAA 6m, every 2 weeks: 7.1%/yr, Sharpe 0.88, max DD −17.4%,
-Sharpe after 2017 1.00 — PASS**. The dual-momentum blend now fails: in-sample
-chose every 2 weeks, which scored 0.80 after 2017 (below 60/40's 0.93),
-confirming it is fragile. The engine still runs monthly `core_gtaa` until
-Dacian decides whether to switch.
+Rebalance frequency test (126 variants): **frequency doesn't matter.** Every
+other week first looked better, but only because of which weeks were picked:
+anchored one week apart, the same 50/50 GTAA blend scores Sharpe 0.88 or 0.76.
+Weekly (both phases) scores 0.82, monthly 0.80. Faster only adds turnover, so
+everything rebalances at month-end. The dual-momentum blend flips between
+pass and fail with these choices, so it is out.
+
+**Paper strategy: `core_gtaa_50`**, 60/40 core 50% + GTAA 6m 50%, monthly:
+6.5%/yr, Sharpe 0.80, max drawdown −18.3% (60/40: 8.3%, 0.78, −31.4%).
+`core_gtaa` (70/30) stays available: 7.2%, 0.81, −23.7%.
 
 Both monthly candidates above still pass at 20 bps costs. Neither adds much return; the gain is smaller
 crashes (2008: −5% vs −18% for the dual-momentum blend). Next: run both on
@@ -79,7 +81,7 @@ engine owns the whole account: positions outside the targets are sold.
 Going live on paper:
 1. Create an Alpaca account, open the **Paper** dashboard, generate API keys.
 2. `cp .env.example .env` and paste the two keys; pick `TAE2_STRATEGY`
-   (`core_gtaa` is the default and the more robust candidate).
+   (`core_gtaa_50` is the default).
 3. `python -m tae2 rebalance` (dry run against the real paper account).
 4. Schedule it: `cp deploy/com.tae2.rebalance.plist ~/Library/LaunchAgents/`
    then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tae2.rebalance.plist`.
