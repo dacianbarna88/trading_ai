@@ -56,5 +56,31 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(data.drop_unclosed_session(p, AFTER_CLOSE).index[-1], pd.Timestamp("2026-09-23"))
 
 
+class FetchThreadsTest(unittest.TestCase):
+    """Bug found 2026-09-25: yfinance's default threaded download hit
+    peewee.OperationalError on 322/505 tickers for a large-universe caller
+    (stocks/data.py) -- its shared per-user SQLite tz-cache isn't safe
+    under that much concurrency. tae2's own 13-ticker universe never has
+    enough concurrent threads to trigger it, so the default here stays
+    threads=True and tae2's own call site (data.load()) is unaffected --
+    only a caller with a large ticker list needs to pass threads=False."""
+
+    def test_defaults_to_threaded_unchanged_for_tae2s_own_call_site(self) -> None:
+        import unittest.mock as mock
+
+        with mock.patch("yfinance.download") as dl:
+            dl.return_value = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex(["2026-09-01"]))
+            data.fetch(["SPY"])
+        self.assertTrue(dl.call_args.kwargs["threads"])
+
+    def test_a_large_universe_caller_can_force_sequential(self) -> None:
+        import unittest.mock as mock
+
+        with mock.patch("yfinance.download") as dl:
+            dl.return_value = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex(["2026-09-01"]))
+            data.fetch(["SPY"], threads=False)
+        self.assertFalse(dl.call_args.kwargs["threads"])
+
+
 if __name__ == "__main__":
     unittest.main()

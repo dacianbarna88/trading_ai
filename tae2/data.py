@@ -82,11 +82,22 @@ def drop_unclosed_session(prices: pd.DataFrame, now: datetime) -> pd.DataFrame:
     return prices.loc[prices.index <= expected]
 
 
-def fetch(tickers: list[str], start: str = config.DATA_START) -> pd.DataFrame:
-    """Adjusted daily closes from Yahoo Finance on the SPY trading calendar."""
+def fetch(tickers: list[str], start: str = config.DATA_START, threads: bool = True) -> pd.DataFrame:
+    """Adjusted daily closes from Yahoo Finance on the SPY trading calendar.
+
+    `threads=True` (yfinance's own default, unchanged here for tae2's own
+    13-ticker universe) spins up a thread per batch to download concurrently.
+    Found 2026-09-25: yfinance's per-user tz-cache is a shared SQLite file
+    (~/Library/Caches/py-yfinance/tkr-tz.db, peewee, WAL mode) that isn't
+    safe under many concurrent threads -- a ~500-ticker caller hit
+    `peewee.OperationalError: unable to open database file` on 322/505
+    tickers. tae2's own small universe never has enough concurrent threads
+    to trigger it. Callers with a large ticker list should pass
+    `threads=False` (sequential, slower, but correct).
+    """
     import yfinance as yf
 
-    raw = yf.download(tickers, start=start, auto_adjust=True, progress=False, group_by="column")
+    raw = yf.download(tickers, start=start, auto_adjust=True, progress=False, group_by="column", threads=threads)
     closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]].set_axis(tickers, axis=1)
     closes = closes[closes[config.CALENDAR_TICKER].notna()]
     closes.index = pd.DatetimeIndex(closes.index).tz_localize(None).normalize()
