@@ -8,6 +8,7 @@ and are never logged.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,5 +111,14 @@ class AlpacaPaper:
         if notional is not None:
             body["notional"] = f"{notional:.2f}"
         else:
-            body["qty"] = f"{qty:.6f}"
+            # Bug found 2026-10-02 on the real tae2 paper account: f"{qty:.6f}"
+            # ROUNDS, and Alpaca rejects a qty even a sliver over what's held
+            # -- "insufficient qty available (requested: 95.16968, available:
+            # 95.169679579)" was the EXACT held quantity, rounded up at the
+            # 6th decimal by formatting alone (rebalance.plan()'s own
+            # float-precision cap on the Python side can't fix this, since
+            # the true held qty itself rounds up here). Floor instead of
+            # round so a qty-based order (always a sell in practice) can
+            # never request more shares than intended.
+            body["qty"] = f"{math.floor(qty * 1_000_000) / 1_000_000:.6f}"
         return self._call("POST", "/v2/orders", json=body)

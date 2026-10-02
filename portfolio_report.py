@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import requests
+
 from tae2.broker import AlpacaPaper as Tae2Broker
 from tae2.broker import BrokerError, Position
 from stocks import universe
@@ -61,12 +63,19 @@ class AccountReport:
 
 
 def _fetch(label: str, make_broker) -> AccountReport:
+    """Bug found 2026-10-02: a launchd catch-up run fired right after the
+    Mac woke from sleep, before networking was back up -- requests raised
+    ConnectionError, not BrokerError, and since that wasn't caught here it
+    crashed main() before collect() returned, so the OTHER (reachable)
+    account's report was lost too and no file/notification was produced at
+    all. A report script should degrade to "this account unreadable" per
+    account, never crash the whole run over one account's connectivity."""
     try:
         broker = make_broker()
         acct = broker.account()
         positions = sorted(broker.positions(), key=lambda p: -p.market_value)
         return AccountReport(label, acct.equity, acct.cash, positions)
-    except BrokerError as e:
+    except (BrokerError, requests.exceptions.RequestException) as e:
         return AccountReport(label, 0.0, 0.0, [], error=str(e))
 
 

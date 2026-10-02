@@ -60,7 +60,12 @@ def plan(targets: pd.Series, positions: list[Position], equity: float, cash: flo
             if want == 0:
                 sells.append(Order(s, "sell", qty=pos.qty, reason="exit"))
             else:
-                qty = pos.qty * (-diff / have)
+                # Same fix as tae2.rebalance.plan() (bug found 2026-10-02 on
+                # the real tae2 account): cap the sell qty at what's actually
+                # held, since IEEE 754 rounding on a near-zero `want` can
+                # push -diff/have fractionally above 1.0 and Alpaca rejects
+                # a qty even a hair over the position's real size.
+                qty = min(pos.qty, pos.qty * (-diff / have))
                 sells.append(Order(s, "sell", qty=qty, reason=f"trim to {want / equity:.1%}"))
             freed += -diff
         elif diff > 0:

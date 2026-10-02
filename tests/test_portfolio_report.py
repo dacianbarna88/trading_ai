@@ -3,8 +3,55 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timezone
 
+import requests
+
 import portfolio_report as pr
 from tae2.broker import Position
+
+
+class FetchResilienceTest(unittest.TestCase):
+    """Bug found 2026-10-02: a launchd catch-up run fired right after the
+    Mac woke from sleep, before networking was back up. requests raised
+    ConnectionError (not BrokerError), which _fetch() didn't catch -- it
+    crashed collect() entirely, losing the OTHER account's report too and
+    producing no file/notification for the whole run."""
+
+    def test_a_network_error_is_captured_per_account_not_raised(self) -> None:
+        def make_broker():
+            class _Broker:
+                def account(self):
+                    raise requests.exceptions.ConnectionError("Failed to resolve host")
+
+            return _Broker()
+
+        report = pr._fetch("tae2", make_broker)
+        self.assertIsNotNone(report.error)
+        self.assertEqual(report.positions, [])
+
+    def test_one_accounts_network_error_does_not_lose_the_others_report(self) -> None:
+        def broken():
+            class _Broker:
+                def account(self):
+                    raise requests.exceptions.ConnectionError("Failed to resolve host")
+
+            return _Broker()
+
+        def working():
+            class _Broker:
+                def account(self):
+                    from tae2.broker import Account
+
+                    return Account(1_000.0, 500.0, 500.0, "ACTIVE", False)
+
+                def positions(self):
+                    return []
+
+            return _Broker()
+
+        reports = [pr._fetch("broken", broken), pr._fetch("working", working)]
+        self.assertIsNotNone(reports[0].error)
+        self.assertIsNone(reports[1].error)
+        self.assertEqual(reports[1].equity, 1_000.0)
 
 
 class ResolveNameTest(unittest.TestCase):

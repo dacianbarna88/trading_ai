@@ -50,7 +50,17 @@ def plan(targets: pd.Series, positions: list[Position], equity: float, cash: flo
             if want == 0:
                 sells.append(Order(s, "sell", qty=pos.qty, reason="exit"))
             else:
-                qty = pos.qty * (-diff / have)
+                # Bug found 2026-10-02 on the real tae2 paper account: a
+                # near-zero `want` (floating-point noise from upstream
+                # weight math, e.g. a "1 - sum(...)" cash remainder landing
+                # on something like -1e-12 instead of exactly 0) can push
+                # -diff/have fractionally above 1.0 in IEEE 754, computing a
+                # sell qty that is a hair more than actually held. Alpaca
+                # rejected it outright: "insufficient qty available
+                # (requested: 95.16968, available: 95.169679579)". Capping
+                # at the held qty is correct either way -- selling "100%+"
+                # of a position only ever means "sell all of it".
+                qty = min(pos.qty, pos.qty * (-diff / have))
                 sells.append(Order(s, "sell", qty=qty, reason=f"trim to {want / equity:.1%}"))
             freed += -diff
         elif diff > 0:

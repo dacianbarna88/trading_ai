@@ -150,6 +150,21 @@ class BrokerGuardTest(unittest.TestCase):
         self.assertEqual((method, url), ("POST", "https://paper-api.alpaca.markets/v2/orders"))
         self.assertEqual(body, {"symbol": "SPY", "side": "buy", "type": "market", "time_in_force": "day", "notional": "1234.57"})
 
+    def test_a_sell_qty_is_floored_not_rounded(self) -> None:
+        """Bug found 2026-10-02 on the real tae2 paper account: Alpaca
+        rejected a sell of the EXACT held quantity (95.169679579) with
+        "insufficient qty available (requested: 95.16968, available:
+        95.169679579)" -- f"{qty:.6f}" rounds the 6th decimal up (9->0
+        carrying) whenever the 7th digit is >=5, requesting a hair more
+        shares than exist. Flooring must never do that."""
+        session = mock.Mock(headers={})
+        session.request.return_value = mock.Mock(status_code=200, text='{"id": "1"}', json=lambda: {"id": "1"})
+        client = brk.AlpacaPaper("k", "s", session=session)
+        client.submit("EFA", "sell", qty=95.169679579)
+        body = session.request.call_args.kwargs["json"]
+        self.assertEqual(body["qty"], "95.169679")
+        self.assertLessEqual(float(body["qty"]), 95.169679579)
+
 
 class PlanTest(unittest.TestCase):
     def test_small_differences_are_left_alone(self) -> None:
@@ -166,6 +181,19 @@ class PlanTest(unittest.TestCase):
     def test_leverage_is_refused(self) -> None:
         with self.assertRaises(ValueError):
             rebalance.plan(pd.Series({"SPY": 0.8, "IEF": 0.4}), [], 10_000, 10_000)
+
+    def test_a_near_zero_target_never_requests_more_than_the_held_qty(self) -> None:
+        """Bug found 2026-10-02 on the real tae2 paper account: Alpaca
+        rejected a sell with "insufficient qty available (requested:
+        95.16968, available: 95.169679579)". A target weight that's a tiny
+        negative epsilon instead of exactly 0 (floating-point noise from
+        upstream weight math, not user error) makes `want` slightly
+        negative, which pushes -diff/have fractionally above 1.0 in IEEE
+        754 -- the computed sell qty must never exceed what's actually held."""
+        pos = [Position("EFA", 95.169679579, 10_000.0)]
+        orders = rebalance.plan(pd.Series({"EFA": -1e-15}), pos, 10_000.0, 0.0)
+        self.assertEqual(len(orders), 1)
+        self.assertLessEqual(orders[0].qty, 95.169679579)
 
 
 if __name__ == "__main__":

@@ -166,6 +166,16 @@ class RebalanceThresholdTest(unittest.TestCase):
         bought = {o.symbol for o in orders if o.side == "buy"}
         self.assertEqual(bought, {"SHY"})  # every individual stock silently skipped
 
+    def test_a_near_zero_target_never_requests_more_than_the_held_qty(self) -> None:
+        """Same bug as tae2.rebalance.plan() (found 2026-10-02 on the real
+        tae2 account, Alpaca rejected a sell for a hair more than held) --
+        this file copied that function's logic verbatim, so it had the
+        identical bug."""
+        pos = [Position("AAPL", 10.123456789, 10_000.0)]
+        orders = rebalance.plan(pd.Series({"AAPL": -1e-15}), pos, 10_000.0, 0.0)
+        self.assertEqual(len(orders), 1)
+        self.assertLessEqual(orders[0].qty, 10.123456789)
+
 
 class MomentumVt10DefaultTest(_TempDir):
     """The real default deployable, on a synthetic universe big enough for
