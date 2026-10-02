@@ -10,6 +10,9 @@ PYTHON="venv/bin/python3"
 [ -x "$PYTHON" ] || PYTHON="$(command -v python3)"
 {
   echo "===== $(date '+%Y-%m-%d %H:%M:%S') rebalance ====="
-  "$PYTHON" -m tae2 rebalance --submit  # strategy from TAE2_STRATEGY in .env
+  # caffeinate -i: don't let the Mac idle-sleep mid-run (it was just woken
+  # by deploy/arm_evening_wake.sh for exactly this window, but that's a
+  # one-time wake, not a guarantee it stays up for the run's duration).
+  caffeinate -i "$PYTHON" -m tae2 rebalance --submit  # strategy from TAE2_STRATEGY in .env
   echo "exit $?"
 } >> state/launchd.log 2>&1

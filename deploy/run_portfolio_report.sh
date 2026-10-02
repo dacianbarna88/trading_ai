@@ -9,6 +9,9 @@ PYTHON="venv/bin/python3"
 [ -x "$PYTHON" ] || PYTHON="$(command -v python3)"
 {
   echo "===== $(date '+%Y-%m-%d %H:%M:%S') portfolio report ====="
-  "$PYTHON" portfolio_report.py
+  # caffeinate -i: don't let the Mac idle-sleep mid-run (woken by
+  # deploy/arm_evening_wake.sh for this window, which is a one-time wake,
+  # not a guarantee it stays up for the run's duration).
+  caffeinate -i "$PYTHON" portfolio_report.py
   echo "exit $?"
 } >> state/portfolio_report_launchd.log 2>&1

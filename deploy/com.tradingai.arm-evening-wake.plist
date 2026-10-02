@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- A LaunchDAEMON (runs as root, lives in /Library/LaunchDaemons -- NOT
+     ~/Library/LaunchAgents), because pmset schedule needs root and this
+     avoids ever needing an interactive sudo password at run time.
+
+     Runs weekdays at 10:05am -- 6 minutes after the existing, already-
+     relied-on `wakepoweron at 9:59AM weekdays` (betting_ai's jobs use it),
+     so this daemon is itself reliably triggered without adding a second
+     `pmset repeat` slot (macOS allows only one wake/poweron pair).
+     RunAtLoad=true so installing it also arms tonight's wakes immediately,
+     not just starting tomorrow. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.tradingai.arm-evening-wake</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/book/trading_ai_restored/deploy/arm_evening_wake.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>5</integer></dict>
+  </array>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
