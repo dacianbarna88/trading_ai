@@ -74,5 +74,26 @@ class SplicedIndexTest(unittest.TestCase):
         self.assertAlmostEqual(actual_ret_at_seam, late_ret_at_seam, places=6)
 
 
+class SpliceAcrossCalendarsTest(unittest.TestCase):
+    def test_early_and_late_may_have_different_calendars(self) -> None:
+        # EARLY trades every day (US-style); LATE is missing day index 2
+        # (as a UCITS listing on a different exchange calendar would be).
+        early_idx = pd.bdate_range("2020-01-01", periods=5)
+        late_idx = early_idx.delete(2)
+        early = pd.Series([100.0, 102.0, 104.0, 999.0, 999.0], index=early_idx)
+        late = pd.Series([10.0, 10.2, 10.6, 10.8], index=late_idx)  # day2 missing
+        splice = early_idx[3]  # split right where LATE is already missing a day
+        idx = ucits_data._splice_returns(early, late, splice.isoformat())
+        # Pre-splice: EARLY's own +2%/day compounding, on EARLY's own calendar.
+        self.assertAlmostEqual(idx.iloc[0], 102.0, places=4)
+        self.assertAlmostEqual(idx.iloc[1], 104.0, places=4)
+        # Post-splice: LATE's own actual day-over-day return at the seam
+        # (10.6 vs 10.2, i.e. across LATE's own missing day), not distorted
+        # by EARLY's absolute price level or by the gap in LATE's calendar.
+        late_ret_at_seam = late.loc[late.index >= splice].iloc[0] / late.loc[late.index < splice].iloc[-1] - 1
+        actual_ret_at_seam = idx.iloc[2] / idx.iloc[1] - 1
+        self.assertAlmostEqual(actual_ret_at_seam, late_ret_at_seam, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

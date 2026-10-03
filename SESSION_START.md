@@ -42,6 +42,19 @@ https://claude.ai/artifact/4rmxeAZzqAHfMPQivuugyA
 | 4 Paper for 3+ months | Not started |
 | 5 Real money | Owner decision only; Claude never places real trades |
 
+## EU/UCITS research checkpoint (2026-10-04)
+
+`tae2_ucits/` asks whether `core_gtaa_50` (unchanged) also clears the gates
+on UCITS-listed equivalents (EU retail can't buy the US-domiciled originals
+under PRIIPs). **STRICT** (real UCITS data only, from 2011-06-01): FAIL,
+too little history. **EXTENDED** (2008-2011 recovered via a documented
+splice of the original US tickers, switching to the real UCITS fund at
+2011-06-01): PASS, all 5 gates. Full detail, splice dates, and the
+risk/benchmark-family study (TAE2 behaves like insurance: ~7.0% CAGR,
+~7.7% vol, ~-13.6% Max DD, risk-matched to a 40/60-to-20/80 passive mix) are
+in `tae2_ucits/__init__.py`. Status: **RESEARCH_VALIDATED / NOT_LIVE_APPROVED**
+-- no broker wiring, no capital decision from this checkpoint alone.
+
 ## Phase 2 result (2026-09-23, 94 variants, 10 bps costs, data to 2026-09-21)
 
 | Strategy | CAGR | Sharpe | Max DD | Sharpe 2008–16 / 2017–26 | Robustness |
@@ -116,6 +129,7 @@ prices to `data_cache/` (both gitignored).
 | `tae2/broker.py` | Minimal Alpaca client, paper URL only |
 | `deploy/` | Daily launchd job (install by hand, see above) |
 | `tests/` | Hermetic tests, incl. no-lookahead for every strategy |
+| `tae2_ucits/` | EU/UCITS research twin of core_gtaa_50 (see its `__init__.py` for checkpoint status) |
 
 ## Rules
 

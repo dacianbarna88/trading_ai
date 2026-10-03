@@ -37,6 +37,32 @@ The combined/spliced result is intentionally given the SAME column names
 tae2.strategies' functions expect (SPY, EFA, IEF, DBC, VNQ, SHY) so
 tae2.engine.DEPLOYABLE["core_gtaa_50"] and tae2.backtest.run() can be
 called completely unchanged -- only the input data differs.
+
+TWO VARIANTS, never blurred together:
+
+- STRICT (build_strict / load("strict")): only real, clean UCITS history.
+  Starts 2011-06-01 in practice (see tae2_ucits/research.py's EVAL_START note
+  -- IBTS.L and IUSP.L are real funds back to 2008-2009 but Yahoo's feed for
+  both is corrupted through ~2011-05). The conservative test: every number in
+  it is a real UCITS fund's real price.
+
+- EXTENDED (build_extended / load("extended")): recovers 2008-2011 by
+  splicing, for SPY/IEF/VNQ/SHY/EFA only, the ORIGINAL US ticker's own real
+  returns before the UCITS fund's clean-data start, switching to the real
+  UCITS fund from then on -- exactly the same technique already used for
+  DBC (US DBC -> CMOD.L), just with a different splice date chosen for a
+  different reason (a data-quality gap, not a short fund history). DBC's
+  own existing splice already reaches back to 2006 and is left unchanged.
+
+      2008 ──────────── 2011-06-01 │ 2011-06-01 ──────────────── today
+           PROXY (original US ETF)  │   UCITS REAL (own fund)
+                                    ↑ splice date (RECOVERY_SPLICE_DATE)
+
+  This is a documented reconstruction, not "real UCITS history" -- useful
+  specifically to test whether the STRICT variant's first-half gate failure
+  is caused by excluding the 2008 crisis, not by anything UCITS-specific.
+  Built 2026-10-03 after autopsy.py showed the same failure on pure US data
+  restricted to the same short window.
 """
 
 from __future__ import annotations
@@ -46,8 +72,12 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-CACHE = Path("data_cache/tae2_ucits_prices.parquet")
+CACHE_STRICT = Path("data_cache/tae2_ucits_prices.parquet")
+CACHE_EXTENDED = Path("data_cache/tae2_ucits_prices_extended.parquet")
 DATA_START = "2005-01-01"
+
+RECOVERY_SPLICE_DATE = "2011-06-01"  # STRICT's own clean-data start (see above)
+RECOVERY_LEGS = ("SPY", "IEF", "VNQ", "SHY", "EFA")  # DBC already has its own, earlier splice
 
 SPY_TICKER = "CSPX.L"
 IEF_TICKER = "IDTM.L"
@@ -93,20 +123,30 @@ def _blended_index(prices: pd.DataFrame, weights: dict[str, float]) -> pd.Series
     return 100 * (1 + weighted_return).cumprod()
 
 
-def _spliced_index(prices: pd.DataFrame, early_ticker: str, late_ticker: str, splice_date: str) -> pd.Series:
-    """One continuous series: `early_ticker`'s own returns before
-    `splice_date`, `late_ticker`'s own returns from `splice_date` onward,
-    chained so there's no artificial jump at the seam."""
-    early_ret = prices[early_ticker].pct_change()
-    late_ret = prices[late_ticker].pct_change()
+def _splice_returns(early: pd.Series, late: pd.Series, splice_date: str) -> pd.Series:
+    """One continuous index: `early`'s own returns before `splice_date`,
+    `late`'s own returns from `splice_date` onward, chained so there's no
+    artificial jump at the seam. `early` and `late` may be on different
+    calendars (each is pct_change'd on its own index first) -- that's the
+    point: it lets a US-calendar series splice onto a UCITS-calendar one."""
+    early_ret = early.pct_change().dropna()
+    late_ret = late.pct_change().dropna()
     splice = pd.Timestamp(splice_date)
     combined_ret = pd.concat([early_ret.loc[early_ret.index < splice], late_ret.loc[late_ret.index >= splice]])
-    combined_ret = combined_ret.dropna()
-    return 100 * (1 + combined_ret).cumprod()
+    return 100 * (1 + combined_ret.sort_index()).cumprod()
 
 
-def build(raw: pd.DataFrame) -> pd.DataFrame:
-    """Rename/combine the raw UCITS tickers into tae2's own column names."""
+def _spliced_index(prices: pd.DataFrame, early_ticker: str, late_ticker: str, splice_date: str) -> pd.Series:
+    """Same as `_splice_returns`, for two columns that already share a calendar."""
+    return _splice_returns(prices[early_ticker], prices[late_ticker], splice_date)
+
+
+def _strict_columns(raw: pd.DataFrame) -> pd.DataFrame:
+    """build_strict()'s six columns, WITHOUT the final row-level dropna --
+    SPY/IEF/VNQ/SHY keep their natural leading NaNs (each starts on its own
+    ticker's real first trading day). build_extended() needs this
+    intermediate form so it can splice each leg on ITS OWN earliest real
+    date, not on the date all six already happen to overlap."""
     out = pd.DataFrame(index=raw.index)
     out["SPY"] = raw[SPY_TICKER]
     out["IEF"] = raw[IEF_TICKER]
@@ -114,14 +154,46 @@ def build(raw: pd.DataFrame) -> pd.DataFrame:
     out["SHY"] = raw[SHY_TICKER]
     out["EFA"] = _blended_index(raw, EAFE_WEIGHTS)
     out["DBC"] = _spliced_index(raw, DBC_SPLICE_TICKER, DBC_UCITS_TICKER, DBC_SPLICE_DATE)
+    return out
+
+
+def build_strict(raw: pd.DataFrame) -> pd.DataFrame:
+    """Rename/combine the raw UCITS tickers into tae2's own column names.
+    Real UCITS history only -- see the STRICT variant note above."""
+    return _strict_columns(raw).dropna(how="any")
+
+
+def build_extended(raw: pd.DataFrame, us_prices: pd.DataFrame) -> pd.DataFrame:
+    """build_strict() plus the pre-2011-06-01 recovery splice -- see the
+    EXTENDED variant note above. `us_prices` must have SPY/IEF/VNQ/SHY/EFA
+    columns with real history back to at least 2008 (tae2.data.load()'s own
+    cache: the ORIGINAL US tickers tae2 itself trades).
+
+    Splices from _strict_columns() (pre-dropna), not build_strict()'s own
+    output -- splicing onto the already-dropna'd frame would silently clip
+    every recovered pre-2011 date right back off (each leg's UCITS half
+    must keep its own natural start date until the final dropna, below)."""
+    strict = _strict_columns(raw)
+    spliced = {leg: _splice_returns(us_prices[leg], strict[leg], RECOVERY_SPLICE_DATE) for leg in RECOVERY_LEGS}
+    out = pd.DataFrame(spliced)
+    out["DBC"] = strict["DBC"]
     return out.dropna(how="any")
 
 
-def load(refresh: bool = False) -> pd.DataFrame:
-    if not refresh and CACHE.is_file():
-        return pd.read_parquet(CACHE)
+def load(variant: str = "strict", refresh: bool = False) -> pd.DataFrame:
+    if variant not in ("strict", "extended"):
+        raise ValueError(f"unknown variant {variant!r}; choose 'strict' or 'extended'")
+    cache = CACHE_STRICT if variant == "strict" else CACHE_EXTENDED
+    if not refresh and cache.is_file():
+        return pd.read_parquet(cache)
     raw = fetch(ALL_TICKERS)
-    prices = build(raw)
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    prices.to_parquet(CACHE)
+    if variant == "strict":
+        prices = build_strict(raw)
+    else:
+        from tae2 import data as us_data
+
+        us_prices, _ = us_data.load(refresh=False)
+        prices = build_extended(raw, us_prices)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    prices.to_parquet(cache)
     return prices

@@ -17,7 +17,7 @@ from tae2.config import COST_BPS
 from tae2.strategies import core_plus_sleeve, fixed_mix, gtaa
 
 from tae2_ucits import data as ucits_data
-from tae2_ucits.research import EVAL_START, SPLIT_DATE, UCITS_GATES
+from tae2_ucits.research import EVAL_START, SPLIT_DATE
 
 
 def _half_sharpes(returns: pd.Series, split: str = SPLIT_DATE) -> tuple[float, float]:
@@ -27,7 +27,7 @@ def _half_sharpes(returns: pd.Series, split: str = SPLIT_DATE) -> tuple[float, f
 
 def run() -> list[dict]:
     raw = ucits_data.fetch(ucits_data.ALL_TICKERS)
-    baseline_prices = ucits_data.build(raw).loc[EVAL_START:]
+    baseline_prices = ucits_data.build_strict(raw).loc[EVAL_START:]
 
     europe_only_prices = baseline_prices.copy()
     europe_only_prices["EFA"] = raw[ucits_data.EUROPE_TICKER].loc[baseline_prices.index]
