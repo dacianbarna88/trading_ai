@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Weekly, Monday 10:15 Bucharest time -- after the existing reliable
-     `wakepoweron at 9:59AM weekdays` (betting_ai's jobs already depend on
-     it; see deploy/arm_evening_wake.sh's own comment), so this fires
-     without needing its own pmset wake. Read-only: refreshes BVB data and
-     writes the trend+momentum signal report; never places an order. -->
+<!-- Weekly, Friday 21:50 Bucharest time -- after BVB's own close (~17:45)
+     AND inside the evening wake deploy/arm_evening_wake.sh already arms
+     for every weekday at 21:25 (tae2's own 21:30 job relies on the same
+     wake), so this needs no new pmset wake either. Deliberately NOT Monday
+     morning: BVB is closed over the weekend so the data is identical
+     either way, but a Monday run after ~10:00 would land AFTER BVB's own
+     open, costing same-day reaction time Friday evening doesn't. Read-
+     only: refreshes BVB data and writes the trend+momentum signal report;
+     never places an order. -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.bvb.research</string>
@@ -15,7 +19,7 @@
   </array>
   <key>StartCalendarInterval</key>
   <array>
-    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>50</integer></dict>
   </array>
   <key>RunAtLoad</key><false/>
 </dict>
