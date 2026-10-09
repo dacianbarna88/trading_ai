@@ -131,6 +131,8 @@ prices to `data_cache/` (both gitignored).
 | `tests/` | Hermetic tests, incl. no-lookahead for every strategy |
 | `tae2_ucits/` | EU/UCITS research twin of core_gtaa_50 (see its `__init__.py` for checkpoint status) |
 | `bvb/` | BVB (Bucharest) signal lab -- trend + momentum, for Dacian's real bt-trade.ro account; read-only, never places an order (see its `__init__.py`) |
+| `portfolio_report.py` | Nightly report, both paper accounts: positions (ticker + full name + sector/domain + price change since entry) and the full equity curve since each account's inception |
+| `system_health_check.py` | Daily, before market open: tests, data validation, broker reachability, then a safe idempotent re-run of each engine's own submit pass as catch-up. Can't fix failing tests/bad credentials/real data corruption -- those are surfaced, not guessed at |
 
 ## Rules
 

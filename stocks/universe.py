@@ -23,6 +23,7 @@ import requests
 
 CACHE = Path("data_cache/sp500_current_members.json")
 NAMES_CACHE = Path("data_cache/sp500_company_names.json")
+SECTORS_CACHE = Path("data_cache/sp500_company_sectors.json")
 WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 # Wikipedia returns 403 without a UA; this is a research script identifying itself, not spoofing a browser.
 _HEADERS = {"User-Agent": "tae2-stocks-research (local backtest, non-commercial)"}
@@ -48,6 +49,14 @@ def fetch_current_names() -> dict[str, str]:
     return dict(zip(table["Symbol"], table["Security"]))
 
 
+def fetch_current_sectors() -> dict[str, str]:
+    """Today's S&P 500 {ticker: GICS Sector}, same Wikipedia table -- the
+    "domeniul de activitate" (field of business) requested 2026-10-09 for
+    the daily portfolio report, no second data source."""
+    table = _fetch_members_table()
+    return dict(zip(table["Symbol"], table["GICS Sector"]))
+
+
 def load(refresh: bool = False) -> list[str]:
     """Cached ticker list; refetches from Wikipedia when asked or missing."""
     if not refresh and CACHE.is_file():
@@ -55,6 +64,7 @@ def load(refresh: bool = False) -> list[str]:
     table = _fetch_members_table()
     tickers = table["Symbol"].tolist()
     names = dict(zip(table["Symbol"], table["Security"]))
+    sectors = dict(zip(table["Symbol"], table["GICS Sector"]))
     fetched_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     CACHE.parent.mkdir(parents=True, exist_ok=True)
     CACHE.write_text(
@@ -76,6 +86,10 @@ def load(refresh: bool = False) -> list[str]:
         json.dumps({"names": names, "fetched_at": fetched_at, "source": WIKIPEDIA_URL}, indent=2),
         encoding="utf-8",
     )
+    SECTORS_CACHE.write_text(
+        json.dumps({"sectors": sectors, "fetched_at": fetched_at, "source": WIKIPEDIA_URL}, indent=2),
+        encoding="utf-8",
+    )
     return tickers
 
 
@@ -84,3 +98,10 @@ def load_names(refresh: bool = False) -> dict[str, str]:
     if refresh or not NAMES_CACHE.is_file():
         load(refresh=True)  # single Wikipedia fetch refreshes both caches together
     return json.loads(NAMES_CACHE.read_text(encoding="utf-8"))["names"]
+
+
+def load_sectors(refresh: bool = False) -> dict[str, str]:
+    """Cached {ticker: GICS Sector}; refetches (all three caches, one request) when asked or missing."""
+    if refresh or not SECTORS_CACHE.is_file():
+        load(refresh=True)
+    return json.loads(SECTORS_CACHE.read_text(encoding="utf-8"))["sectors"]

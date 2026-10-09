@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Weekdays 10:20 Bucharest time -- after the existing reliable
+     `wakepoweron at 9:59AM weekdays` (betting_ai's jobs already depend on
+     it) and the 10:05 arm-evening-wake daemon, so no new pmset wake is
+     needed. Well before the US market's own open (16:30 Bucharest in
+     summer, 17:30 in winter) -- unlike the BVB job (see its own plist's
+     history), there is no near-the-open timing trap here. Runs tests,
+     validates both universes' data, checks both Alpaca accounts, and
+     re-runs each engine's own idempotent submit pass as a safe catch-up. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.health.check</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/book/trading_ai_restored/deploy/run_health_check.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>20</integer></dict>
+  </array>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>
