@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Weekly, Monday 10:15 Bucharest time -- after the existing reliable
+     `wakepoweron at 9:59AM weekdays` (betting_ai's jobs already depend on
+     it; see deploy/arm_evening_wake.sh's own comment), so this fires
+     without needing its own pmset wake. Read-only: refreshes BVB data and
+     writes the trend+momentum signal report; never places an order. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.bvb.research</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/book/trading_ai_restored/deploy/run_bvb_research.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>15</integer></dict>
+  </array>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

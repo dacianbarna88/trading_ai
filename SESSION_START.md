@@ -130,6 +130,7 @@ prices to `data_cache/` (both gitignored).
 | `deploy/` | Daily launchd job (install by hand, see above) |
 | `tests/` | Hermetic tests, incl. no-lookahead for every strategy |
 | `tae2_ucits/` | EU/UCITS research twin of core_gtaa_50 (see its `__init__.py` for checkpoint status) |
+| `bvb/` | BVB (Bucharest) signal lab -- trend + momentum, for Dacian's real bt-trade.ro account; read-only, never places an order (see its `__init__.py`) |
 
 ## Rules
 
