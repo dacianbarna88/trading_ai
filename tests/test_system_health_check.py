@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import unittest
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import system_health_check as shc
 from tae2.data import Issue
@@ -13,6 +16,33 @@ class _FakeReport:
     status: str
     decision_date: str = "2026-10-01"
     detail: str = ""
+
+
+class RunTestsTest(unittest.TestCase):
+    def test_uses_sys_executable_not_a_bare_python3(self) -> None:
+        # Bug found 2026-10-12: launchd's minimal PATH resolves a bare
+        # "python3" to macOS's own system Python (no pandas), not this
+        # project's venv -- every pandas-importing test file then errors
+        # on import, reported as 14/14 "failing" tests that were actually
+        # never really run. sys.executable is always the interpreter
+        # already running this process, which run_health_check.sh already
+        # resolved correctly.
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+
+            class _Proc:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            return _Proc()
+
+        with patch.object(subprocess, "run", fake_run):
+            shc.run_tests()
+        self.assertEqual(captured["cmd"][0], sys.executable)
+        self.assertNotEqual(captured["cmd"][0], "python3")
 
 
 class CheckDataTest(unittest.TestCase):

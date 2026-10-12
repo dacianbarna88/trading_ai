@@ -34,6 +34,7 @@ so if the notification is missed, check output/system_health_*.md by hand.
 from __future__ import annotations
 
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -72,8 +73,17 @@ class HealthReport:
 
 
 def run_tests() -> CheckResult:
+    # sys.executable, NOT a bare "python3": launchd starts with a minimal
+    # PATH (same note tae2/engine.py's own deploy scripts already carry),
+    # where plain "python3" resolves to macOS's own system Python (3.9,
+    # no pandas) instead of this project's venv -- found 2026-10-12 when
+    # the real health-check run reported 14/14 tests "failed" (every test
+    # file that imports pandas/yfinance errored on import under that wrong
+    # interpreter). sys.executable is whatever interpreter is ALREADY
+    # running this script, which run_health_check.sh already resolved
+    # correctly before launching it.
     proc = subprocess.run(
-        ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."],
+        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
         capture_output=True, text=True, timeout=300,
     )
     ok = proc.returncode == 0
