@@ -133,6 +133,15 @@ class MomentumVt10WiringTest(_TempDir):
         self.assertEqual(report.status, "blocked_data")
         self.assertEqual(fake.sent, [])
 
+    def test_no_prices_at_all_is_journaled_as_blocked_data_not_a_crash(self) -> None:
+        # Offline after a wake-up: every download fails, columns survive, rows are empty.
+        fake = FakeBroker()
+        empty = _prices_until("2026-09-30").iloc[0:0]
+        report = engine.run("test_fixed", submit=True, broker=fake, prices=empty, now=OCT_1)
+        self.assertEqual(report.status, "blocked_data")
+        self.assertEqual(report.decision_date, "n/a")
+        self.assertEqual(fake.sent, [])
+
     def test_dry_run_works_without_an_account(self) -> None:
         with mock.patch.dict(os.environ, {"STOCKS_ALPACA_API_KEY_ID": "", "STOCKS_ALPACA_API_SECRET_KEY": ""}):
             report = engine.run("test_fixed", submit=False, prices=_prices_until("2026-09-30"), now=OCT_1)

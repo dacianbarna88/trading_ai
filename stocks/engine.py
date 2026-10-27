@@ -123,8 +123,15 @@ def run(
     else:
         issues = data.validate(prices, now)
     blocking = [i for i in issues if i.kind != "JUMP"]
-    decision = latest_decision(prices, now)
-    report = RunReport(strategy, str(decision.date()), submit, "planned")
+    try:
+        decision = latest_decision(prices, now)
+    except ValueError:
+        # No prices at all (offline after a wake-up, Yahoo outage): journal the
+        # data problem instead of crashing. Without blocking issues it's a real bug.
+        if not blocking:
+            raise
+        decision = None
+    report = RunReport(strategy, str(decision.date()) if decision is not None else "n/a", submit, "planned")
     if blocking:
         report.status = "blocked_data"
         report.detail = "; ".join(f"{i.ticker} {i.kind}: {i.detail}" for i in blocking)
