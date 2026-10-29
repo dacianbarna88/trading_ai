@@ -133,6 +133,40 @@ class MomentumVt10WiringTest(_TempDir):
         self.assertEqual(report.status, "blocked_data")
         self.assertEqual(fake.sent, [])
 
+    def _with_dead_columns(self, *names: str) -> pd.DataFrame:
+        prices = _prices_until("2026-09-30")
+        prices[list(names)] = np.nan  # a ticker Yahoo returned nothing for
+        return prices
+
+    def test_one_ticker_without_data_no_longer_blocks_the_rebalance(self) -> None:
+        fake = FakeBroker()
+        report = engine.run("test_fixed", submit=False, broker=fake, prices=self._with_dead_columns("T050"), now=OCT_1)
+        self.assertEqual(report.status, "dry_run")
+        self.assertIn("T050 NO_DATA", report.detail)  # journaled, never silent
+        symbols = {o["symbol"] for o in report.orders}
+        self.assertTrue({"T000", "T001"} <= symbols)  # the rest of the book is still traded
+        self.assertNotIn("T050", symbols)
+
+    def test_a_held_ticker_with_bad_data_blocks_instead_of_being_sold_blind(self) -> None:
+        fake = FakeBroker(positions=[Position("T050", 10, 1_000.0)])
+        report = engine.run("test_fixed", submit=True, broker=fake, prices=self._with_dead_columns("T050"), now=OCT_1)
+        self.assertEqual(report.status, "blocked_data")
+        self.assertIn("T050", report.detail)
+        self.assertEqual(fake.sent, [])
+
+    def test_a_dead_cash_ticker_still_blocks(self) -> None:
+        fake = FakeBroker()
+        report = engine.run("test_fixed", submit=True, broker=fake, prices=self._with_dead_columns("SHY"), now=OCT_1)
+        self.assertEqual(report.status, "blocked_data")
+        self.assertEqual(fake.sent, [])
+
+    def test_too_many_dead_tickers_still_blocks(self) -> None:
+        fake = FakeBroker()
+        names = [f"T{i:03d}" for i in range(50, 50 + 6)]
+        report = engine.run("test_fixed", submit=True, broker=fake, prices=self._with_dead_columns(*names), now=OCT_1)
+        self.assertEqual(report.status, "blocked_data")
+        self.assertEqual(fake.sent, [])
+
     def test_no_prices_at_all_is_journaled_as_blocked_data_not_a_crash(self) -> None:
         # Offline after a wake-up: every download fails, columns survive, rows are empty.
         fake = FakeBroker()

@@ -91,19 +91,29 @@ def run_tests() -> CheckResult:
     return CheckResult("Teste", ok, "OK" if ok else "; ".join(tail))
 
 
-def check_data(label: str, load) -> tuple[CheckResult, object]:
+def check_data(label: str, load, split=None) -> tuple[CheckResult, object]:
     """`load` is a (refresh=True) -> (prices, issues) callable, same contract
-    tae2.data.load/stocks.data.load already share."""
+    tae2.data.load/stocks.data.load already share. `split` (stocks only) is the
+    engine's own issues -> (blocking, excluded) policy, so this check agrees with
+    what the engine will actually do."""
     try:
         prices, issues = load(refresh=True)
     except Exception as e:  # yfinance/network failures surface here, not a crash
         return CheckResult(f"Date {label}", False, f"eroare la descărcare: {e}"), None
-    blocking = [i for i in issues if i.kind not in NON_BLOCKING_ISSUE_KINDS]
+    if split is not None:
+        blocking, excluded = split(issues)
+    else:
+        blocking, excluded = [i for i in issues if i.kind not in NON_BLOCKING_ISSUE_KINDS], []
     if blocking:
         detail = "; ".join(f"{i.ticker} {i.kind}: {i.detail}" for i in blocking)
         return CheckResult(f"Date {label}", False, detail), prices
-    tolerated = len(issues)
-    detail = "OK" if not tolerated else f"OK ({tolerated} JUMP tolerate, verifică dacă persistă)"
+    jumps = sum(1 for i in issues if i.kind in NON_BLOCKING_ISSUE_KINDS)
+    notes = []
+    if excluded:
+        notes.append(f"{len(excluded)} ticker(e) excluse din rulare: {', '.join(excluded)}")
+    if jumps:
+        notes.append(f"{jumps} JUMP tolerate, verifică dacă persistă")
+    detail = "OK" if not notes else f"OK ({'; '.join(notes)})"
     return CheckResult(f"Date {label}", True, detail), prices
 
 
@@ -138,7 +148,7 @@ def collect(now: datetime | None = None) -> HealthReport:
 
     tae2_check, tae2_prices = check_data("tae2 (ETF-uri)", tae2_data.load)
     report.checks.append(tae2_check)
-    stocks_check, stocks_prices = check_data("stocks (S&P 500)", stocks_data.load)
+    stocks_check, stocks_prices = check_data("stocks (S&P 500)", stocks_data.load, split=stocks_data.split_issues)
     report.checks.append(stocks_check)
 
     report.checks.append(check_broker("tae2", Tae2Broker.from_env))

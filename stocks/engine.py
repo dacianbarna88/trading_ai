@@ -122,7 +122,7 @@ def run(
         prices, issues = data.load(refresh=True, now=now)
     else:
         issues = data.validate(prices, now)
-    blocking = [i for i in issues if i.kind != "JUMP"]
+    blocking, excluded = data.split_issues(issues)
     try:
         decision = latest_decision(prices, now)
     except ValueError:
@@ -137,6 +137,10 @@ def run(
         report.detail = "; ".join(f"{i.ticker} {i.kind}: {i.detail}" for i in blocking)
         _journal(report)
         return report
+    if excluded:
+        bad = {i.ticker: f"{i.kind}: {i.detail}" for i in issues if i.ticker in excluded and i.kind != "JUMP"}
+        report.detail = "excluded for data issues -- " + "; ".join(f"{t} {d}" for t, d in bad.items())
+        prices = prices.drop(columns=excluded)
 
     targets = targets_for(strategy, prices, decision)
     state = _read_state()
@@ -155,6 +159,13 @@ def run(
     if broker.open_orders():
         report.status = "blocked_open_orders"
         report.detail = "orders from an earlier run are still open"
+        _journal(report)
+        return report
+    held_bad = sorted({p.symbol for p in broker.positions()} & set(excluded))
+    if held_bad:
+        # Dropping a held name from the targets would make plan() sell it over a data glitch.
+        report.status = "blocked_data"
+        report.detail = f"held position(s) with bad price data, not selling blind: {', '.join(held_bad)}"
         _journal(report)
         return report
     orders = rebalance.plan(targets, broker.positions(), acct.equity, acct.cash)

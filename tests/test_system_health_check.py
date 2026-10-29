@@ -70,6 +70,27 @@ class CheckDataTest(unittest.TestCase):
         self.assertFalse(check.ok)
         self.assertIn("GAP", check.detail)
 
+    def test_stocks_policy_tolerates_a_dead_ticker_and_says_so(self) -> None:
+        from stocks import data as stocks_data
+
+        def load(refresh: bool):
+            return "PRICES", [Issue("GILD", "NO_DATA", "no prices at all")]
+
+        check, _ = shc.check_data("x", load, split=stocks_data.split_issues)
+        self.assertTrue(check.ok)
+        self.assertIn("GILD", check.detail)
+        self.assertIn("excluse", check.detail)
+
+    def test_stocks_policy_still_blocks_on_the_cash_ticker(self) -> None:
+        from stocks import data as stocks_data
+
+        def load(refresh: bool):
+            return "PRICES", [Issue("SHY", "STALE", "last bar 2026-10-05")]
+
+        check, _ = shc.check_data("x", load, split=stocks_data.split_issues)
+        self.assertFalse(check.ok)
+        self.assertIn("SHY", check.detail)
+
     def test_fetch_exception_is_captured_not_raised(self) -> None:
         def load(refresh: bool):
             raise RuntimeError("yfinance down")
