@@ -57,6 +57,32 @@ class FetchResilienceTest(unittest.TestCase):
         self.assertEqual(reports[1].equity, 1_000.0)
 
 
+class DustPositionsTest(unittest.TestCase):
+    """Found 2026-10-29: exit sells leave ~1e-07 share remainders that Alpaca still
+    lists as positions, so MoVo10 showed 96 positions (20 of them $0.00) instead of 76."""
+
+    def test_sub_dollar_remainders_are_hidden_but_counted(self) -> None:
+        def pos(sym, qty, mv):
+            return {"symbol": sym, "qty": str(qty), "market_value": str(mv), "avg_entry_price": "10", "current_price": "10"}
+
+        class _Broker:
+            def account(self):
+                from tae2.broker import Account
+
+                return Account(1_000.0, 500.0, 500.0, "ACTIVE", False)
+
+            def _call(self, method, path, **kwargs):
+                if path == "/v2/positions":
+                    return [pos("SHY", 50, 490.0), pos("ADI", 3.25e-07, 0.000138), pos("SWK", 5e-08, 5e-06)]
+                return {"timestamp": [], "equity": []}
+
+        report = pr._fetch("stocks", lambda: _Broker())
+        self.assertEqual([p.symbol for p in report.positions], ["SHY"])
+        self.assertEqual(report.dust, 2)
+        md = pr.to_markdown([report], {}, {}, datetime(2026, 10, 29, tzinfo=timezone.utc))
+        self.assertIn("Poziții: 1 (+2 resturi sub $1 ascunse)", md)
+
+
 class EquityHistoryDatesTest(unittest.TestCase):
     """Bug found 2026-10-29: Alpaca stamps each daily point 00:00 UTC of the
     NEXT calendar day (= 20:00 New York on the trading day itself), so taking

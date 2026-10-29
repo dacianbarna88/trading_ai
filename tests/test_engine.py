@@ -176,6 +176,18 @@ class BrokerGuardTest(unittest.TestCase):
 
 
 class PlanTest(unittest.TestCase):
+    def test_sub_dollar_remainders_are_not_exited(self) -> None:
+        # Found 2026-10-29: exit sells are floored to 6 decimals, leaving ~4e-07 share
+        # remainders (~$0.00003) in the account. Planning an exit for one sends qty
+        # 0.000000, which Alpaca rejects and would abort the whole rebalance.
+        pos = [Position("EFA", 4e-07, 0.00003), Position("SPY", 50, 5_000.0), Position("IEF", 50, 5_000.0)]
+        self.assertEqual(rebalance.plan(pd.Series({"SPY": 0.5, "IEF": 0.5}), pos, 10_000, 0), [])
+
+    def test_a_real_small_position_outside_the_targets_is_still_exited(self) -> None:
+        pos = [Position("EFA", 0.4, 30.0), Position("SPY", 50, 4_970.0), Position("IEF", 50, 5_000.0)]
+        orders = rebalance.plan(pd.Series({"SPY": 0.5, "IEF": 0.5}), pos, 10_000, 0)
+        self.assertEqual([(o.symbol, o.side, o.reason) for o in orders if o.symbol == "EFA"], [("EFA", "sell", "exit")])
+
     def test_small_differences_are_left_alone(self) -> None:
         pos = [Position("SPY", 1, 6_010), Position("IEF", 1, 3_990)]
         orders = rebalance.plan(pd.Series({"SPY": 0.6, "IEF": 0.4}), pos, 10_000, 0)

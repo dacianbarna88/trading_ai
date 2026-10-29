@@ -193,6 +193,15 @@ class RebalanceThresholdTest(unittest.TestCase):
     ($500) minimum trade size would have silently skipped every one of them
     and bought only SHY, on the strategy's very first rebalance."""
 
+    def test_real_dust_left_by_floored_exit_sells_is_not_exited_again(self) -> None:
+        # Found 2026-10-29 on the live MoVo10 account: 20 names sold on 2026-10-02 left
+        # remainders like 3.25e-07 shares ($0.000138). An "exit" for one is a qty-0.000000
+        # sell, which Alpaca rejects -- it would have aborted the 2026-11-02 rebalance.
+        dust = [Position("ADI", 3.25e-07, 0.000138), Position("SWK", 5e-08, 5e-06)]
+        held = dust + [Position("SHY", 100, 60_000.0), Position("AAA", 4, 39_999.0)]
+        orders = rebalance.plan(pd.Series({"SHY": 0.6, "AAA": 0.4}), held, 100_000.0, 1_000.0)
+        self.assertEqual([o.symbol for o in orders if o.symbol in {"ADI", "SWK"}], [])
+
     def test_many_small_positions_clear_the_stocks_threshold(self) -> None:
         equity = 100_000.0
         targets = pd.Series({f"T{i:03d}": 0.00461 for i in range(75)} | {"SHY": 1 - 75 * 0.00461})

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from tae2.broker import Position
+from tae2.rebalance import DUST_USD  # same sub-$1 remainder rule as tae2: see its comment
 
 MIN_TRADE_FRACTION = 0.001  # ignore differences under 0.1% of equity (tae2 uses 0.5%, sized for 2-8 holdings)
 MIN_TRADE_USD = 25.0
@@ -43,7 +44,7 @@ def plan(targets: pd.Series, positions: list[Position], equity: float, cash: flo
         raise ValueError("equity must be positive")
     if (targets < -1e-12).any() or targets.sum() > 1 + 1e-9:
         raise ValueError("targets must be long-only and sum to at most 1")
-    held = {p.symbol: p for p in positions}
+    held = {p.symbol: p for p in positions if p.market_value >= DUST_USD}
     symbols = sorted(set(held) | set(targets[targets > 0].index))
     threshold = max(MIN_TRADE_USD, MIN_TRADE_FRACTION * equity)
     sells: list[Order] = []

@@ -16,6 +16,11 @@ from tae2.broker import Position
 MIN_TRADE_FRACTION = 0.005  # ignore differences under 0.5% of equity
 MIN_TRADE_USD = 25.0
 CASH_BUFFER = 0.005  # keep 0.5% of equity uninvested for price moves while orders fill
+# A "sell everything" qty is floored to 6 decimals (see AlpacaPaper.submit), which
+# leaves a sub-microshare remainder (~$0.0001) in the account. Planning an exit for
+# that remainder would send qty 0.000000, which Alpaca rejects and would abort the
+# whole rebalance, so positions under Alpaca's $1 minimum order are treated as gone.
+DUST_USD = 1.0
 
 
 @dataclass(frozen=True)
@@ -33,7 +38,7 @@ def plan(targets: pd.Series, positions: list[Position], equity: float, cash: flo
         raise ValueError("equity must be positive")
     if (targets < -1e-12).any() or targets.sum() > 1 + 1e-9:
         raise ValueError("targets must be long-only and sum to at most 1")
-    held = {p.symbol: p for p in positions}
+    held = {p.symbol: p for p in positions if p.market_value >= DUST_USD}
     symbols = sorted(set(held) | set(targets[targets > 0].index))
     threshold = max(MIN_TRADE_USD, MIN_TRADE_FRACTION * equity)
     sells: list[Order] = []

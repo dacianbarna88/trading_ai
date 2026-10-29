@@ -37,6 +37,7 @@ import requests
 from tae2.broker import AlpacaPaper as Tae2Broker
 from tae2.broker import BrokerError
 from tae2.config import UNIVERSE as TAE2_UNIVERSE
+from tae2.rebalance import DUST_USD
 from stocks import universe
 from stocks.broker import from_env as stocks_broker_from_env
 
@@ -101,6 +102,11 @@ class AccountReport:
     positions: list[PositionDetail]
     history: list[EquityPoint] = field(default_factory=list)
     error: str | None = None
+    dust: int = 0  # sub-$1 remainders left by floored exit sells, hidden from `positions`
+
+
+def _dust_note(r: AccountReport) -> str:
+    return f" (+{r.dust} resturi sub $1 ascunse)" if r.dust else ""
 
 
 def _raw_positions(broker) -> list[PositionDetail]:
@@ -152,9 +158,10 @@ def _fetch(label: str, make_broker) -> AccountReport:
     try:
         broker = make_broker()
         acct = broker.account()
-        positions = _raw_positions(broker)
+        raw = _raw_positions(broker)
+        positions = [p for p in raw if p.market_value >= DUST_USD]
         history = _equity_history(broker)
-        return AccountReport(label, acct.equity, acct.cash, positions, history)
+        return AccountReport(label, acct.equity, acct.cash, positions, history, dust=len(raw) - len(positions))
     except (BrokerError, requests.exceptions.RequestException) as e:
         return AccountReport(label, 0.0, 0.0, [], [], error=str(e))
 
@@ -215,7 +222,7 @@ def to_markdown(
             continue
         invested = r.equity - r.cash
         lines += [
-            f"Echitate: **\\${r.equity:,.2f}**  ·  Cash: \\${r.cash:,.2f}  ·  Investit: \\${invested:,.2f}  ·  Poziții: {len(r.positions)}",
+            f"Echitate: **\\${r.equity:,.2f}**  ·  Cash: \\${r.cash:,.2f}  ·  Investit: \\${invested:,.2f}  ·  Poziții: {len(r.positions)}{_dust_note(r)}",
             "",
         ]
         if r.positions:
@@ -262,7 +269,7 @@ def to_html(
         parts.append(
             f"<div class='summary'>Echitate: <b>${r.equity:,.2f}</b> &nbsp;·&nbsp; "
             f"Cash: ${r.cash:,.2f} &nbsp;·&nbsp; Investit: ${invested:,.2f} &nbsp;·&nbsp; "
-            f"Poziții: {len(r.positions)}</div>"
+            f"Poziții: {len(r.positions)}{_dust_note(r)}</div>"
         )
         if not r.positions:
             parts.append("<p><em>Nicio poziție deschisă.</em></p>")
