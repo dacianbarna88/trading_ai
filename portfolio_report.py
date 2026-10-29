@@ -30,6 +30,7 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -40,6 +41,7 @@ from stocks import universe
 from stocks.broker import from_env as stocks_broker_from_env
 
 OUT_DIR = Path("output")
+NY = ZoneInfo("America/New_York")
 
 # tae2's fixed 13-ETF universe: real fund names, not tae2.config.UNIVERSE's
 # category descriptions -- the user asked for the ETF's actual name. The
@@ -133,7 +135,9 @@ def _equity_history(broker) -> list[EquityPoint]:
     for ts, eq in zip(h.get("timestamp", []), h.get("equity", [])):
         if eq is None:
             continue
-        points.append(EquityPoint(datetime.fromtimestamp(ts, tz=timezone.utc), float(eq)))
+        # Alpaca stamps a daily point 00:00 UTC of the NEXT day (20:00 New York
+        # on the trading day itself); UTC .date() would label Friday as Saturday.
+        points.append(EquityPoint(datetime.fromtimestamp(ts, tz=NY), float(eq)))
     return points
 
 

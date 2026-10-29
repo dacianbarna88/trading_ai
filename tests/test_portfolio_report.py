@@ -57,6 +57,25 @@ class FetchResilienceTest(unittest.TestCase):
         self.assertEqual(reports[1].equity, 1_000.0)
 
 
+class EquityHistoryDatesTest(unittest.TestCase):
+    """Bug found 2026-10-29: Alpaca stamps each daily point 00:00 UTC of the
+    NEXT calendar day (= 20:00 New York on the trading day itself), so taking
+    .date() in UTC labeled Friday's close as Saturday and Monday's as Tuesday.
+    Timestamps below are real values from the live paper account."""
+
+    def test_each_point_is_labeled_with_its_trading_day(self) -> None:
+        class _Broker:
+            def _call(self, method, path, **kwargs):
+                return {
+                    "timestamp": [1790380800, 1790640000, 1793232000],  # 00:00 UTC Sat 9/26, Tue 9/29, Thu 10/29
+                    "equity": [100_000.0, 99_988.99, 100_019.6],
+                }
+
+        days = [p.when.date().isoformat() for p in pr._equity_history(_Broker())]
+        self.assertEqual(days, ["2026-09-25", "2026-09-28", "2026-10-28"])  # Fri, Mon, Wed
+        self.assertEqual({datetime.fromisoformat(d).weekday() for d in days} & {5, 6}, set())
+
+
 class ResolveNameTest(unittest.TestCase):
     def test_etf_ticker_uses_the_real_fund_name(self) -> None:
         self.assertEqual(pr.resolve_name("SPY", {}), "SPDR S&P 500 ETF Trust")
