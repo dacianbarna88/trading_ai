@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Keeps the Mac from idle-sleeping, permanently, so the 21:30/21:40/23:30
+     jobs and the cloud evening report always find it awake.
+
+     Why: the per-run `caffeinate -i` inside deploy/run_*.sh only holds the Mac
+     awake while a job is running. Between jobs nothing did, and the pmset
+     wake events (armed daily by com.tradingai.arm-evening-wake, itself
+     dependent on the Mac being awake at 10:05) failed on 2026-10-28: the Mac
+     slept 36h (10-27 22:34 -> 10-29 10:56) and skipped that evening's jobs.
+
+     -i: no idle sleep.  -s: no system sleep while on AC power.  The display
+     still sleeps normally. A closed lid on battery still sleeps the Mac --
+     caffeinate cannot override that. Per-user LaunchAgent, no sudo needed. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.tradingai.keepawake</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
+    <string>-s</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict>
+</plist>
