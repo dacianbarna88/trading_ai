@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Once a minute, logs lid / power source / battery / display state to
+     ~/Library/Logs/tradingai-sleepdiag.log so the next unexplained sleep can
+     be traced to its trigger. Diagnostics only. See deploy/sleep_diag.sh.
+     Remove with: launchctl bootout gui/$(id -u)/com.tradingai.sleepdiag -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.tradingai.sleepdiag</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/book/trading_ai_restored/deploy/sleep_diag.sh</string>
+  </array>
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
