@@ -249,6 +249,18 @@ class SelfHealTest(unittest.TestCase):
         check = shc.self_heal("tae2", "core_gtaa_50", _Module(), "PRICES", datetime.now(timezone.utc))
         self.assertTrue(check.ok)
 
+    def test_market_closed_before_the_open_is_pending_not_a_problem(self) -> None:
+        # Month-end mornings (2026-11-02): the new decision waits for tonight's run.
+        class _Module:
+            @staticmethod
+            def run(strategy, submit, prices, now):
+                return _FakeReport("blocked_market_closed", decision_date="2026-10-30")
+
+        check = shc.self_heal("tae2", "core_gtaa_50", _Module(), "PRICES", datetime.now(timezone.utc))
+        self.assertTrue(check.ok)
+        self.assertIn("în așteptare", check.detail)
+        self.assertIn("2026-10-30", check.detail)
+
     def test_blocked_data_counts_as_a_problem(self) -> None:
         class _Module:
             @staticmethod

@@ -227,6 +227,14 @@ def self_heal(label: str, strategy: str, module, prices, now: datetime) -> Check
         report = module.run(strategy, submit=True, prices=prices, now=now)
     except Exception as e:
         return CheckResult(f"Motor {label}", False, f"eroare la rulare: {e}")
+    if report.status == "blocked_market_closed":
+        # The 10:20 pass runs before the US open, so on every month-end morning the
+        # new decision is legitimately waiting for tonight's run. A genuinely missed
+        # evening is flagged separately by check_heartbeat, not by this.
+        return CheckResult(
+            f"Motor {label}", True,
+            f"în așteptare: piața e închisă acum, decizia {report.decision_date} se execută la rularea de seară",
+        )
     ok = report.status in {"already_done", "submitted", "dry_run"}
     return CheckResult(f"Motor {label}", ok, f"{report.status}: {report.detail or report.decision_date}")
 
