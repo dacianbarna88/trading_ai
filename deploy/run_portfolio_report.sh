@@ -14,4 +14,7 @@ PYTHON="venv/bin/python3"
   # not a guarantee it stays up for the run's duration).
   caffeinate -i "$PYTHON" portfolio_report.py
   echo "exit $?"
+  # One status notification (budget, positions, tonight's orders) + output/status_evening_<date>.md
+  caffeinate -i "$PYTHON" status_notify.py evening
+  echo "status exit $?"
 } >> state/portfolio_report_launchd.log 2>&1

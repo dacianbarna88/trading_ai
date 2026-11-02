@@ -322,7 +322,7 @@ def main() -> int:
     print(text)
     path = write_report(text)
     print(f"Report written to {path}")
-    notify(report)
+    # headline banner now comes from status_notify.py (run by deploy/run_*.sh)
     return 0 if report.ok else 1
 
 

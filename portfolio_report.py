@@ -334,7 +334,7 @@ def main() -> int:
     html_path.write_text(html, encoding="utf-8")
     print(md)
     print(f"Report written to {md_path} and {html_path}")
-    notify(reports)
+    # headline banner now comes from status_notify.py (run by deploy/run_*.sh)
     return 0 if all(r.error is None for r in reports) else 1
 
 

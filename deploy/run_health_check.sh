@@ -14,4 +14,7 @@ PYTHON="venv/bin/python3"
   echo "===== $(date '+%Y-%m-%d %H:%M:%S') health check ====="
   caffeinate -i "$PYTHON" system_health_check.py
   echo "exit $?"
+  # One status notification (verdict + budget + positions) + output/status_morning_<date>.md
+  caffeinate -i "$PYTHON" status_notify.py morning
+  echo "status exit $?"
 } >> state/health_check_launchd.log 2>&1
